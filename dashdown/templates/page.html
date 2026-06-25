@@ -1,0 +1,301 @@
+{# Dev server: vars unset -> absolute paths + live API.
+   Static build: root-relative paths resolved against a runtime <base href>. #}
+{% set ap = asset_prefix | default("/") %}
+{% set home = home_href | default("/") %}
+{# Desktop sidebar collapse. `sidebar_collapsed` is the first-visit
+   default (a saved localStorage choice overrides it); `sidebar_can_toggle` gates
+   the control. Defaults keep older render callers working. #}
+{% set sidebar_collapsed_default = 'true' if (sidebar_collapsed | default(false)) else 'false' %}
+{% set sidebar_can_toggle = sidebar_toggle | default(true) %}
+{# A single-page project hides the nav + menu buttons entirely (nothing to
+   navigate to) unless sidebar.show_single_page forces them on. #}
+{% set sidebar_shown = show_sidebar | default(true) %}
+{# "Made with Dashdown" attribution footer (rendered into <main> below). Single
+   source of truth for the link — swap for the product site once it exists. #}
+{% set made_with_url = "https://github.com/DirendAI/dashdown" %}
+{# Full-text search box. Rendered into the header (centered, desktop)
+   and the top of the mobile menu — see the .dashdown-header-search /
+   .dashdown-sidebar-search wrappers below. site_search.js finds it by the
+   data-async-component selector and fetches the index client-side. #}
+{% macro site_search(placeholder, max_results) -%}
+<div class="dashdown-site-search" data-async-component="site-search" data-config='{"max_results":{{ max_results | default(8) }}}'>
+  <div class="dashdown-site-search-box">
+    <svg class="dashdown-site-search-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+    <input type="text" class="input input-sm dashdown-site-search-input" placeholder="{{ placeholder }}" aria-label="Search documentation" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
+    <kbd class="dashdown-site-search-hint" aria-hidden="true">/</kbd>
+  </div>
+  <div class="dashdown-site-search-results" role="listbox" hidden></div>
+</div>
+{%- endmacro %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  {# Static build only: compute the absolute site root from this page's depth
+     and set <base> so every relative URL resolves correctly no matter how the
+     page is served (trailing slash or not, sub-path, etc.). Must run before any
+     <link>/<script> below. #}
+  {{ base_script | default("") | safe }}
+  <title>{{ page_title }} · {{ title }}</title>
+  {# Bundled default favicon (avoids the /favicon.ico 404); overridable via
+     branding.favicon in dashdown.yaml. #}
+  <link rel="icon" href="{{ favicon_url | default(ap ~ '_dashdown/static/favicon.svg', true) }}" />
+  <!-- Apply theme + embed mode before any paint to prevent flash -->
+  <script>
+    (function() {
+      var p = new URLSearchParams(window.location.search);
+      // Embedded view: hide the app shell before first paint. The live server
+      // also omits the chrome HTML server-side; this covers the static build
+      // (whose template always ships the shell) and any pre-Alpine flash.
+      if (p.has('_embed')) document.documentElement.classList.add('dashdown-embed');
+      // ?_theme=light|dark lets an embedding host pin the iframe's theme.
+      var t = p.get('_theme') || localStorage.getItem('theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', t);
+      // Desktop sidebar collapse: a saved choice (per-browser) wins over the
+      // configured default. Set the class before first paint to avoid a flash;
+      // the CSS only acts on it ≥md, and Alpine's $watch keeps it in sync after.
+      var sc = localStorage.getItem('dashdown-sidebar-collapsed');
+      var collapsed = sc === null ? {{ sidebar_collapsed_default }} : sc === '1';
+      if (collapsed) document.documentElement.classList.add('dashdown-sidebar-collapsed');
+    })();
+  </script>
+  <!-- Auto-detect OS theme changes while the page is open, unless the user
+       has explicitly picked a theme (stored in localStorage). Alpine's
+       $watch on `theme` syncs the data-theme attribute. -->
+  <script>
+    (function() {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      var onChange = function(e) {
+        if (localStorage.getItem('theme')) return; // user override wins
+        var t = e.matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+        var body = document.body;
+        if (body && body._x_dataStack) {
+          var data = window.Alpine && Alpine.$data ? Alpine.$data(body) : null;
+          if (data) data.theme = t;
+        }
+      };
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    })();
+  </script>
+  <!-- Self-hosted Tailwind + DaisyUI, pre-built at release time. Replaces the
+       in-browser Tailwind runtime compiler (and the DaisyUI stylesheet) — no
+       external request, no in-browser compile, works offline. -->
+  <link rel="stylesheet" href="{{ ap }}_dashdown/static/vendor/tailwind.css" />
+  <!-- Dashdown custom CSS — after the vendor CSS so its overrides win. -->
+  <link rel="stylesheet" href="{{ ap }}_dashdown/static/dashdown.css" />
+  {%- for css in (component_css | default([])) %}
+  <!-- Colocated CSS for a custom component (components/<Name>/<file>.css). -->
+  <link rel="stylesheet" href="{{ ap }}_dashdown/components/{{ css }}" />
+  {%- endfor %}
+  {%- if custom_css_url %}
+  <!-- Project escape hatch: assets/custom.css (last → highest priority). -->
+  <link rel="stylesheet" href="{{ custom_css_url }}" />
+  {%- endif %}
+  {%- if component_js %}
+  <!-- Stable specifier for custom-component JS to import framework modules:
+       `import { fetchQueryData } from "dashdown/core.js"`. The mapped target is
+       resolved against the asset prefix / runtime <base>, so it works on the
+       dev server, in sub-path static exports, and in embeds alike.
+       NB: import-map addresses are NOT plain URLs — a value must be an absolute
+       URL or start with `/`, `./`, or `../`, else the browser nulls it ("blocked
+       by a null value"). The dev server's `ap` is `/…` (fine); a static build's
+       `ap` is empty (root-relative, resolved against <base>), so prefix `./` to
+       keep it spec-valid — it resolves to the same root as every other asset. -->
+  {%- set importmap_base = ap if ap else "./" %}
+  <script type="importmap">
+  { "imports": { "dashdown/": "{{ importmap_base }}_dashdown/static/" } }
+  </script>
+  {%- endif %}
+  <script src="{{ ap }}_dashdown/static/vendor/echarts.min.js"></script>
+</head>
+<body x-data="{
+  theme: (new URLSearchParams(window.location.search).get('_theme')) ||
+         localStorage.getItem('theme') ||
+         (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+  sidebarOpen: false,
+  sidebarCollapsed: (function(){ var s = localStorage.getItem('dashdown-sidebar-collapsed'); return s === null ? {{ sidebar_collapsed_default }} : s === '1'; })()
+}"
+      x-init="document.documentElement.setAttribute('data-theme', theme);
+             $watch('theme', value => { document.documentElement.setAttribute('data-theme', value); });
+             $watch('sidebarCollapsed', value => { localStorage.setItem('dashdown-sidebar-collapsed', value ? '1' : '0'); document.documentElement.classList.toggle('dashdown-sidebar-collapsed', value); });">
+  {# Embed mode (?_embed): the app shell — header, sidebar, breadcrumbs — is
+     omitted so a page can be <iframe>'d into an external site. The page content
+     and its filter bar live in body_html, so they travel intact. #}
+  {% if not embed %}
+  <header class="dashdown-header navbar bg-base-100 border-b border-base-300">
+    {% if sidebar_shown %}
+    <div class="flex-none md:hidden">
+      <!-- Mobile hamburger menu -->
+      <button class="dashdown-mobile-menu-btn btn btn-square btn-ghost"
+              aria-label="Open navigation menu"
+              @click="sidebarOpen = !sidebarOpen">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+    {% endif %}
+    {% if sidebar_can_toggle and sidebar_shown %}
+    <!-- Desktop sidebar collapse toggle. Hidden on mobile (the slide-in
+         hamburger handles small screens — see .dashdown-sidebar-toggle-wrap CSS);
+         stays visible when collapsed so the nav is one click back. -->
+    <div class="flex-none dashdown-sidebar-toggle-wrap">
+      <button class="dashdown-sidebar-toggle btn btn-square btn-ghost"
+              :class="{ 'is-collapsed': sidebarCollapsed }"
+              aria-label="Toggle sidebar"
+              :aria-pressed="sidebarCollapsed"
+              :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+              @click="sidebarCollapsed = !sidebarCollapsed">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" />
+        </svg>
+      </button>
+    </div>
+    {% endif %}
+    <div class="flex-1 dashdown-brand-wrap">
+      <a href="{{ home }}" class="dashdown-brand btn btn-ghost text-xl font-bold">
+        {%- if logo_url %}<img src="{{ logo_url }}" alt="" class="dashdown-brand-logo" />{% endif -%}
+        <span class="dashdown-brand-title">{{ title }}</span></a>
+    </div>
+    {# Centered full-text search (desktop), gated by the `search:` block in
+       dashdown.yaml (default on). Absolutely centered in the header so it stays
+       mid-bar regardless of brand/action widths; hidden on mobile, where it moves
+       to the top of the slide-in menu (see the aside). #}
+    {% if search_enabled | default(true) %}
+    <div class="dashdown-header-search">{{ site_search(search_placeholder | default('Search…'), search_max_results | default(8)) }}</div>
+    {% endif %}
+    <div class="flex-none dashdown-header-actions">
+      {# Project-wide global date filter (global_filters.date): rendered into the
+         sticky header so it's reachable from anywhere on a long page. Empty
+         unless enabled; in embed mode it rides body_html as a page filter. #}
+      {% if global_date_html %}
+      <div class="dashdown-header-date">{{ global_date_html | safe }}</div>
+      {% endif %}
+      {# The PDF + Embed buttons live in a per-page action row (right of the
+         filters), rendered into body_html by render_page — not in the header. #}
+      <label class="flex cursor-pointer gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5" />
+          <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+        </svg>
+        <input type="checkbox" :checked="theme === 'dark'" class="toggle" @click="theme = theme === 'light' ? 'dark' : 'light'; localStorage.setItem('theme', theme)" />
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </label>
+    </div>
+  </header>
+  {% endif %}
+  <div class="dashdown-layout">
+    {% if not embed and sidebar_shown %}
+    <aside class="dashdown-sidebar bg-base-200 border-r border-base-300"
+           :class="{ 'open': sidebarOpen }">
+      {# Search at the top of the slide-in menu — mobile only (the header search
+         is hidden there). CSS keeps this hidden on desktop, where the header box
+         is used instead. Same `search:` gate as the header. #}
+      {% if search_enabled | default(true) %}
+      <div class="dashdown-sidebar-search">{{ site_search(search_placeholder | default('Search…'), search_max_results | default(8)) }}</div>
+      {% endif %}
+      <nav class="dashdown-sidenav">
+        {{ _render_nav(nav_tree, current) }}
+      </nav>
+    </aside>
+
+    <!-- Sidebar overlay for mobile -->
+    <div class="dashdown-sidebar-overlay"
+         @click="sidebarOpen = false"
+         x-show="sidebarOpen"></div>
+    {% endif %}
+
+    <script id="dashdown-data" type="application/json">{{ datasets_json | safe }}</script>
+    <script id="dashdown-query-defs" type="application/json">{{ query_defs_json | safe }}</script>
+    {% if route_params_json %}
+    <!-- Dynamic [slug] page route params (e.g. /teams/Brazil -> {"team":"Brazil"}).
+         core.js merges these into every data/ask/WS request so the request URL is
+         unique per record — without them two slugs of one page template share a
+         cacheable, param-less data URL and the browser serves the first record's
+         data for the second. Only emitted on dynamic pages. -->
+    <script id="dashdown-route-params" type="application/json">{{ route_params_json | safe }}</script>
+    {% endif %}
+    {% if build_config_json %}
+    <!-- Present only in `dashdown build` static export: routes query data to pre-rendered JSON. -->
+    <script id="dashdown-build" type="application/json">{{ build_config_json | safe }}</script>
+    {% endif %}
+    {% if not live_reload %}
+    <!-- Production / static: no file watcher, so don't open the live-reload SSE
+         (it would just hold one idle connection per viewer). -->
+    <script>window.__dashdownNoLiveReload = true;</script>
+    {% endif %}
+    {% if branding_json %}
+    <!-- From the `branding:` block in dashdown.yaml; chart.js applies the palette. -->
+    <script id="dashdown-branding" type="application/json">{{ branding_json | safe }}</script>
+    {% endif %}
+    {% if format_json %}
+    <!-- From the `format:` block in dashdown.yaml; core.js uses it as the default
+         locale/currency when a component doesn't set its own. -->
+    <script id="dashdown-format" type="application/json">{{ format_json | safe }}</script>
+    {% endif %}
+    <main class="dashdown-main p-6">
+      {# Top bar: breadcrumbs (left) + the PDF/Embed page actions (right), on one
+         line. Rendered off-embed whenever there are actions or breadcrumbs — so
+         the actions show on *every* page, even one with no breadcrumbs (a
+         top-level page). page_actions_html (from render_page) is empty in embeds.
+         Wrapped in the same max-w-7xl column as the content so it lines up. #}
+      {% if not embed and (page_actions_html or (breadcrumbs and breadcrumbs|length > 1)) %}
+      <div class="dashdown-page-topbar max-w-7xl mx-auto">
+        {% if breadcrumbs and breadcrumbs|length > 1 %}
+        <nav class="dashdown-breadcrumbs text-sm breadcrumbs" aria-label="Breadcrumb">
+          <ul>
+            {% for crumb in breadcrumbs %}
+              {% if not loop.last %}
+                <li><a href="{{ crumb.url }}">{{ crumb.label }}</a></li>
+              {% else %}
+                <li class="text-base-content font-semibold">{{ crumb.label }}</li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        </nav>
+        {% endif %}
+        {{ page_actions_html | safe }}
+      </div>
+      {% endif %}
+
+      {# Filter row: emitted inside body_html by render_page (below the page
+         header) on pages that have filter components — see pipeline.py's
+         _FILTER_BAR_SLOT_HTML and filter_bar.js. #}
+      <div class="max-w-7xl mx-auto dashdown-prose">
+        {{ body_html | safe }}
+      </div>
+
+      {# `dashdown build` provenance: when this static page was generated. Only
+         emitted by build.py (the dev server leaves `built_at` unset), so it
+         never shows on the live app. page_header.js localizes the <time> to the
+         viewer; the server-rendered text is the no-JS fallback. Hidden in embed
+         + print via CSS, like the breadcrumbs. #}
+      {% if built_at %}
+      <footer class="dashdown-build-stamp max-w-7xl mx-auto">
+        Generated <time datetime="{{ built_at }}" data-dashdown-build-time>{{ built_at_display }}</time>
+      </footer>
+      {% endif %}
+
+      {# "Made with Dashdown" attribution — shown on every page (dev server and
+         static build alike). Hidden in embed + print via CSS, like the build
+         stamp. The link points at the project repo; see `made_with_url` above. #}
+      <footer class="dashdown-made-with max-w-7xl mx-auto">
+        Made with <a href="{{ made_with_url }}" target="_blank" rel="noopener noreferrer">Dashdown</a>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="{{ ap }}_dashdown/static/dashdown.js"></script>
+  {%- for js in (component_js | default([])) %}
+  <!-- Colocated JS for a custom component (components/<Name>/<file>.js). Loaded
+       after the framework module so it can `import` from "dashdown/…". -->
+  <script type="module" src="{{ ap }}_dashdown/components/{{ js }}"></script>
+  {%- endfor %}
+  <script defer src="{{ ap }}_dashdown/static/vendor/alpine.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# A single CSV connector. `dashdown serve docs` runs an embedded DuckDB over the
+# files in `data/`, so the pages can answer SQL with no external database.
+main:
+  type: csv
+  directory: data

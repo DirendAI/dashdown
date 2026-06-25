@@ -1,0 +1,7 @@
+stage_from,stage_to,users
+Visit,Sign-up,1000
+Visit,Bounce,1450
+Sign-up,Trial,720
+Sign-up,Idle,280
+Trial,Paid,430
+Trial,Churn,290

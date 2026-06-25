@@ -1,0 +1,11 @@
+title: Dashdown Docs
+
+branding:
+  logo: assets/dashdown-icon.svg
+
+# These docs are themselves a Dashdown project — every page you read is a
+# `pages/*.md` file rendered by the same pipeline it documents. The charts below
+# are live queries against `data/downloads.csv` (see sources.yaml).
+
+format:
+  locale: en-US

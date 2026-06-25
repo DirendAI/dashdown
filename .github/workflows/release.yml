@@ -1,0 +1,102 @@
+name: Release
+
+# Publishes to PyPI via Trusted Publishing (OIDC) — no API tokens stored in the repo.
+#
+# Two ways to run:
+#   1. Publish a GitHub Release whose tag is `vX.Y.Z` (e.g. v0.1.0). The tag must
+#      match the version in pyproject.toml, or the build fails fast.
+#   2. Manually via "Run workflow" (workflow_dispatch). Defaults to TestPyPI so a
+#      manual run can never accidentally push to real PyPI; pick `pypi` to target it.
+#
+# One-time setup on (Test)PyPI before the first run — add a "pending publisher".
+# Note: the PyPI *project* name is `dashdown-md` (plain `dashdown` is blocked as too
+# similar to the existing `dash-down`); the GitHub repo stays `dashdown`.
+#   PyPI Project Name: dashdown-md
+#   Owner: DirendAI   Repository: dashdown
+#   Workflow: release.yml   Environment: pypi   (and `testpypi` on test.pypi.org)
+# See: https://docs.pypi.org/trusted-publishers/
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Publish target"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Run test suite
+        run: uv run pytest tests/ -q
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Validate metadata
+        run: uvx twine check dist/*
+      - name: Verify tag matches package version
+        if: github.event_name == 'release'
+        run: |
+          PKG_VERSION="$(uv run python -c 'import tomllib,sys; sys.stdout.write(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "pyproject version: $PKG_VERSION | release tag: $GITHUB_REF_NAME"
+          if [ "$PKG_VERSION" != "$TAG" ]; then
+            echo "::error::Release tag '$GITHUB_REF_NAME' does not match pyproject version '$PKG_VERSION'. Bump the version or fix the tag."
+            exit 1
+          fi
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dashdown-md
+    permissions:
+      id-token: write   # required for OIDC Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dashdown-md
+    permissions:
+      id-token: write   # required for OIDC Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

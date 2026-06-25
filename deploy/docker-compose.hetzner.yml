@@ -1,0 +1,45 @@
+# Live Dashdown dashboard on a Hetzner VM, behind Caddy for TLS + gzip.
+#
+#   # with a domain (automatic HTTPS):
+#   SITE_ADDRESS=dash.example.com docker compose -f deploy/docker-compose.hetzner.yml up -d --build
+#
+#   # bare IP, plain HTTP (no domain yet):
+#   docker compose -f deploy/docker-compose.hetzner.yml up -d --build
+#
+# Caddy fronts the app on 80/443; the dashboard itself is NOT published to the
+# host (only reachable on the internal compose network).
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: docs
+    environment:
+      # Each worker holds its own in-memory copy of the data: memory ~=
+      # workers x dataset size. 4 GB box -> 2-3 is comfortable.
+      WEB_CONCURRENCY: "3"
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # A domain -> Caddy gets a Let's Encrypt cert automatically.
+      # Unset -> defaults to ":80" (plain HTTP on the public IP).
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - dashboard
+
+volumes:
+  caddy_data:
+  caddy_config:

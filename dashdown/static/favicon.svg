@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
+  <rect width="512" height="512" rx="112" fill="url(#sheen)"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="M 130 100 L 248 100 C 356 100 422 168 422 256 C 422 344 356 412 248 412 L 130 412 Z M 196 164 L 196 348 L 248 348 C 314 348 356 308 356 256 C 356 204 314 164 248 164 Z"/>
+  <rect x="216" y="254" width="28" height="60" rx="7" fill="#ffffff"/>
+  <rect x="256" y="224" width="28" height="90" rx="7" fill="#ffffff"/>
+  <rect x="296" y="196" width="28" height="118" rx="7" fill="#ffffff"/>
+</svg>

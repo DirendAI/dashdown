@@ -1,0 +1,7 @@
+/* Input for the Tailwind CLI build → dashdown/static/vendor/tailwind.css.
+   `base` is Tailwind's preflight reset (the same one the CDN injected);
+   `components`/`utilities` plus the daisyUI plugin emit the component classes,
+   utilities, and all themes. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

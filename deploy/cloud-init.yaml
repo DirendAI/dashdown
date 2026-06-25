@@ -1,0 +1,21 @@
+#cloud-config
+# Hetzner Cloud "user data" for a fresh Ubuntu 24.04 box: installs Docker +
+# the compose plugin and opens the firewall. Paste this into the "Cloud config"
+# field when creating the server (or `hcloud server create --user-data-from-file`).
+# After it boots, SSH in and bring the stack up (see deploy/README.md).
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - ufw
+runcmd:
+  # Docker Engine + compose plugin (official convenience script).
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  # Firewall: SSH + HTTP + HTTPS only.
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable

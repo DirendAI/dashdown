@@ -1,0 +1,28 @@
+title: Semantic Metric Layer
+
+# The global date filter maps onto any semantic model's `time_dimension`
+# automatically — pick a month range and every metric chart re-queries.
+global_filters:
+  date:
+    enabled: true
+    label: Month
+    start_param: date_start
+    end_param: date_end
+
+# Optional: LLM commentary with <Ask />. It works on semantic metrics too —
+# <Ask metric={sales.revenue} by={sales.region} ask="…" /> on the page below —
+# binding to the SAME synthetic query the charts use (no extra query to write).
+#
+# The rest of this dashboard needs no API key; only the <Ask> demo does. To
+# enable it, uncomment the block below and set the key (the server refuses to
+# start if the block is active but the env var is unset — same fail-fast policy
+# as `auth:`, so keep it commented until you have a key):
+#
+#     pip install 'dashdown-md[mistral]'        # or anthropic | openai | openrouter
+#     export MISTRAL_API_KEY=...
+#     dashdown serve .
+#
+# llm:
+#   provider: mistral              # mistral | anthropic | openai | openrouter
+#   api_key: ${MISTRAL_API_KEY}
+#   # model: mistral-small-latest  # optional (provider default otherwise)

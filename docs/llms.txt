@@ -1,0 +1,33 @@
+# Dashdown
+
+> Dashdown turns Markdown files — with embedded SQL and component tags — into interactive analytics dashboards.
+
+Dashdown renders Markdown (with embedded SQL and `<Component />` tags) as interactive analytics dashboards. The links below are the documentation, one page per topic. For the entire manual in a single file, fetch `/llms-full.txt`.
+
+## Documentation
+
+- [Getting started](/getting-started): Dashdown ships as the `dashdown` pip package with a CLI entry point
+- [Writing pages](/pages): Every file under `pages/` is a route
+- [Configuration](/configuration): Every project has a `dashdown.yaml` at its root — the single config file for the whole dashboard
+- [Connectors](/connectors): Connectors are declared in `sources.yaml` and loaded **lazily** the first time a query asks for that type
+- [Queries](/queries): SQL lives either in the shared **query library** under `queries/` (the recommended default) or, for a quick one-off, inline in a `:::query` block on a page
+- [Python queries](/python-queries): Some questions are awkward — or impossible — in a single SQL statement: a **forecast**, an ML score, a **cross-connector join**, an external-API pull, a…
+- [Semantic layer](/semantic-layer): Define your metrics and dimensions **once**, then reference them straight from a component — no per-chart SQL, no copy-pasted queries:
+- [Real-time data](/realtime): A `:::query` block opts into **live streaming** with the `live` attribute: `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`)
+- [Components](/components): A component is a PascalCase tag you drop into a page
+- [Filters & parameters](/filters): Filters write into a central reactive store; any query that references the filter's name with `${...}` re-runs when it changes
+- [Formatting](/formatting): Tables, counters, values and chart axes all render numbers and dates through **one** formatter, so `63712.895` becomes `$63,712.90` the same way everywhere
+- [Theming & styling](/theming): Dashdown ships a polished light/dark theme out of the box, but every project can override the look — colours, radii, spacing, chrome, typography — with **one…
+- [Detail pages](/detail-pages): A **detail page** — a "drill-down" or sub page — is a single template that serves a whole collection: one file renders the focused view for *every* record,…
+- [AI](/ai): Dashdown is built for AI in **two directions** — the LLM that helps your *readers* understand a dashboard, and the coding agent that helps *you* build one
+- [Full-text search](/search): `<SiteSearch />` is a built-in component that searches **every page** of the project
+- [Exporting](/exporting): Renders the project to a serverless static site through the *exact same* render path as the live server
+- [Embedding](/embedding): Any page can be served chrome-less for embedding in another site via an auto-resizing iframe
+- [Authentication](/authentication): Dashdown ships optional built-in auth, configured with an `auth:` block in `dashdown.yaml`
+- [Extending Dashdown](/extending): Dashdown has two extension points, both plain Python: **custom components** and **custom connectors**
+- [CLI reference](/cli): Everything Dashdown does from the terminal goes through the `dashdown` command
+- [Telemetry & privacy](/telemetry): Dashdown is pip-installed and self-hosted, with no accounts and no server in the loop
+
+## Full text
+
+- [Complete documentation](/llms-full.txt): every topic concatenated into one file.

@@ -1,0 +1,143 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dashdown-md"
+version = "0.1.0"
+description = "Markdown-driven analytics pages, served by Python."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Dirend AI", email = "info@dirend.ai" }]
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "markdown-it-py>=3.0",
+    "mdit-py-plugins>=0.4",
+    "pygments>=2.17",
+    "duckdb>=0.10",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "watchfiles>=0.21",
+    "typer>=0.9",
+    "pydantic>=2.5",
+    "requests>=2.28",
+]
+
+[project.urls]
+Homepage = "https://github.com/DirendAI/dashdown"
+Repository = "https://github.com/DirendAI/dashdown"
+Issues = "https://github.com/DirendAI/dashdown/issues"
+
+[project.optional-dependencies]
+# The DAX/Fabric connector needs MSAL for auth and pyarrow to parse the
+# Arrow IPC responses. They are heavy and only relevant to Fabric users, so
+# they install on demand via:  pip install 'dashdown-md[dax]'
+dax = [
+    "msal>=1.37.0",
+    "azure-identity>=1.25.3",
+    "pyarrow>=14.0.0",
+]
+# SQL database connectors. Each ships its DB-API driver as an extra so the core
+# install stays lean:  pip install 'dashdown-md[postgres]'  /  'dashdown-md[mysql]'
+postgres = ["psycopg2-binary>=2.9"]
+mysql = ["pymysql>=1.1"]
+# Microsoft SQL Server / Azure SQL. pyodbc needs Microsoft's ODBC driver on the
+# host (msodbcsql18); the Azure AD auth modes (service principal, managed identity)
+# require ODBC Driver 18 (or 17.x >= 17.3).
+mssql = ["pyodbc>=5.0"]
+snowflake = ["snowflake-connector-python>=3.0"]
+bigquery = ["google-cloud-bigquery>=3.0"]
+# Spreadsheet connectors. Rows are loaded into an in-memory DuckDB for SQL.
+excel = ["openpyxl>=3.1"]
+sheets = ["gspread>=6.0"]
+# LLM providers for the <Ask /> commentary component (`llm:` in dashdown.yaml).
+# Each provider's SDK is an extra so the core install stays lean. OpenRouter
+# is OpenAI-compatible, so it reuses the openai SDK against a different base URL.
+mistral = ["mistralai>=1.0"]
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.40"]
+openrouter = ["openai>=1.40"]
+# Presentation PDF export (`dashdown pdf`). Headless Chromium rasterizes the
+# static export's client-side ECharts; pypdf merges the per-page files into a
+# single deck (--combine). After installing, run the one-time browser download:
+#   playwright install chromium
+pdf = ["playwright>=1.40", "pypdf>=4.0"]
+# Python queries (`queries/*.py` returning Arrow/pandas/Polars). pandas is already
+# core; this pins pyarrow so `.to_arrow()` and Arrow-returning queries work out of
+# the box:  pip install 'dashdown-md[python]'. (Polars / an engine of your choice is
+# brought by your own query code — the normalizer duck-types, no hard import.)
+python = ["pyarrow>=14.0.0"]
+# First-class semantic metric layer. Delegates metric/dimension/join
+# definition + pushdown to boring-semantic-layer on Ibis. The duckdb Ibis backend
+# is included so the local CSV/DuckDB bridge works out of the box; warehouse
+# backends (postgres/snowflake/bigquery) are pulled by the matching ibis extra or
+# a BSL profile:  pip install 'dashdown-md[semantic]'.
+semantic = [
+    "boring-semantic-layer>=0.3",
+    "ibis-framework[duckdb]>=10",
+]
+# Cube (cube.dev) semantic backend. The `cube` connector is a thin HTTP
+# client for a Cube deployment (structured JSON /load + /meta introspection); it needs
+# an HTTP client and a JWT signer:  pip install 'dashdown-md[cube]'.
+cube = [
+    "httpx>=0.27",
+    "pyjwt>=2.8",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+dashdown = "dashdown.cli:app"
+
+# Built-in connectors register through the same entry-point mechanism that
+# third-party connector plugins use. A PyPI package exposes a connector by
+# declaring `[project.entry-points."dashdown.connectors"]` with `type = "module:Class"`.
+[project.entry-points."dashdown.connectors"]
+csv = "dashdown.data.csv_connector:CSVConnector"
+json = "dashdown.data.json_connector:JSONConnector"
+parquet = "dashdown.data.parquet_connector:ParquetConnector"
+duckdb = "dashdown.data.duckdb_connector:DuckDBConnector"
+motherduck = "dashdown.data.motherduck_connector:MotherDuckConnector"
+quack = "dashdown.data.quack_connector:QuackConnector"
+dax = "dashdown.data.dax_connector:DAXConnector"
+postgres = "dashdown.data.postgres_connector:PostgresConnector"
+mysql = "dashdown.data.mysql_connector:MySQLConnector"
+mssql = "dashdown.data.mssql_connector:MSSQLConnector"
+snowflake = "dashdown.data.snowflake_connector:SnowflakeConnector"
+bigquery = "dashdown.data.bigquery_connector:BigQueryConnector"
+excel = "dashdown.data.excel_connector:ExcelConnector"
+sheets = "dashdown.data.sheets_connector:GoogleSheetsConnector"
+cube = "dashdown.data.cube_connector:CubeConnector"
+
+# Built-in semantic-layer backends register through the same entry-point mechanism
+# as connectors (plus an eager in-package fallback in dashdown/semantic.py). A
+# package contributes a backend by declaring
+# `[project.entry-points."dashdown.semantic_backends"]` name = "module:BackendClass".
+[project.entry-points."dashdown.semantic_backends"]
+ibis = "dashdown.semantic:IbisBackend"
+cube = "dashdown.semantic_cube:CubeBackend"
+
+[tool.setuptools]
+# Ship the AGPL text, the commercial-license explainer, and the third-party
+# attribution for the vendored frontend assets in the wheel's dist-info/licenses/.
+# The default glob (LICEN[CS]E*) catches only LICENSE, so the other two are listed
+# explicitly — otherwise the bundled ECharts (Apache-2.0)/MIT/OFL notices wouldn't
+# travel with the redistributed minified code.
+license-files = ["LICENSE", "LICENSING.md", "THIRD-PARTY-NOTICES.md"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dashdown*"]
+
+[tool.setuptools.package-data]
+# Recursive: `static/*` does NOT descend into subdirs, so this must glob `**`
+# to ship static/components/, static/vendor/ (pre-built CSS + vendored JS),
+# and static/vendor/fonts/ in the wheel.
+dashdown = ["templates/*.html", "static/**/*", "scaffold/**/*"]

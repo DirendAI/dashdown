@@ -1,0 +1,64 @@
+# The sales semantic model — a boring-semantic-layer (BSL) model, defined once and
+# referenced straight from page components: <BarChart metric={sales.revenue}
+# by={sales.region} />. Metrics/dimensions/joins live here; BSL+Ibis compile and
+# **push the query down** to the connector below.
+#
+# `connector:` is our extension — it bridges this model's `table` to one of the
+# project's sources.yaml connectors (here the CSV-backed DuckDB `main`) so there's
+# one connection config and real pushdown. (A native BSL `profile:` is the escape
+# hatch for backends we don't bridge yet.)
+#
+# Needs the optional deps:  pip install 'dashdown-md[semantic]'
+
+sales:
+  connector: main
+  table: orders
+  description: Sales orders
+
+  dimensions:
+    region: _.region
+    status: _.status
+    # ONE real DATE column powers every time view. A chart buckets it on demand
+    # with `grain=` — `by={sales.order_date} grain="month"` (or "quarter"/"year",
+    # or an interactive `grain={control}`). So there are **no** pre-declared
+    # `month` / `month_of_year` / `year` dimensions to maintain any more — that was
+    # the workaround `grain=` removes. Use a real temporal column (not
+    # a computed cast) for the time dimension: BSL truncates it per the requested
+    # grain and validates against `smallest_time_grain`, and can't resolve a derived
+    # expression through a join.
+    order_date:
+      expr: _.order_date
+      is_time_dimension: true
+      smallest_time_grain: TIME_GRAIN_DAY
+
+  measures:
+    revenue:
+      expr: _.amount.sum()
+      metadata: { format: currency, currency: "$" }
+    orders: _.count()
+    avg_deal:
+      expr: _.amount.mean()
+      metadata: { format: currency, currency: "$" }
+
+  # A join to the `geo` model below — BSL/Ibis plans the join and pushes it down.
+  # Its dimensions become available as `geo.manager` / `geo.zone` (or the short
+  # `manager` / `zone`), so a chart can group revenue by a column that lives in a
+  # *different table*. This is the semantic-layer payoff we don't hand-roll.
+  joins:
+    geo:
+      model: geo
+      type: one
+      left_on: region
+      right_on: region
+
+# The lookup table joined above. Defining it as a sibling model in the same file
+# is what lets `sales.joins.geo` reference it by name.
+geo:
+  connector: main
+  table: regions
+  dimensions:
+    region: _.region
+    manager: _.manager
+    zone: _.zone
+  measures:
+    n: _.count()

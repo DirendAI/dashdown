@@ -1,0 +1,140 @@
+// Dashdown Ask Component
+// Authored LLM commentary on a query's data. Fetches the rendered answer from
+// /_dashdown/api/ask/{id} (or the baked _ask/{id}.json snapshot in a static
+// export), with a loading shimmer, debounced regeneration when filters the
+// referenced query uses change, and an explicit ↻ refresh affordance.
+
+"use strict";
+
+import { readBuildConfig, readEmbedToken, readRouteParams, esc } from "../core.js";
+
+const _DEBOUNCE_MS = 400;
+
+/**
+ * Non-empty, non-internal filter values for the request URL. Query SQL is never
+ * shipped to the client, so all active filters are sent; the server keys its
+ * answer cache on only the params each query actually substitutes.
+ * @returns {Object} - filter name -> string value
+ */
+function relevantFilters(filters) {
+  const out = {};
+  for (const k of Object.keys(filters || {})) {
+    if (k.startsWith("_")) continue;
+    const v = filters[k];
+    if (v == null || String(v) === "") continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+
+/**
+ * Initialize an ask component
+ * @param {HTMLElement} el - Element with data-async-component="ask"
+ */
+export function initAsk(el) {
+  const config = JSON.parse(el.dataset.config);
+  const askId = config.ask_id;
+  const queryName = config.query_name;
+  const body = el.querySelector(".dashdown-ask-body");
+  const refreshBtn = el.querySelector(".dashdown-ask-refresh");
+  if (!body) return;
+
+  const skeletonHtml = body.innerHTML;
+  const build = readBuildConfig();
+  let requestSeq = 0; // drop responses that a newer request has superseded
+  let debounceTimer = null;
+  let lastUrl = null;
+
+  function urlFor(filters, refresh) {
+    if (build && build.static) {
+      return `${build.dataBase}/_ask/${encodeURIComponent(askId)}.json`;
+    }
+    // Route params (lowest precedence) so an <Ask /> on a dynamic [slug] page
+    // comments on that record's data — the answer cache then keys per record too.
+    const params = new URLSearchParams({
+      ...readRouteParams(),
+      ...relevantFilters(filters),
+    });
+    if (refresh) params.set("_refresh", "1");
+    const embedToken = readEmbedToken();
+    if (embedToken) params.set("_embed", embedToken);
+    const qs = params.toString();
+    return `/_dashdown/api/ask/${encodeURIComponent(askId)}` + (qs ? `?${qs}` : "");
+  }
+
+  function renderError(message) {
+    body.innerHTML = `<div class="dashdown-ask-error">${esc(message)}</div>`;
+  }
+
+  async function load(url) {
+    const seq = ++requestSeq;
+    body.innerHTML = skeletonHtml;
+    try {
+      const response = await fetch(url);
+      const data = await response.json().catch(() => null);
+      if (seq !== requestSeq) return; // stale — a newer request is in flight
+      if (!response.ok || !data || data.error) {
+        renderError((data && (data.error || data.detail)) || `HTTP ${response.status}`);
+        return;
+      }
+      body.innerHTML = data.html || "";
+      // Regeneration needs the live endpoint; a static snapshot is fixed.
+      if (refreshBtn) refreshBtn.hidden = !!(build && build.static);
+    } catch (error) {
+      if (seq !== requestSeq) return;
+      console.error(`Ask component error for ${askId}:`, error);
+      renderError(error.message);
+    }
+  }
+
+  function scheduleLoad(filters, refresh = false) {
+    const url = urlFor(filters, refresh);
+    if (!refresh && url === lastUrl) return; // nothing relevant changed
+    lastUrl = url;
+    clearTimeout(debounceTimer);
+    if (requestSeq === 0 || refresh) {
+      // First paint and explicit refresh fire immediately; only filter
+      // churn is debounced.
+      load(url);
+    } else {
+      debounceTimer = setTimeout(() => load(url), _DEBOUNCE_MS);
+    }
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      const filters = (window.Alpine && Alpine.store("filters")) || {};
+      scheduleLoad({ ...filters }, true);
+    });
+  }
+
+  // A static snapshot ignores filters — fetch the baked answer once.
+  if (build && build.static) {
+    scheduleLoad({});
+    return;
+  }
+
+  // Single reactive path (same as counter.js): subscribe to the filters store
+  // via an Alpine effect. Runs once immediately, then on any filter change;
+  // the relevant-filter URL dedup above skips refetches the query can't see.
+  const subscribe = () => {
+    Alpine.effect(() => {
+      const filters = { ...(Alpine.store("filters") || {}) };
+      scheduleLoad(filters);
+    });
+  };
+  if (window.Alpine) {
+    subscribe();
+  } else {
+    document.addEventListener("alpine:init", subscribe);
+  }
+}
+
+/**
+ * Initialize all ask components on the page
+ */
+export function initAllAsks() {
+  document.querySelectorAll('[data-async-component="ask"]').forEach((el) => {
+    initAsk(el);
+  });
+}

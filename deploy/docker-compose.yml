@@ -1,0 +1,17 @@
+# Live Dashdown dashboard. Build from the repo root:
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# Scale workers with WEB_CONCURRENCY (each worker holds its own in-memory copy
+# of the CSV data, so memory ~= workers x dataset size).
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: docs
+    ports:
+      - "8000:8000"
+    environment:
+      WEB_CONCURRENCY: "4"
+    restart: unless-stopped

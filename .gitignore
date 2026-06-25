@@ -1,0 +1,69 @@
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Packaging / build artifacts (setuptools backend) ---
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+sdist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- uv (uv.lock IS committed; ignore only the local cache) ---
+.uv/
+
+# --- Test / type / lint caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# --- dashdown build outputs (static export from `dashdown build`) ---
+/dist-site/
+
+# --- tooling/ (release-only Node asset build) ---
+tooling/node_modules/
+tooling/package-lock.json
+tooling/npm-debug.log*
+
+# --- Local DB / data scratch ---
+*.duckdb
+*.duckdb.wal
+*.db-journal
+
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
+
+# --- Editor / IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.python-version

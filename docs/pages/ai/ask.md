@@ -1,0 +1,101 @@
+---
+title: Ask — LLM commentary
+sidebar_label: Ask
+sidebar_position: 1
+icon: "\U0001F4AC"
+---
+
+# Ask — LLM commentary
+
+`<Ask />` sends a query's result to an LLM and renders its natural-language
+commentary inline — the explained-insight layer on top of a chart or table. The
+model's markdown answer is rendered with **raw HTML disabled**, and answers are
+**cached** so repeat page loads don't re-bill.
+
+```markdown
+<Ask data={downloads_by_month} ask="Summarize the download trend in two sentences." />
+```
+
+| Attribute   | Purpose                                                          |
+| ----------- | --------------------------------------------------------------- |
+| `data`      | **Required.** The query whose result the model sees.            |
+| `ask`       | **Required.** The instruction / prompt.                         |
+| `max_rows`  | Cap on rows sent to the model (default in `llm.py`).            |
+| `cache_ttl` | Seconds to cache the answer.                                    |
+| `label`     | Optional heading above the answer.                              |
+
+:::warning Needs an `llm:` block
+`<Ask>` requires an [`llm:` block](#configuration) in `dashdown.yaml` — so there's
+no live example on this docs site. Install the provider extra and add the config
+below.
+:::
+
+## Works on semantic-layer data too
+
+`<Ask>` accepts a [semantic metric reference](/semantic-layer) as an alternative to
+`data={query}` — the same grammar a chart uses:
+
+```markdown
+<Ask metric={sales.revenue} by={sales.region} ask="Which region stands out, and why?" />
+```
+
+It binds to the *same* synthetic query a chart with those attrs would build, so the
+answer rides the same result cache and filter path. A plain `queries/*.py`
+[Python query](/python-queries) works as a source too.
+
+## Configuration
+
+Set `llm.provider` to one of `mistral`, `anthropic` (Claude), `openai`, or
+`openrouter` (OpenRouter's OpenAI-compatible gateway). Each provider's SDK is an
+optional extra — `pip install 'dashdown-md[mistral|anthropic|openai|openrouter]'`.
+
+```yaml
+# dashdown.yaml
+llm:
+  provider: anthropic
+  api_key: ${ANTHROPIC_API_KEY}    # ${VAR} reads from the environment
+  model: claude-haiku-4-5          # optional (this is the anthropic default)
+```
+
+`model` is optional for every provider except `openrouter`, which routes to many
+upstream models — name one explicitly (e.g. `model: anthropic/claude-3.5-sonnet`).
+The defaults are fast/cheap models; since each uncached request is billed, pin a
+more capable one (e.g. `claude-opus-4-8`) via `model` when quality matters more.
+
+The block is **provider-only** (`provider` / `api_key` / `model`) — per-answer knobs
+like `max_rows` and `cache_ttl` are `<Ask>` attributes, not config. See
+[Configuration → `llm`](/configuration#llm).
+
+## Caching & cost
+
+Each answer is cached by a **deterministic id** — a hash of (connector, query,
+prompt, `max_rows`) plus the filter params the SQL actually substitutes — so repeat
+page loads and shared filter states reuse one answer instead of billing each view.
+`cache_ttl` controls expiry; it isn't part of the id (so changing it doesn't bust
+the cache). A reader's ↻ refresh affordance forces a fresh answer past the cache.
+
+## Safety
+
+The prompt is **registered server-side** and addressed by that opaque id, so the
+`GET /_dashdown/api/ask/{id}` endpoint can never be fed an arbitrary prompt. The
+data payload is capped to `max_rows` rows plus column types, and the model's answer
+is rendered as markdown with **raw HTML disabled**.
+
+:::note Data leaves your server
+`<Ask>` sends the (capped) query result to your chosen LLM provider. Treat it like
+any third-party data processor — don't point it at columns you can't share, or run
+an OpenAI-compatible endpoint yourself and target it with the `openai` / `openrouter`
+provider.
+:::
+
+## Static builds
+
+`dashdown build` bakes one answer JSON per `<Ask>` def into the export, so the
+commentary ships in a static site with **no server or API key** at view time — the
+answer is computed once at build.
+
+## Try it
+
+Add an `llm:` block to your `dashdown.yaml`, drop an
+`<Ask data={your_query} ask="…" />` tag onto a page, and `dashdown serve` it —
+the commentary renders inline beneath the data.

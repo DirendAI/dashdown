@@ -1,0 +1,12 @@
+# SITE_ADDRESS is injected by docker-compose:
+#   - a domain (e.g. dash.example.com) -> automatic HTTPS via Let's Encrypt
+#   - ":80" (the default) -> plain HTTP on the public IP
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Static framework assets are safe to cache in the browser for a while.
+	@static path /_dashdown/static/*
+	header @static Cache-Control "public, max-age=3600"
+
+	reverse_proxy dashboard:8000
+}

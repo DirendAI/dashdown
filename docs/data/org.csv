@@ -1,0 +1,12 @@
+id,parent,name,headcount
+company,,Dashdown,120
+eng,company,Engineering,62
+sales,company,Sales,34
+ops,company,Operations,24
+frontend,eng,Frontend,24
+backend,eng,Backend,30
+data,eng,Data,8
+inbound,sales,Inbound,18
+outbound,sales,Outbound,16
+support,ops,Support,15
+finance,ops,Finance,9

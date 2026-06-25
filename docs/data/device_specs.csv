@@ -1,0 +1,7 @@
+device,tier,price,speed,battery,rating
+Pro,High,1299,95,82,4.7
+Max,High,1499,98,88,4.8
+Air,Mid,999,84,90,4.5
+Plus,Mid,899,80,86,4.4
+Mini,Budget,699,72,78,4.1
+Lite,Budget,549,65,84,3.9
