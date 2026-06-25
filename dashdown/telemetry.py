@@ -89,7 +89,8 @@ def _version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("dashdown")
+        # Distribution (PyPI) name is "dashdown-md"; the import package is "dashdown".
+        return version("dashdown-md")
     except Exception:
         return "unknown"
 

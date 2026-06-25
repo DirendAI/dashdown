@@ -374,7 +374,8 @@ def _provides_extras() -> frozenset[str]:
     try:
         from importlib import metadata
 
-        return frozenset(metadata.metadata("dashdown").get_all("Provides-Extra") or [])
+        # Distribution (PyPI) name is "dashdown-md"; the import package is "dashdown".
+        return frozenset(metadata.metadata("dashdown-md").get_all("Provides-Extra") or [])
     except Exception:  # pragma: no cover - metadata unavailable (uninstalled)
         return frozenset()
 

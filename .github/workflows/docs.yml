@@ -46,6 +46,10 @@ jobs:
         run: touch _site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Enable Pages (Actions source) on first run instead of failing if a
+          # human hasn't toggled it in Settings -> Pages yet.
+          enablement: true
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
