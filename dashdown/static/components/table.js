@@ -42,6 +42,25 @@ function fillPattern(pattern, row) {
   });
 }
 
+/**
+ * Resolve a drill-down target for the current hosting. `row_link`/`link_pattern`
+ * are authored as absolute routes (e.g. `/detail-pages/{id}`), correct as-is on
+ * the dev server (served at the origin root). A static build is hosted against a
+ * relative `<base>` so it works under a sub-path (project GitHub Pages); there an
+ * absolute `/route` bypasses the base and 404s, so re-root it as the same
+ * `<route>/index.html` the nav uses (mirrors build.root_link). The presence of a
+ * `<base>` marks a static build; external/in-page links are left alone.
+ */
+function navHref(href) {
+  if (!href || href[0] !== "/" || href.startsWith("//")) return href;
+  if (!document.querySelector("base[href]")) return href; // dev server
+  const i = href.search(/[#?]/);
+  const path = i === -1 ? href : href.slice(0, i);
+  const tail = i === -1 ? "" : href.slice(i);
+  const route = path.replace(/^\/+|\/+$/g, "");
+  return new URL((route ? `${route}/index.html` : "index.html") + tail, document.baseURI).href;
+}
+
 /** snake_case / kebab-case / camelCase column name → "Title Case". */
 export function humanizeHeader(name) {
   return String(name)
@@ -468,7 +487,7 @@ export function buildTableView(el) {
   // Rows — hover state, formatted + aligned cells, optional cell link / clickable
   // row. A row_link row carries data-row-href; wireInteractions navigates on click.
   view.forEach((r) => {
-    const rowHref = rowLink ? fillPattern(rowLink, r) : null;
+    const rowHref = rowLink ? navHref(fillPattern(rowLink, r)) : null;
     const trAttrs = rowHref
       ? ` class="hover cursor-pointer" data-row-href="${esc(rowHref)}"`
       : ' class="hover"';
@@ -486,7 +505,7 @@ export function buildTableView(el) {
       // A cell renders as a link when it's the configured link_column (using
       // link_pattern) or the accessible anchor for a clickable row (row_link).
       let href = null;
-      if (linkColumn && linkPattern && col === linkColumn) href = fillPattern(linkPattern, r);
+      if (linkColumn && linkPattern && col === linkColumn) href = navHref(fillPattern(linkPattern, r));
       else if (rowHref && col === anchorCol) href = rowHref;
 
       if (href != null) {

@@ -496,7 +496,7 @@ _ASSET_SKIP_PREFIXES = (
 
 
 def _resolve_asset_ref(
-    url: str, page_dir: str, pages_dir: Path | None, static_build: bool
+    url: str, page_dir: str, pages_dir: Path | None, static_build: bool, attr: str = "src"
 ) -> str | None:
     """Return the rewritten URL, or None to leave the original untouched."""
     u = url.strip()
@@ -516,9 +516,18 @@ def _resolve_asset_ref(
     # hosting depth.
     if path_part.startswith("/assets/"):
         return path_part[1:] + suffix if static_build else None
-    # Any other absolute path (page links, etc.) is left alone.
+    # (A2) Absolute internal *page* link, e.g. `[x](/detail-pages)` or
+    # `/queries#params`. On the dev server it's correct as-is (served at the origin
+    # root). A static build resolves every URL against a relative `<base>` so it
+    # works under sub-path hosting (project GitHub Pages); an absolute `/route`
+    # bypasses the `<base>` and 404s, so rewrite it to the same root-relative
+    # `<route>/index.html` the nav uses (see build.root_link). `href` only — an
+    # image/script `src` is never a page route.
     if path_part.startswith("/"):
-        return None
+        if not static_build or attr.lower() != "href":
+            return None
+        route = path_part.strip("/")
+        return ("index.html" if not route else f"{route}/index.html") + suffix
     # (B) Co-located page asset: a relative ref to a real non-.md file next to the
     # page under pages/. Resolve it and confine to pages/ (traversal guard).
     if pages_dir is None:
@@ -542,7 +551,7 @@ def _rewrite_asset_urls(
     page_dir = page_dir or ""
 
     def repl(m: re.Match[str]) -> str:
-        new = _resolve_asset_ref(m.group(3), page_dir, pages_dir, static_build)
+        new = _resolve_asset_ref(m.group(3), page_dir, pages_dir, static_build, m.group(1))
         if new is None:
             return m.group(0)
         return f"{m.group(1)}={m.group(2)}{new}{m.group(2)}"

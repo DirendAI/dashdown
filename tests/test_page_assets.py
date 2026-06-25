@@ -51,6 +51,24 @@ def test_query_and_fragment_preserved(tmp_path):
     assert _resolve_asset_ref("/assets/a.pdf#p=3", "", pages, static_build=True) == "assets/a.pdf#p=3"
 
 
+def test_absolute_page_link_href_rewritten_in_build(tmp_path):
+    # An absolute internal page link bypasses the build's relative <base> and 404s
+    # under sub-path hosting, so a static build rewrites it (href only) to the same
+    # root-relative "<route>/index.html" the nav uses. The dev server keeps it as-is.
+    pages = _pages(tmp_path)
+    R = _resolve_asset_ref
+    assert R("/getting-started", "topics", pages, static_build=True, attr="href") == "getting-started/index.html"
+    assert R("/queries#params", "topics", pages, static_build=True, attr="href") == "queries/index.html#params"
+    assert R("/", "", pages, static_build=True, attr="href") == "index.html"
+    # dev server: an absolute page link is correct as-is
+    assert R("/getting-started", "topics", pages, static_build=False, attr="href") is None
+    # an image/script src is never turned into a page link, even in a build
+    assert R("/getting-started", "topics", pages, static_build=True, attr="src") is None
+    # framework + external links stay skipped even as href
+    assert R("/_dashdown/static/core.js", "topics", pages, static_build=True, attr="href") is None
+    assert R("https://x.com/p", "topics", pages, static_build=True, attr="href") is None
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -60,7 +78,7 @@ def test_query_and_fragment_preserved(tmp_path):
         "data:image/png;base64,AAAA",
         "mailto:a@b.com",
         "/_dashdown/static/core.js",
-        "/getting-started",          # absolute page link — left alone
+        "/getting-started",          # page link as <img src> — left alone (href is rewritten, see above)
         "missing.png",               # relative but no such file
         "other.md",                  # relative .md (a page link, not an asset)
     ],
@@ -79,11 +97,16 @@ def test_traversal_is_blocked(tmp_path):
 
 def test_rewrite_over_html(tmp_path):
     pages = _pages(tmp_path)
-    html = '<img src="chart.png"><a href="missing.png">x</a><img src="/assets/a.png">'
+    html = (
+        '<img src="chart.png"><a href="missing.png">x</a><img src="/assets/a.png">'
+        '<a href="/detail-pages">d</a><a href="/queries#p">q</a>'
+    )
     out = _rewrite_asset_urls(html, page_dir="topics", pages_dir=pages, static_build=True)
     assert 'src="topics/chart.png"' in out
-    assert 'href="missing.png"' in out          # untouched
+    assert 'href="missing.png"' in out                 # untouched
     assert 'src="assets/a.png"' in out
+    assert 'href="detail-pages/index.html"' in out     # absolute page link -> build form
+    assert 'href="queries/index.html#p"' in out        # fragment preserved
 
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +144,15 @@ def test_render_rewrites_markdown_image_and_download(tmp_path):
     built = _render(tmp_path, "topics/guide.md", src, static_build=True)
     assert 'src="topics/chart.png"' in built.body_html
     assert 'href="assets/spec.pdf"' in built.body_html      # build: root-relative
+
+
+def test_render_rewrites_absolute_page_link(tmp_path):
+    src = "# Guide\n\n[Back to channels](/detail-pages) and [Queries](/queries#params)\n"
+    dev = _render(tmp_path, "topics/guide.md", src, static_build=False)
+    assert 'href="/detail-pages"' in dev.body_html              # dev: untouched
+    built = _render(tmp_path, "topics/guide.md", src, static_build=True)
+    assert 'href="detail-pages/index.html"' in built.body_html  # build: sub-path safe
+    assert 'href="queries/index.html#params"' in built.body_html
 
 
 # --------------------------------------------------------------------------- #
