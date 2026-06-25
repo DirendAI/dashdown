@@ -43,3 +43,17 @@ jobs:
         run: uv build
       - name: Validate metadata
         run: uvx twine check dist/*
+
+  docs:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Build docs (no deploy)
+        # Catches docs-breaking changes in PRs before merge. The Docs workflow
+        # handles the actual GitHub Pages deploy on push to main.
+        run: uv run dashdown build docs --out _site

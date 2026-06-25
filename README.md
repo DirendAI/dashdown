@@ -8,6 +8,13 @@
 <p align="center"><strong>Turn Markdown into interactive analytics dashboards.</strong></p>
 
 <p align="center">
+  <a href="https://github.com/DirendAI/dashdown/actions/workflows/ci.yml"><img src="https://github.com/DirendAI/dashdown/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://DirendAI.github.io/dashdown/"><img src="https://github.com/DirendAI/dashdown/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
+  <a href="https://pypi.org/project/dashdown-md/"><img src="https://img.shields.io/pypi/v/dashdown-md?logo=pypi&logoColor=white" alt="PyPI version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License: AGPL-3.0-or-later"></a>
+</p>
+
+<p align="center">
   <a href="docs/assets/dashdown-demo.mp4">
     <img src="docs/assets/dashdown-demo.gif" width="860"
          alt="Dashdown demo — a Markdown + SQL dashboard with KPIs, charts and live filters re-querying the data" />
@@ -161,6 +168,8 @@ or ship it as a pip-installable plugin.
 ---
 
 ## Documentation
+
+📖 **Read them online at [direndai.github.io/dashdown](https://direndai.github.io/dashdown/)** — itself a Dashdown site, built and deployed from `docs/` by CI.
 
 The full docs are *themselves* a Dashdown dashboard. Run them locally:
 

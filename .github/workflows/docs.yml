@@ -1,0 +1,64 @@
+name: Docs
+
+# Builds the docs/ project into a static site (`dashdown build`) and publishes it to
+# GitHub Pages. The static export uses depth-relative <base href> tags, so it works
+# unchanged under the project-pages subpath (https://DirendAI.github.io/dashdown/).
+#
+# One-time setup: repo Settings -> Pages -> "Build and deployment" -> Source:
+# "GitHub Actions". (No gh-pages branch is used.)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "dashdown/**"        # framework changes affect rendering
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; let an in-flight deploy finish rather than cancel it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Build static docs site
+        run: uv run dashdown build docs --out _site
+      - name: Disable Jekyll
+        # GitHub Pages runs Jekyll, which ignores the `_dashdown/` asset+data dir
+        # (leading underscore). .nojekyll makes Pages serve the export verbatim.
+        run: touch _site/.nojekyll
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
