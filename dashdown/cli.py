@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 import shutil
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from importlib.resources import files
 from pathlib import Path
 
@@ -14,11 +15,34 @@ import uvicorn
 app = typer.Typer(help="Dashdown: markdown-driven analytics pages.")
 
 
+def _version_string() -> str:
+    """The installed distribution version, or ``unknown`` from an uninstalled source tree."""
+    try:
+        return _pkg_version("dashdown-md")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"dashdown {_version_string()}")
+        raise typer.Exit()
+
+
 @app.callback()
-def _main() -> None:
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed Dashdown version and exit.",
+    ),
+) -> None:
     """Dashdown: markdown-driven analytics pages."""
     # Print the one-time anonymous-telemetry notice before any command runs.
     # Best-effort and to stderr, so it never affects machine-readable stdout.
+    # (Skipped for --version: that callback is eager and exits before we get here.)
     from dashdown import telemetry
 
     telemetry.maybe_print_first_run_notice()
