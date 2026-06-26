@@ -70,6 +70,7 @@ SELECT SUM(downloads) AS downloads FROM downloads
 
 ## Where to go next
 
+- **[Installation](/installation)** — install the CLI globally, `uvx`, extras, PATH.
 - **[Getting started](/getting-started)** — install, scaffold, run.
 - **[Configuration](/configuration)** — every `dashdown.yaml` block in one place.
 - **[Writing pages](/pages)** — frontmatter, callouts, Mermaid, includes.

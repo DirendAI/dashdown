@@ -9,47 +9,34 @@ icon: "\U0001F680"
 
 ## Install
 
-Dashdown ships as the `dashdown` pip package with a CLI entry point. Install it
-with whichever Python tool you use.
-
-### With [uv](https://docs.astral.sh/uv/) (recommended)
-
-`uv` is a fast Python package manager. Add Dashdown to a project, or run it as a
-one-off tool without installing it globally:
+Dashdown is published to PyPI as the `dashdown-md` package, with a CLI entry point
+named `dashdown`. The fastest way to get going is to install the CLI globally with
+[uv](https://docs.astral.sh/uv/) so `dashdown` works from any directory:
 
 ```bash
-# Add it to the current project's environment
-uv add dashdown
+uv tool install dashdown-md      # `dashdown` on your PATH, usable anywhere
+```
 
-# …with extras for a specific connector / feature
-uv add 'dashdown-md[postgres]'
-uv add 'dashdown-md[pdf]'          # presentation PDF export
+…or run it once without installing, or pin it to a single project:
 
-# Run the CLI inside the project env
+```bash
+# Run it ad-hoc, no install, in a throwaway env
+uvx --from dashdown-md dashdown new my-dashboard
+
+# …or add it to the current project's environment (pins the version)
+uv add dashdown-md
 uv run dashdown serve .
 
-# Or run it ad-hoc, no install, in a throwaway env
-uvx --from dashdown-md dashdown new my-dashboard
-uvx --from dashdown-md dashdown serve .
+# …or with plain pip
+pip install dashdown-md
 ```
 
 :::tip
-`uv run dashdown …` always uses the project's pinned environment, so everyone on
-the team runs the same version. `uvx --from dashdown-md dashdown …` is handy for a quick try without
-touching your project.
+For a connector or feature, install the matching extra
+(`uv tool install 'dashdown-md[postgres]'`). See
+**[Installation](/installation)** for every method, the full extras list, upgrading,
+and fixing a `dashdown: command not found` PATH issue.
 :::
-
-### With pip
-
-```bash
-pip install dashdown-md
-# …with extras for a specific connector / feature
-pip install 'dashdown-md[postgres]'
-pip install 'dashdown-md[pdf]'      # presentation PDF export
-```
-
-Extras pull in a backend's heavy dependencies only when you need them — see
-[Connectors](/connectors) for the full list.
 
 ### Hacking on Dashdown itself
 
