@@ -6,7 +6,8 @@ Dashdown renders Markdown (with embedded SQL and `<Component />` tags) as intera
 
 ## Documentation
 
-- [Getting started](/getting-started): Dashdown ships as the `dashdown` pip package with a CLI entry point
+- [Getting started](/getting-started): Dashdown is published to PyPI as the `dashdown-md` package, with a CLI entry point named `dashdown`
+- [Installation](/installation): Dashdown is published to PyPI as **`dashdown-md`**, and the CLI it installs is the command **`dashdown`**
 - [Writing pages](/pages): Every file under `pages/` is a route
 - [Configuration](/configuration): Every project has a `dashdown.yaml` at its root — the single config file for the whole dashboard
 - [Connectors](/connectors): Connectors are declared in `sources.yaml` and loaded **lazily** the first time a query asks for that type
