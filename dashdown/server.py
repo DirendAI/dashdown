@@ -32,6 +32,7 @@ from dashdown.llm import (
     get_ask_def,
     get_cached_answer,
     relevant_params,
+    resolve_model_name,
 )
 from dashdown.project import (
     Project,
@@ -530,6 +531,10 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 status_code=503,
                 detail="No LLM provider configured — add an `llm:` block to dashdown.yaml",
             )
+        # The model that authored the commentary, surfaced to the reader. Derived
+        # from config (not the adapter), so a cache hit reports it without
+        # constructing/importing the provider SDK.
+        model = resolve_model_name(llm_cfg)
 
         filter_params = {
             key: unquote(str(value))
@@ -584,7 +589,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             cached_html = get_cached_answer(ask_id, cache_params)
             if cached_html is not None:
                 return JSONResponse(
-                    {"ask_id": ask_id, "html": cached_html, "cached": True}
+                    {"ask_id": ask_id, "html": cached_html, "cached": True, "model": model}
                 )
 
         # Run the referenced query, sharing the data API's result cache.
@@ -613,7 +618,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             )
 
         cache_answer(ask_id, cache_params, answer_html, ask.cache_ttl)
-        return JSONResponse({"ask_id": ask_id, "html": answer_html, "cached": False})
+        return JSONResponse(
+            {"ask_id": ask_id, "html": answer_html, "cached": False, "model": model}
+        )
 
     @app.get("/_dashdown/api/pdf")
     def export_page_pdf(request: Request):

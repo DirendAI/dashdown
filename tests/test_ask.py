@@ -33,6 +33,7 @@ from dashdown.llm import (
     parse_llm_config,
     register_ask_def,
     relevant_params,
+    resolve_model_name,
 )
 from dashdown.project import load_project
 from dashdown.render import pipeline
@@ -169,6 +170,26 @@ class TestParseLLMConfig:
     def test_create_adapter_requires_config(self):
         with pytest.raises(ValueError, match="no LLM provider"):
             create_adapter(LLMConfig())
+
+    def test_resolve_model_name(self):
+        # Falls back to the provider's DEFAULT_MODEL when llm.model is unset...
+        assert (
+            resolve_model_name(LLMConfig(provider="mistral", api_key="x"))
+            == "mistral-small-latest"
+        )
+        assert (
+            resolve_model_name(LLMConfig(provider="anthropic", api_key="x"))
+            == "claude-haiku-4-5"
+        )
+        # ...and honors an explicit override.
+        assert (
+            resolve_model_name(
+                LLMConfig(provider="mistral", api_key="x", model="mistral-large-latest")
+            )
+            == "mistral-large-latest"
+        )
+        # No provider configured → empty (the endpoint 503s before this matters).
+        assert resolve_model_name(LLMConfig()) == ""
 
 
 # --------------------------------------------------------------------------- #
@@ -517,11 +538,15 @@ class TestAskEndpoint:
         body = r.json()
         assert body["cached"] is False
         assert "<strong>North</strong>" in body["html"]
+        # The configured model (mistral default) is attributed to the reader.
+        assert body["model"] == "mistral-small-latest"
         assert len(fake.calls) == 1
 
-        # Second identical request answers from the cache — no new LLM call.
+        # Second identical request answers from the cache — no new LLM call, but
+        # the model is still reported (resolved from config, not the cache).
         r2 = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}")
         assert r2.json()["cached"] is True
+        assert r2.json()["model"] == "mistral-small-latest"
         assert len(fake.calls) == 1
 
     def test_relevant_filter_change_regenerates(self, tmp_path):
@@ -706,6 +731,8 @@ class TestStaticBuild:
         payload = json.loads(snapshot.read_text(encoding="utf-8"))
         assert payload["ask_id"] == THE_ASK_ID
         assert "<strong>North</strong>" in payload["html"]
+        # The baked snapshot records the model, so a static export attributes it too.
+        assert payload["model"] == "mistral-small-latest"
         assert len(fake.calls) == 1
 
     def test_build_without_llm_writes_error(self, tmp_path):
