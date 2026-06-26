@@ -37,6 +37,7 @@ dashdown serve my-dashboard    # → http://127.0.0.1:8000
 Verify it's installed and on your `PATH`:
 
 ```bash
+dashdown --version             # prints the installed version
 uv tool list                   # shows dashdown-md and the `dashdown` executable
 dashdown --help                # lists every command
 ```
