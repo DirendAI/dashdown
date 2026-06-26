@@ -23,29 +23,6 @@ write `.md`, point the CLI at the folder, and get a live dashboard.
 > `pages/*.md` file rendered by the very pipeline it describes, and the chart
 > below is a live query against a CSV. Read the source under [`docs/`](https://github.com/DirendAI/dashdown/tree/main/docs).
 
-## Recipes for agents
-
-Building a dashboard? These task-focused recipes get you to working code without
-reading the whole guide:
-
-- **[Query JSON / nested data](/connectors/duckdb#querying-json-and-nested-data)** —
-  read local or remote JSON in SQL: `unnest()` arrays, struct fields, 1-indexed
-  lists, quoting reserved words, and the quoted-string `${param}` rule.
-- **[Write a custom data-driven component](/extending#data-driven-components)** —
-  the `data-async-component` placeholder contract, the `/_dashdown/api/data` shape
-  (rows are arrays), self-init JS, and reading the baked snapshot in a static build.
-- **[Export dynamic detail pages](/exporting#dynamic-detail-pages-static_paths)** —
-  the `static_paths` frontmatter that pre-renders one page (and one snapshot) per
-  record, plus [how `${param}` reaches data](/detail-pages#how-a-route-value-reaches-your-data).
-
-## Try the search
-
-Press <kbd>/</kbd> anywhere, or click the box above, and type — for example
-`connector`, `pdf`, or `injection`. Results rank pages and jump straight to the
-matching section. It is a built-in component, [`<SiteSearch />`](/search), backed
-by an index of every page; it works the same on the live server and in a static
-export.
-
 ## A page is just Markdown + SQL + components
 
 ````markdown
@@ -67,6 +44,33 @@ SELECT SUM(downloads) AS downloads FROM downloads
 <Counter data={downloads_total} column="downloads" label="Total downloads (all months)" />
 
 <LineChart data={downloads_by_month} x="month" y="downloads" title="Monthly Downloads" />
+
+## Try the search
+
+Press <kbd>/</kbd> anywhere, or click the box above, and type — for example
+`connector`, `pdf`, or `injection`. Results rank pages and jump straight to the
+matching section. It is a built-in component, [`<SiteSearch />`](/search), backed
+by an index of every page; it works the same on the live server and in a static
+export.
+
+## AI ready
+
+Dashdown is built to be authored **with** a coding agent. `dashdown new` scaffolds a
+tool-agnostic `AGENTS.md` guide (plus a Claude Code skill) into every project, the CLI
+exposes its own catalog so an agent checks facts instead of guessing, and the whole
+manual ships as `llms.txt` for any model to read. See **[Coding agents →](/ai/coding-agents)**.
+
+Point an agent straight at a task:
+
+- **[Query JSON / nested data](/connectors/duckdb#querying-json-and-nested-data)** —
+  read local or remote JSON in SQL: `unnest()` arrays, struct fields, 1-indexed
+  lists, quoting reserved words, and the quoted-string `${param}` rule.
+- **[Write a custom data-driven component](/extending#data-driven-components)** —
+  the `data-async-component` placeholder contract, the `/_dashdown/api/data` shape
+  (rows are arrays), self-init JS, and reading the baked snapshot in a static build.
+- **[Export dynamic detail pages](/exporting#dynamic-detail-pages-static_paths)** —
+  the `static_paths` frontmatter that pre-renders one page (and one snapshot) per
+  record, plus [how `${param}` reaches data](/detail-pages#how-a-route-value-reaches-your-data).
 
 ## Where to go next
 

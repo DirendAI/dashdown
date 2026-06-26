@@ -225,6 +225,19 @@ def _make_container_render(queries: list[QuerySpec]):
     return render
 
 
+# Wrap GFM markdown tables in a horizontal-scroll container so a wide table
+# scrolls *within its own box* instead of forcing the whole page to scroll
+# sideways on narrow screens. These rules only fire for pipe tables — the
+# PascalCase `<Table>` component ships as raw HTML, not a `table` token, so it
+# is untouched (and is styled via `.dashdown-prose table.table`, not here).
+def _render_table_open(self, tokens, idx, options, env):  # noqa: ANN001
+    return '<div class="dashdown-table-scroll">' + self.renderToken(tokens, idx, options, env)
+
+
+def _render_table_close(self, tokens, idx, options, env):  # noqa: ANN001
+    return self.renderToken(tokens, idx, options, env) + "</div>"
+
+
 def build_md(queries_sink: list[QuerySpec]) -> MarkdownIt:
     md = MarkdownIt(
         "commonmark",
@@ -237,6 +250,9 @@ def build_md(queries_sink: list[QuerySpec]) -> MarkdownIt:
         },
     )
     md.enable("table")
+    # Wrap each rendered table in a horizontal-scroll container (see helpers above).
+    md.add_render_rule("table_open", _render_table_open)
+    md.add_render_rule("table_close", _render_table_close)
     # GitHub-flavored niceties on top of CommonMark: ~~strikethrough~~, `- [ ]`
     # task lists, footnotes, definition lists, and slugged heading anchors (with a
     # hover permalink). These are page-markdown only — `render_markdown_text`
