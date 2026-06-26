@@ -114,6 +114,10 @@ body {
 
 .dashdown-brand {
   text-decoration: none;
+  /* DaisyUI's `.btn` sets `flex-wrap: wrap`; on a tight mobile header that wraps
+     the logo + title onto two lines. Keep them on one line (the title
+     ellipsis-truncates instead — see the <768px rules below). */
+  flex-wrap: nowrap;
 }
 
 .dashdown-brand-logo {
@@ -122,6 +126,7 @@ body {
   max-width: 12rem;
   margin-right: 0.5rem;
   object-fit: contain;
+  flex-shrink: 0;
 }
 
 /* --- Layout: sidebar + main -------------------------------------------- */
@@ -1788,6 +1793,23 @@ body {
 }
 .dashdown-prose table:not(.table) tbody tr:hover {
   background: var(--fallback-b2, oklch(var(--b2) / 0.7));
+}
+/* Horizontal-scroll container that wraps every markdown table (emitted by the
+   table_open/table_close render rules in render/markdown.py). A wide table
+   scrolls within this box instead of forcing the whole page to scroll sideways
+   on narrow screens. max-width caps it to the prose column so the box itself
+   never overflows the viewport. */
+.dashdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: var(--dashdown-space-section) 0;
+}
+/* The wrapper now carries the block spacing; zero the table's own margin so it
+   doesn't double up inside the scroll box (overflow makes the wrapper a BFC,
+   so the table margin would otherwise sit *inside* the box). */
+.dashdown-table-scroll > table:not(.table) {
+  margin: 0;
 }
 
 /* --- Footnotes ------------------------------------------------------------ */
