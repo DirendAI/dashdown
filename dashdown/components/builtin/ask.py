@@ -100,7 +100,9 @@ class Ask(Component):
         style_attr = f' style="{span}"' if span else ""
 
         # Shimmer lines sized via dashdown.css (.dashdown-ask-skeleton); the
-        # refresh button stays hidden until ask.js confirms a live server.
+        # refresh button stays hidden until ask.js confirms a live server, and
+        # the model attribution stays hidden until ask.js fills it from the
+        # answer payload's `model` field.
         return (
             f'<div id="{cid}"{style_attr} '
             f'data-async-component="ask" '
@@ -120,5 +122,7 @@ class Ask(Component):
             f'<div class="dashdown-ask-body">'
             f'<div class="dashdown-ask-skeleton">'
             f'<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>'
-            f"</div></div></div>"
+            f"</div></div>"
+            f'<div class="dashdown-ask-model" hidden></div>'
+            f"</div>"
         )

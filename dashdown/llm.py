@@ -338,6 +338,20 @@ def create_adapter(config: LLMConfig) -> LLMAdapter:
     return cls(config)
 
 
+def resolve_model_name(config: LLMConfig) -> str:
+    """The model id that will actually be called for ``config`` — the
+    ``llm.model`` override, else the provider adapter's ``DEFAULT_MODEL``.
+
+    Derived from config alone (no SDK import / client construction), so the
+    ``<Ask />`` endpoint and the static build can attach the model to every
+    answer payload — including cache hits, before any adapter is touched.
+    Returns ``""`` when no provider is configured.
+    """
+    cls = _PROVIDERS.get(config.provider)
+    default = cls.DEFAULT_MODEL if cls is not None else None
+    return config.model or default or ""
+
+
 # --------------------------------------------------------------------------- #
 # Ask-prompt registry (mirrors the query-def cache in render/pipeline.py)
 # --------------------------------------------------------------------------- #

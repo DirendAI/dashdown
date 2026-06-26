@@ -791,6 +791,12 @@ body {
   background: var(--fallback-b2, oklch(var(--b2) / 1));
 }
 .dashdown-ask-refresh svg { width: 0.875rem; height: 0.875rem; }
+/* Model attribution: a muted footer line naming the model that wrote the answer. */
+.dashdown-ask-model {
+  margin-top: 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
 .dashdown-ask-error {
   font-size: 0.85rem;
   color: var(--fallback-bc3, oklch(var(--bc3) / 1));

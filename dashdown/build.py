@@ -43,7 +43,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from dashdown.llm import AskDef, generate_answer_html
+from dashdown.llm import AskDef, generate_answer_html, resolve_model_name
 from dashdown.project import (
     Project,
     load_project,
@@ -811,7 +811,14 @@ def _export_ask(
             return
 
     ask_path.write_text(
-        json.dumps({"ask_id": ask.id, "html": html}, default=_json_default),
+        json.dumps(
+            {
+                "ask_id": ask.id,
+                "html": html,
+                "model": resolve_model_name(project.config.llm),
+            },
+            default=_json_default,
+        ),
         encoding="utf-8",
     )
     result.asks.append(ask.id)
