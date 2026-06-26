@@ -1733,16 +1733,6 @@ to define one — the rest of this page is the grammar that's shared across all 
 them. A third party can add another backend as a separate package; the registry is
 the public extension point, mirroring [data connectors](/connectors).
 
-:::note Power BI / Fabric has no semantic backend
-Ibis has no Power BI backend, so `metric={…} by={…}` doesn't apply there. Drive a
-Fabric model with hand-authored [`queries/*.dax`](/queries) against the
-[`dax` connector](/connectors/dax) — an imperative, run-verbatim DAX query through
-the one audited `${param}` substitution. (An experimental `backend: dax` once
-compiled the grammar to `EVALUATE SUMMARIZECOLUMNS(...)` but was removed — never
-verified against live Fabric, and a second user-input→DAX-string surface beyond
-the audited path. The `dax` *connector* is unaffected.)
-:::
-
 ## Reference it from a component
 
 The examples below assume a `sales` model — see
