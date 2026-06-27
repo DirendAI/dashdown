@@ -11,6 +11,14 @@ from pathlib import Path
 
 import typer
 import uvicorn
+import yaml
+
+from dashdown.agent_targets import (
+    EmittedFile,
+    agent_target_names,
+    detect_agent_targets,
+    get_agent_target,
+)
 
 app = typer.Typer(help="Dashdown: markdown-driven analytics pages.")
 
@@ -893,18 +901,34 @@ def embed_token(
 @app.command()
 def new(
     name: str = typer.Argument(..., help="Project directory to create"),
+    target: str = typer.Option(
+        "claude",
+        "--target",
+        help=(
+            "Comma-separated coding agents to set up a guide for "
+            f"({', '.join(agent_target_names())}). Recorded in dashdown.yaml so "
+            "`dashdown skill` keeps them in sync."
+        ),
+    ),
 ) -> None:
-    """Scaffold a new Dashdown project."""
-    target = Path(name).resolve()
-    if target.exists() and any(target.iterdir()):
-        raise typer.BadParameter(f"{target} already exists and is not empty")
-    target.mkdir(parents=True, exist_ok=True)
-    _scaffold(target)
-    typer.echo(f"Created {target}")
-    typer.echo(f"Run: dashdown serve {target.name}")
+    """Scaffold a new Dashdown project.
+
+    A fresh directory has no tooling to detect, so the coding-agent guide is installed for
+    whatever ``--target`` names (default ``claude``); the choice is saved to dashdown.yaml.
+    """
+    root = Path(name).resolve()
+    if root.exists() and any(root.iterdir()):
+        raise typer.BadParameter(f"{root} already exists and is not empty")
+    targets = _resolve_targets(root, _parse_target_opt(target))
+    root.mkdir(parents=True, exist_ok=True)
+    _scaffold(root, targets)
+    typer.echo(f"Created {root}")
+    typer.echo(f"Run: dashdown serve {root.name}")
 
 
-def _scaffold(root: Path) -> None:
+def _scaffold(root: Path, targets: list[str] | None = None) -> None:
+    if targets is None:
+        targets = ["claude"]
     (root / "pages").mkdir(exist_ok=True)
     (root / "data").mkdir(exist_ok=True)
 
@@ -920,6 +944,8 @@ def _scaffold(root: Path) -> None:
 
     (root / "dashdown.yaml").write_text(
         "title: My Analytics\n"
+        f"agents: [{', '.join(targets)}]   "
+        "# coding-agent guides to keep in sync via `dashdown skill`\n"
         "# branding:\n"
         "#   logo: assets/logo.svg   # shown in the header; path or https URL\n"
         "#   palette: [\"#6366f1\", \"#22c55e\", \"#f59e0b\"]   # chart series colors\n"
@@ -960,7 +986,7 @@ def _scaffold(root: Path) -> None:
         encoding="utf-8",
     )
 
-    _scaffold_agent_docs(root)
+    _scaffold_agent_docs(root, targets)
 
 
 @app.command()
@@ -973,16 +999,29 @@ def skill(
         "--refresh",
         help="Overwrite existing guide files with this version's (and prune stale shards)",
     ),
+    target: str = typer.Option(
+        None,
+        "--target",
+        help=(
+            "Comma-separated coding agents to install for "
+            f"({', '.join(agent_target_names())}). Default: the project's dashdown.yaml "
+            "`agents:`, else auto-detected tools, else claude."
+        ),
+    ),
 ) -> None:
     """Install or update the bundled coding-agent guide in an existing project.
 
-    Adds (or, with `--refresh`, updates) `AGENTS.md`, the `references/` shards, and the
-    Claude Code authoring skill — the same progressive-disclosure guide `dashdown new`
-    scaffolds. The guide is versioned with the framework, so a project scaffolded on an
-    older release can pull the current one without re-scaffolding:
+    Adds (or, with `--refresh`, updates) `AGENTS.md`, the `references/` shards, and a
+    per-tool wrapper — the same progressive-disclosure guide `dashdown new` scaffolds. The
+    guide is versioned with the framework, so a project scaffolded on an older release can
+    pull the current one without re-scaffolding:
 
-        dashdown skill                 # fill in anything missing (keeps your edits)
-        dashdown skill --refresh       # overwrite to this version's guide
+        dashdown skill                    # for the project's tools (config/detect/claude)
+        dashdown skill --target cursor    # also/instead install the Cursor rule
+        dashdown skill --refresh          # overwrite to this version's guide
+
+    `AGENTS.md` + `references/` are always installed (tool-agnostic); `--target` only
+    chooses which per-tool wrappers ride on top.
     """
     root = project.resolve()
     if not root.is_dir():
@@ -990,8 +1029,10 @@ def skill(
     if not (root / "dashdown.yaml").is_file():
         typer.echo(f"warning: {root} has no dashdown.yaml (not a Dashdown project?)", err=True)
 
-    written, skipped = _install_agent_docs(root, refresh=refresh)
+    targets = _resolve_targets(root, _parse_target_opt(target))
+    written, skipped = _install_agent_docs(root, refresh=refresh, targets=targets)
 
+    typer.echo(f"Agents: {', '.join(targets)}")
     verb = "Updated" if refresh else "Installed"
     if written:
         typer.echo(f"{verb} {len(written)} file(s) in {root}:")
@@ -1005,46 +1046,96 @@ def skill(
         typer.echo("Already up to date.")
 
 
-def _agent_doc_files() -> list[tuple[Path, Path]]:
-    """The bundled coding-agent guide as ``(source, dest_relative)`` pairs.
+def _agent_doc_files(targets: list[str]) -> list[EmittedFile]:
+    """The bundled coding-agent guide as a list of files to install.
 
-    Ships the progressive-disclosure guide generated from `docs/` by
+    Always ships the progressive-disclosure guide generated from `docs/` by
     `tooling/gen-agent-docs.py`: `AGENTS.md` (the tool-agnostic *map* — cheat-sheet +
     a table of contents) alongside `references/<topic>.md` (the per-topic detail shards
-    the map links to), plus a thin Claude Code skill that routes into them. So any agent
-    opening the project reads the small map first and loads only the shard a task needs.
-    Stored in the package under `scaffold/claude/` (no leading dot) because setuptools'
-    `**` glob skips hidden paths; the `.claude` rename happens on copy.
+    the map links to). That content is **tool-agnostic**, so it's the baseline regardless
+    of ``targets``. On top, each name in ``targets`` contributes its per-tool **wrapper**
+    (a Claude skill, a Cursor rule, …) — a thin router into the shared content, emitted by
+    its `AgentTarget` (see `dashdown/agent_targets.py`).
     """
     src = Path(str(files("dashdown") / "scaffold"))
-    items: list[tuple[Path, Path]] = []
+    items: list[EmittedFile] = []
     agents = src / "AGENTS.md"
     if agents.is_file():
-        items.append((agents, Path("AGENTS.md")))
+        items.append(EmittedFile(dest=Path("AGENTS.md"), source=agents))
     references = src / "references"
     if references.is_dir():
         for ref in sorted(references.glob("*.md")):
-            items.append((ref, Path("references") / ref.name))
-    claude = src / "claude"
-    if claude.is_dir():
-        for f in sorted(claude.rglob("*")):
-            if f.is_file():
-                items.append((f, Path(".claude") / f.relative_to(claude)))
+            items.append(EmittedFile(dest=Path("references") / ref.name, source=ref))
+    for name in targets:
+        target = get_agent_target(name)
+        if target is None:  # defensive — callers validate via `_resolve_targets`
+            raise typer.BadParameter(
+                f"unknown agent target: {name!r} (known: {', '.join(agent_target_names())})"
+            )
+        items.extend(target.emit(src))
     return items
 
 
-def _install_agent_docs(root: Path, *, refresh: bool) -> tuple[list[str], list[str]]:
-    """Copy the bundled guide into ``root``; return ``(written, skipped)`` rel paths.
+def _read_agents_config(root: Path) -> list[str]:
+    """The ``agents:`` list recorded in a project's ``dashdown.yaml`` (`dashdown new --target`)."""
+    cfg_path = root / "dashdown.yaml"
+    if not cfg_path.is_file():
+        return []
+    try:
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return []
+    agents = raw.get("agents") if isinstance(raw, dict) else None
+    if isinstance(agents, str):
+        agents = agents.split(",")
+    if not isinstance(agents, list):
+        return []
+    return [str(a).strip().lower() for a in agents if str(a).strip()]
 
+
+def _resolve_targets(root: Path, explicit: list[str] | None) -> list[str]:
+    """Which coding agents to install for, by precedence.
+
+    explicit ``--target`` → the project's ``dashdown.yaml: agents:`` → auto-detected tools
+    (a marker dir already present) → ``["claude"]`` as the final fallback. A fresh
+    `dashdown new` has nothing to detect, so it relies on the flag (default ``claude``);
+    `dashdown skill` in an existing project rides config/detection so it just works.
+    """
+    names = explicit or _read_agents_config(root) or detect_agent_targets(root) or ["claude"]
+    unknown = [n for n in names if get_agent_target(n) is None]
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown agent target(s): {', '.join(unknown)} "
+            f"(known: {', '.join(agent_target_names())})"
+        )
+    return names
+
+
+def _parse_target_opt(value: str | None) -> list[str] | None:
+    """A comma-separated ``--target`` string → a normalized name list (``None`` if unset)."""
+    if not value:
+        return None
+    return [t.strip().lower() for t in value.split(",") if t.strip()]
+
+
+def _install_agent_docs(
+    root: Path, *, refresh: bool, targets: list[str] | None = None
+) -> tuple[list[str], list[str]]:
+    """Install the bundled guide into ``root``; return ``(written, skipped)`` rel paths.
+
+    ``targets`` selects which per-tool wrappers to add on top of the always-installed
+    `AGENTS.md` + `references/` baseline; ``None`` resolves them from config/detection.
     Without ``refresh`` an existing file is left untouched (so a project's local edits
     survive an install that just fills in missing pieces); with ``refresh`` every file is
     overwritten to the wheel's current version and any ghost `references/*.md` a renamed
     docs topic left behind is pruned (mirroring `gen-agent-docs.py`'s stale-shard evict).
     """
-    items = _agent_doc_files()
+    if targets is None:
+        targets = _resolve_targets(root, None)
+    items = _agent_doc_files(targets)
     if refresh:
         shipped_refs = {
-            dest.name for _, dest in items if dest.parent.as_posix() == "references"
+            it.dest.name for it in items if it.dest.parent.as_posix() == "references"
         }
         refs_dir = root / "references"
         if refs_dir.is_dir():
@@ -1054,20 +1145,24 @@ def _install_agent_docs(root: Path, *, refresh: bool) -> tuple[list[str], list[s
 
     written: list[str] = []
     skipped: list[str] = []
-    for source, dest_rel in items:
-        dest = root / dest_rel
+    for item in items:
+        dest = root / item.dest
+        rel = item.dest.as_posix()
         if dest.exists() and not refresh:
-            skipped.append(dest_rel.as_posix())
+            skipped.append(rel)
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, dest)
-        written.append(dest_rel.as_posix())
+        if item.source is not None:
+            shutil.copyfile(item.source, dest)
+        else:
+            dest.write_text(item.content or "", encoding="utf-8")
+        written.append(rel)
     return written, skipped
 
 
-def _scaffold_agent_docs(root: Path) -> None:
+def _scaffold_agent_docs(root: Path, targets: list[str]) -> None:
     """Drop the bundled coding-agent guide into a freshly scaffolded project."""
-    _install_agent_docs(root, refresh=True)
+    _install_agent_docs(root, refresh=True, targets=targets)
 
 
 def main() -> None:  # pragma: no cover

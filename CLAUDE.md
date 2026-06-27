@@ -435,11 +435,26 @@ only the one shard a task needs.
   **Re-run it after editing `docs/`** or the shipped guide goes stale —
   `tests/test_scaffold.py::test_agent_docs_are_freshly_generated` fails on drift.
 - The generated tree lives in the package under `dashdown/scaffold/` (`AGENTS.md`, `references/*.md`,
-  and a Claude Code skill under `scaffold/claude/` — the `.claude` rename happens on copy). The same
-  generator emits `docs/llms.txt` (the network-fetchable map) and `docs/llms-full.txt` (the monolith);
-  `build.py` copies any root-level `llms.txt`/`llms-full.txt` into the static-build root.
-- **`dashdown skill [--refresh]`** installs/updates the bundled guide into an existing project, so a
-  project scaffolded on an older release pulls the current one without re-scaffolding.
+  and a Claude Code skill under `scaffold/claude/`). The same generator emits `docs/llms.txt` (the
+  network-fetchable map) and `docs/llms-full.txt` (the monolith); `build.py` copies any root-level
+  `llms.txt`/`llms-full.txt` into the static-build root.
+- **Content vs. wrapper (`dashdown/agent_targets.py`).** The `AGENTS.md` + `references/` content is
+  **always** installed (it's tool-agnostic); only the thin per-tool **wrapper** that routes into it
+  varies by tool. Each tool is an `AgentTarget` (`name`, `emit(scaffold_src) -> [EmittedFile]`,
+  `detect(root)`) in a small registry — same shape as the connector/component registries. Built-ins:
+  `claude` (the real skill, copied `scaffold/claude/` → `.claude/` — the dotted rename happens here,
+  on install, since setuptools' `**` glob skips the dot) and `mistral` (the **same** skill tree under
+  `.vibe/`, which mirrors `.claude`'s `skills/<name>/SKILL.md` layout — both share `_skill_tree`), plus
+  pointer-stub wrappers `cursor` (`.cursor/rules/dashdown.mdc`) and `gemini` (`GEMINI.md`). Codex et al.
+  need no wrapper — they read the baseline `AGENTS.md`. Add a tool = one `register_agent_target(...)`.
+- **Target selection (`_resolve_targets` in `cli.py`).** Precedence: explicit `--target a,b` → the
+  project's `dashdown.yaml` `agents:` list → auto-detected tools (a marker dir already present) →
+  `["claude"]`. `dashdown new --target …` can't detect (fresh dir), so it takes the flag (default
+  `claude`) **and records it** into the scaffolded `dashdown.yaml` `agents:` — which then becomes the
+  default for every later `dashdown skill` in that project.
+- **`dashdown skill [--refresh] [--target …]`** installs/updates the bundled guide into an existing
+  project (resolving targets as above), so a project scaffolded on an older release pulls the current
+  one without re-scaffolding.
 
 ## Introspected catalog (`dashdown components`)
 
