@@ -36,7 +36,7 @@ for the shared attributes, then the per-type page:
 
 ## Filters & search
 
-- [Dropdown](/components/dropdown) · [Search](/components/search) · [DateRange](/components/date-range) · [Toggle](/components/toggle) · [TimeGrain](/components/time-grain) — see also the [Filters](/filters) concept page.
+- [Dropdown](/components/dropdown) · [Combobox](/components/combobox) · [Search](/components/search) · [DateRange](/components/date-range) · [RangeSlider](/components/range-slider) · [Slider](/components/slider) · [ButtonGroup](/components/button-group) · [Toggle](/components/toggle) · [TimeGrain](/components/time-grain) — see also the [Filters](/filters) concept page.
 - [SiteSearch](/components/site-search) — full-text search across all pages.
 
 
@@ -1490,6 +1490,14 @@ any query using `${name}` re-runs. Options come from a query column (`data` +
 `column`) or a literal `options` list. Add `multi` for a multi-select that feeds
 an `IN (…)` clause.
 
+```sql
+SELECT month, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${channel}' = '' OR channel = '${channel}'
+GROUP BY month
+ORDER BY month
+```
+
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 
 <LineChart data={dl_by_channel} x="month" y="downloads" title="Downloads (filtered)" />
@@ -1499,6 +1507,14 @@ selection" mean "all".
 
 Add `multi` for a multi-select whose chosen values expand into an `IN (…)` list
 (the same empty-means-all guard applies):
+
+```sql
+SELECT month, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${channels}' = '' OR channel IN (${channels})
+GROUP BY month
+ORDER BY month
+```
 
 <Dropdown name="channels" data={all_channels} column="channel" label="Channels" multi />
 
@@ -1529,6 +1545,14 @@ A free-text filter. Its value lands in `filters[name]`; reference it in SQL with
 `${name}`. This is a **query filter** — for searching across *pages*, use
 [SiteSearch](/components/site-search) instead.
 
+```sql
+SELECT channel, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${q}' = '' OR channel ILIKE '%' || '${q}' || '%'
+GROUP BY channel
+ORDER BY downloads DESC
+```
+
 <Search name="q" label="Filter channels" placeholder="Type a channel…" />
 
 <Table data={channel_like} title="Matching channels" />
@@ -1552,6 +1576,14 @@ Like other filter controls, `<Search>` is stripped from static builds.
 A start/end date control with presets (`last_7_days`, `this_month`, `custom`, …).
 It writes two URL params — `start_param` / `end_param` (default `name_start` /
 `name_end`) — that your SQL reads.
+
+```sql
+SELECT date, visits
+FROM daily
+WHERE ('${from}' = '' OR date >= '${from}')
+  AND ('${to}' = '' OR date <= '${to}')
+ORDER BY date
+```
 
 <DateRange name="period" label="Period" start_param="from" end_param="to" presets="last_7_days,last_30_days,custom" />
 
@@ -1583,6 +1615,13 @@ only X", "include archived", "paid only". It writes a string into the filter
 store under `name`, exactly like the other filters, so your SQL reads it with
 `${name}`.
 
+```sql
+SELECT date, visits
+FROM daily
+WHERE '${busy}' = '' OR visits >= 500
+ORDER BY date
+```
+
 <Toggle name="busy" label="Busy days only" />
 
 <LineChart data={daily_traffic} x="date" y="visits" title="Daily visits" />
@@ -1608,6 +1647,14 @@ The default `on_value="true"` / `off_value=""` is the **all-guard** above — of
 shows everything. Because `on_value` / `off_value` are **arbitrary strings**, a
 non-empty `off_value` turns it into a **two-state** filter where both directions
 narrow the data — including a text column that stores something like `Yes`/`No`:
+
+```sql
+SELECT date, visits
+FROM daily
+WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')
+           ELSE weekday NOT IN ('Sat','Sun') END
+ORDER BY date
+```
 
 <Toggle name="weekend" label="Weekends only" on_value="Yes" off_value="No" />
 
@@ -1698,6 +1745,74 @@ Like every filter control, `<TimeGrain>` is `is_filter` — it's stripped from
 from the "filtered by" badge (a grain is a grouping, not a filter).
 
 
+<!-- source: docs/pages/components/range-slider.md -->
+
+# RangeSlider
+
+A dual-handle numeric slider for a *between* bound on a numeric column (price,
+age, score, …). Like [`<DateRange>`](/components/date-range) it owns **two** URL
+params — `min_param` / `max_param` (default `name_min` / `name_max`) — that your
+SQL reads.
+
+A handle resting on its track bound writes an **empty value** (the same
+empty-means-all convention as every other filter), so **guard each bound** — the
+empty case (a wide-open slider, or the first fetch before the control seeds)
+then shows everything instead of erroring on `CAST('' AS DOUBLE)`:
+
+```sql
+SELECT device, tier, price
+FROM device_specs
+WHERE ('${price_min}' = '' OR price >= CAST(${price_min} AS DOUBLE))
+  AND ('${price_max}' = '' OR price <= CAST(${price_max} AS DOUBLE))
+ORDER BY price DESC
+```
+
+<RangeSlider name="price" min={500} max={1500} step={50} default={[700,1300]} label="Price ($)" format="currency" currency="$" />
+
+<BarChart data={devices_in_range} x="device" y="price" title="Devices in price range" />
+
+Drag either handle — the chart re-queries. The readout above the track shows the
+live low/high, formatted with the same `format=`/`currency=` options the other
+components use.
+
+Each handle substitutes as a **quoted string literal** (the one injection-safe
+path every filter shares), so the `CAST(… AS DOUBLE)` turns it back into a number
+for the comparison. The `'${price_min}' = ''` half of each clause is the
+empty-means-all guard — drag a handle back to its bound and that side stops
+filtering.
+
+## The `default` bounds
+
+`default=` seeds the initial `[low, high]` on first load (URL params still win).
+Write it as an **array literal** or a **comma string** — both clamp into
+`[min, max]`:
+
+```html
+<RangeSlider name="price" min={0} max={10000} step={50} default={[2000,8000]} />
+<RangeSlider name="price" min={0} max={10000} step={50} default="2000, 8000" />
+```
+
+:::note
+Inside `{…}` keep the values **space-free** (`{[2000,8000]}`, not
+`{[2000, 8000]}`) — an unquoted attribute value with a space isn't recognized as
+a tag and renders as plain text. Use the quoted `default="2000, 8000"` form if
+you want spaces. Omitting `default` starts the slider wide open at `[min, max]`.
+:::
+
+| Attribute       | Purpose                                                       |
+| --------------- | ------------------------------------------------------------- |
+| `name`          | **Required.** Base filter key.                                |
+| `min` / `max`   | Track bounds (default `0` / `100`). `max` must exceed `min`.  |
+| `step`          | Handle increment (default `1`).                               |
+| `default`       | Initial `[low, high]` pair (default: the full `[min, max]`).  |
+| `min_param` / `max_param` | URL/SQL param names (default `name_min` / `name_max`). |
+| `format` / `currency` / `decimals` / `locale` | Format the readout values. |
+| `bar`           | Lift into the top [filter bar](/filters) (default: inline).   |
+
+Filter controls drive **server-side** SQL substitution, so they're stripped from
+[static builds](/exporting) automatically.
+
+
 <!-- source: docs/pages/components/site-search.md -->
 
 # SiteSearch
@@ -1722,3 +1837,178 @@ box.
 
 For the full design — index, ranking, static vs live — see the
 [Full-text search](/search) page.
+
+
+<!-- source: docs/pages/components/button-group.md -->
+
+# ButtonGroup
+
+A single-select filter shown as an inline **segmented control** — a row of pill
+buttons where exactly one is active (`All · High · Mid · Budget`). A
+lower-friction alternative to a [`<Dropdown>`](/components/dropdown) for a small,
+**fixed** set of choices: one click instead of open-then-pick.
+
+The picked value is stored as a string under `name`, exactly like the other
+filters, so your SQL reads it with `${name}`. The default **"All"** segment stores
+`""`, so the `'${tier}' = ''` guard passes and every row shows — the same
+empty-means-all convention a single-select Dropdown uses:
+
+```sql
+SELECT device, tier, price
+FROM device_specs
+WHERE '${tier}' = '' OR tier = '${tier}'
+ORDER BY price DESC
+```
+
+<ButtonGroup name="tier" label="Tier" options="High,Mid,Budget" />
+
+<BarChart data={devices_by_tier} x="device" y="price" title="Devices by tier" />
+
+Click a segment — the chart re-queries. Click **All** to drop the filter again
+(selecting a segment doesn't toggle off, so "All" is how you clear it).
+
+| Attribute     | Purpose                                                            |
+| ------------- | ----------------------------------------------------------------- |
+| `name`        | **Required.** Filter key your SQL reads as `${name}`.             |
+| `options`     | **Required.** Choices — `options="High,Mid,Budget"` or `options={[High,Mid,Budget]}`. Value == label. |
+| `label`       | Inline label shown before the segments (defaults to `name`).      |
+| `include_all` | Prepend an **All** segment that clears the filter (default `true`). |
+| `all_label`   | Text for that segment (default `"All"`).                          |
+| `default`     | Value selected on first load (URL params still win).              |
+| `bar`         | Lift into the top [filter bar](/filters) (default: inline).       |
+
+:::note
+A ButtonGroup is for a handful of **fixed** options you'd lay out as buttons. For
+a **dynamic** or high-cardinality column, use a [`<Dropdown>`](/components/dropdown)
+— it populates its options from the data. The value reaches SQL through the same
+context-aware `${param}` substitution as every other filter (always a quoted
+string literal, no new injection surface), and like the other controls it's
+stripped from [static builds](/exporting).
+:::
+
+
+<!-- source: docs/pages/components/combobox.md -->
+
+# Combobox
+
+A **searchable** single-select for a **high-cardinality** column — type to filter
+over thousands of customers, SKUs, or users where a plain
+[`<Dropdown>`](/components/dropdown) (which loads *every* distinct value) would
+choke.
+
+Options are fetched **server-side as you type**: the browser hits
+`/_dashdown/api/options/{query}` and the backend runs a `SELECT DISTINCT … WHERE
+col ILIKE '%term%' LIMIT N` against the warehouse, so only a small matching page
+is ever shipped. The picked value lands in `filters[name]` like every other
+filter, so your SQL reads it with `${name}` and the empty (nothing picked) value
+trips the all-guard:
+
+```sql
+SELECT country, downloads
+FROM by_country
+WHERE '${country}' = '' OR country = '${country}'
+ORDER BY downloads DESC
+```
+
+<Combobox name="country" data={countries} column="country" label="Country" placeholder="Search countries…" />
+
+<BarChart data={country_rows} x="country" y="downloads" title="Downloads by country" />
+
+Start typing — the panel lists matching values fetched from the server; pick one
+and the chart re-queries. The **×** clears the selection.
+
+The `data={query}` + `column` pair names where the distinct values come from. It
+needn't be the same query the chart shows — point it at a lightweight lookup
+(`SELECT country FROM by_country`) and let the heavier display query carry the
+`${country}` guard.
+
+## Multi-select
+
+Add **`multi`** to pick several values. They're stored as one comma-joined string
+that feeds an `IN (…)` clause — identical to a multi-select
+[`<Dropdown>`](/components/dropdown), so the values expand into a quoted,
+per-item-escaped literal list (empty selection → matches all):
+
+```sql
+SELECT country, downloads
+FROM by_country
+WHERE '${countries}' = '' OR country IN (${countries})
+ORDER BY downloads DESC
+```
+
+<Combobox name="countries" data={countries} column="country" label="Countries" multi placeholder="Add a country…" />
+
+<BarChart data={country_multi} x="country" y="downloads" title="Downloads (selected countries)" />
+
+Picks show as removable chips before the search box; the panel marks chosen rows
+with a ✓ and stays open so you can add several. **Backspace** on an empty input
+removes the last chip.
+
+| Attribute   | Purpose                                                            |
+| ----------- | ----------------------------------------------------------------- |
+| `name`      | **Required.** Filter key your SQL reads as `${name}`.             |
+| `data` + `column` | **Required.** The query + column the distinct values come from. |
+| `multi`     | Multi-select → a comma-joined value for an `IN (…)` clause.        |
+| `label`     | Inline label (defaults to `name`).                                |
+| `placeholder` | Input placeholder (default `"Search…"`).                        |
+| `limit`     | Max options fetched per keystroke (default `50`; server caps at `200`). |
+| `min_chars` | Only search once this many characters are typed (default `0`).    |
+| `bar`       | Lift into the top [filter bar](/filters) (default: inline).       |
+
+:::note
+**SQL connectors only** — the options endpoint wraps your query as a subquery,
+which a non-SQL backend (DAX) or a [Python query](/python-queries) can't satisfy.
+The search term and column go through the **same injection-safe rules** as
+`${param}` substitution (the column must be a bare identifier; the term is always
+a quoted literal), so there's no new injection surface. Like the other filter
+controls, `<Combobox>` is stripped from [static builds](/exporting) — a fixed
+snapshot has no server to search.
+:::
+
+
+<!-- source: docs/pages/components/slider.md -->
+
+# Slider
+
+A single-value numeric **threshold** filter — one handle on a track for a
+`min rating ≥`, `price ≤`, or `top N` style bound. The one-handled sibling of
+[`<RangeSlider>`](/components/range-slider) (which carries a low/high pair).
+
+The value is stored under `name`, so your SQL reads it with `${name}`. Guard the
+comparison so a missing value (the brief moment before the control seeds) shows
+everything rather than erroring on `CAST('' AS DOUBLE)`. The **operator you pick
+decides which handle position means "all"**: `>=` → the minimum, `<=` → the
+maximum.
+
+```sql
+SELECT device, rating
+FROM device_specs
+WHERE '${min_rating}' = '' OR rating >= CAST(${min_rating} AS DOUBLE)
+ORDER BY rating DESC
+```
+
+<Slider name="min_rating" min={0} max={5} step={0.1} default={4} label="Min rating" />
+
+<BarChart data={devices_rated} x="device" y="rating" title="Devices at or above the rating" />
+
+Drag the handle — the chart re-queries. The readout above the track shows the
+live value, formatted with the same `format=`/`currency=` options the other
+components use.
+
+| Attribute     | Purpose                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| `name`        | **Required.** Filter key your SQL reads as `${name}`.           |
+| `min` / `max` | Track bounds (default `0` / `100`). `max` must exceed `min`.    |
+| `step`        | Handle increment (default `1`).                                 |
+| `default`     | Initial value (default: `min`). URL params still win.           |
+| `format` / `currency` / `decimals` / `locale` | Format the readout value.       |
+| `bar`         | Lift into the top [filter bar](/filters) (default: inline).     |
+
+:::tip
+For a **between** bound (low *and* high), use [`<RangeSlider>`](/components/range-slider)
+— it carries two handles and a `${name}_min` / `${name}_max` pair. `<Slider>` is
+the single-threshold control.
+:::
+
+Filter controls drive **server-side** SQL substitution, so they're stripped from
+[static builds](/exporting) automatically.

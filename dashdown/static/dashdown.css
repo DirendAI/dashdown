@@ -968,6 +968,403 @@ body {
   cursor: pointer;
 }
 
+/* === Range slider (numeric range filter) ===================
+   A dual-handle numeric range living in the filter-pill shell. The two handles
+   are two native <input type="range"> overlaid on one rail: each input is
+   transparent and click-through (pointer-events:none) EXCEPT its thumb
+   (pointer-events:auto), so both thumbs stay independently draggable while we
+   paint our own rail + fill underneath. Colours come from the design tokens so
+   the control tracks the light/dark themes. */
+.dashdown-range-slider .dashdown-range-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.125rem 0.25rem 0;
+}
+
+.dashdown-range-readout {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.dashdown-range-readout-sep {
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+
+.dashdown-range-track {
+  position: relative;
+  width: 9.5rem;
+  height: 1.125rem;
+  display: flex;
+  align-items: center;
+}
+
+/* The base rail (full width, muted) and the active fill (between the handles,
+   primary-coloured; left/right set inline by fillStyle()). */
+.dashdown-range-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: var(--fallback-b3, oklch(var(--b3) / 1));
+}
+
+.dashdown-range-fill {
+  position: absolute;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+}
+
+.dashdown-range-input {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  height: 1.125rem;
+  background: none;
+  pointer-events: none; /* re-enabled on the thumbs below */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.dashdown-range-input:focus {
+  outline: none;
+}
+
+/* Transparent native tracks — we draw the rail/fill ourselves. */
+.dashdown-range-input::-webkit-slider-runnable-track {
+  background: transparent;
+  border: none;
+  height: 1.125rem;
+}
+.dashdown-range-input::-moz-range-track {
+  background: transparent;
+  border: none;
+  height: 1.125rem;
+}
+
+/* Thumbs: draggable (pointer-events back on), sized from the design palette. */
+.dashdown-range-input::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+  border: 2px solid var(--fallback-b1, oklch(var(--b1) / 1));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+}
+.dashdown-range-input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+  border: 2px solid var(--fallback-b1, oklch(var(--b1) / 1));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+}
+
+.dashdown-range-input:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+.dashdown-range-input:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+
+/* === Slider (single-value threshold filter) ================
+   The one-handle sibling of the range slider: one native range input over a
+   rail with a fill from the minimum to the handle. Same look/tokens as the
+   range slider; only one thumb, so no overlay/pointer-events trickery. */
+.dashdown-slider .dashdown-slider-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.125rem 0.25rem 0;
+}
+
+.dashdown-slider-readout {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.dashdown-slider-track {
+  position: relative;
+  width: 9.5rem;
+  height: 1.125rem;
+  display: flex;
+  align-items: center;
+}
+
+.dashdown-slider-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: var(--fallback-b3, oklch(var(--b3) / 1));
+}
+
+.dashdown-slider-fill {
+  position: absolute;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+}
+
+.dashdown-slider-input {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  height: 1.125rem;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.dashdown-slider-input:focus {
+  outline: none;
+}
+
+.dashdown-slider-input::-webkit-slider-runnable-track {
+  background: transparent;
+  border: none;
+  height: 1.125rem;
+}
+.dashdown-slider-input::-moz-range-track {
+  background: transparent;
+  border: none;
+  height: 1.125rem;
+}
+
+.dashdown-slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+  border: 2px solid var(--fallback-b1, oklch(var(--b1) / 1));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+}
+.dashdown-slider-input::-moz-range-thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 999px;
+  background: var(--fallback-p, oklch(var(--p) / 1));
+  border: 2px solid var(--fallback-b1, oklch(var(--b1) / 1));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+}
+
+.dashdown-slider-input:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+.dashdown-slider-input:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+
+/* === Button group (segmented single-select filter) =========
+   A row of pill buttons where exactly one is active — an iOS-style segmented
+   control living in the filter-pill shell. The active segment lifts onto a
+   raised base-100 surface; the rest are quiet. Colours/radii come from the
+   design tokens so it tracks the light/dark themes. */
+.dashdown-button-group .dashdown-segments {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.125rem;
+  padding: 0.1875rem;
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  border-radius: var(--dashdown-radius-control);
+}
+
+.dashdown-segment {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.3125rem 0.625rem;
+  border-radius: calc(var(--dashdown-radius-control) - 0.1875rem);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.dashdown-segment:hover:not(.dashdown-segment-active) {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b1, oklch(var(--b1) / 0.6));
+}
+
+.dashdown-segment-active {
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.dashdown-segment:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 1px;
+}
+
+/* === Combobox (searchable high-cardinality single-select) ===
+   A text input that searches options server-side (DISTINCT…ILIKE…LIMIT) and
+   shows matches in a floating panel. Lives in the filter-pill shell; the panel
+   is absolutely positioned so it overlays page content. */
+.dashdown-combobox-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dashdown-combobox-input {
+  width: 11rem;
+  max-width: 100%;
+}
+
+.dashdown-combobox-clear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.dashdown-combobox-clear:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+
+.dashdown-combobox-panel {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  min-width: 12rem;
+  max-width: 20rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  z-index: 50;
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  box-shadow: var(--dashdown-shadow-raised, 0 4px 12px rgb(0 0 0 / 0.12));
+  padding: 0.25rem;
+}
+
+.dashdown-combobox-option {
+  padding: 0.375rem 0.625rem;
+  border-radius: calc(var(--dashdown-radius-control) - 0.1875rem);
+  font-size: 0.875rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashdown-combobox-option:hover,
+.dashdown-combobox-option.is-active {
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+
+.dashdown-combobox-option.is-selected {
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  font-weight: 600;
+}
+
+.dashdown-combobox-empty {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+
+/* Multi-select: removable chips sit inline before the search input, which
+   shrinks to share the row. */
+.dashdown-combobox-control.dashdown-combobox-multi {
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  max-width: 22rem;
+}
+
+.dashdown-combobox-multi .dashdown-combobox-input {
+  width: auto;
+  flex: 1 1 5rem;
+  min-width: 5rem;
+}
+
+.dashdown-combobox-chips {
+  display: contents; /* chips flow directly in the wrapping control row */
+}
+
+.dashdown-combobox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.dashdown-combobox-chip-x {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 0.0625rem;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.dashdown-combobox-chip-x:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+
+/* The per-option checkmark gutter in multi mode. */
+.dashdown-combobox-option.is-multi {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.dashdown-combobox-check {
+  display: inline-block;
+  width: 0.875rem;
+  flex: none;
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  font-weight: 700;
+}
+
 /* === Site search ===========================================
    Full-text search over every page. A pill-shaped input with a floating
    results panel; ranking happens client-side in site_search.js. */

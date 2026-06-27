@@ -888,6 +888,58 @@ def _expand_in_list(value: str) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in items)
 
 
+_OPTIONS_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DEFAULT_OPTIONS_LIMIT = 50
+MAX_OPTIONS_LIMIT = 200
+
+
+def build_options_sql(
+    inner_sql: str,
+    column: str,
+    search: str = "",
+    limit: int = DEFAULT_OPTIONS_LIMIT,
+) -> str:
+    """Wrap a query's SQL into a DISTINCT-values lookup for a ``<Combobox>``.
+
+    This is the **only** new SQL surface the searchable filter adds, so it stays
+    injection-safe by the same rules as :func:`_substitute_params`:
+
+    - ``column`` must be a bare identifier (``^[A-Za-z_][A-Za-z0-9_]*$``) — anything
+      else raises ``ValueError``, so it can't smuggle SQL — and is double-quoted in
+      the output.
+    - ``search`` is embedded as a single-quoted string literal with ``'`` doubled
+      (``'`` → ``''``), exactly like a quoted ``${param}``; it can only ever be data,
+      never code.
+    - ``inner_sql`` is the page query *after* ``_substitute_params`` has already run,
+      wrapped verbatim as a subquery (trailing ``;`` stripped so the wrap is valid).
+
+    Selects up to ``limit`` (clamped to ``MAX_OPTIONS_LIMIT``) distinct, non-null
+    values of the column, optionally narrowed by a case-insensitive substring match.
+    SQL connectors only — the wrap is meaningless for a non-SQL backend (e.g. DAX).
+    """
+    if not _OPTIONS_COLUMN_RE.match(column or ""):
+        raise ValueError(f"invalid column name for options: {column!r}")
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        n = DEFAULT_OPTIONS_LIMIT
+    n = max(1, min(n, MAX_OPTIONS_LIMIT))
+
+    col = f'"{column}"'
+    inner = inner_sql.strip().rstrip(";").strip()
+    where = [f"{col} IS NOT NULL"]
+    if search:
+        esc = search.replace("'", "''")
+        where.append(f"CAST({col} AS VARCHAR) ILIKE '%' || '{esc}' || '%'")
+    return (
+        f"SELECT DISTINCT CAST({col} AS VARCHAR) AS value\n"
+        f"FROM (\n{inner}\n) AS _dd_opt\n"
+        f"WHERE {' AND '.join(where)}\n"
+        f"ORDER BY value\n"
+        f"LIMIT {n}"
+    )
+
+
 def _substitute_params(sql: str, params: dict[str, str]) -> str:
     """Replace ``${name}`` placeholders in SQL with parameter values.
 

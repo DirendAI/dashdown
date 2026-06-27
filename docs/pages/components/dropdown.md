@@ -12,6 +12,14 @@ any query using `${name}` re-runs. Options come from a query column (`data` +
 `column`) or a literal `options` list. Add `multi` for a multi-select that feeds
 an `IN (…)` clause.
 
+```sql
+SELECT month, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${channel}' = '' OR channel = '${channel}'
+GROUP BY month
+ORDER BY month
+```
+
 :::query name=dl_by_channel connector=main
 SELECT month, SUM(downloads) AS downloads
 FROM downloads
@@ -29,6 +37,14 @@ selection" mean "all".
 
 Add `multi` for a multi-select whose chosen values expand into an `IN (…)` list
 (the same empty-means-all guard applies):
+
+```sql
+SELECT month, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${channels}' = '' OR channel IN (${channels})
+GROUP BY month
+ORDER BY month
+```
 
 :::query name=dl_multi connector=main
 SELECT month, SUM(downloads) AS downloads

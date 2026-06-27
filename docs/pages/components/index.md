@@ -38,5 +38,5 @@ for the shared attributes, then the per-type page:
 
 ## Filters & search
 
-- [Dropdown](/components/dropdown) · [Search](/components/search) · [DateRange](/components/date-range) · [Toggle](/components/toggle) · [TimeGrain](/components/time-grain) — see also the [Filters](/filters) concept page.
+- [Dropdown](/components/dropdown) · [Combobox](/components/combobox) · [Search](/components/search) · [DateRange](/components/date-range) · [RangeSlider](/components/range-slider) · [Slider](/components/slider) · [ButtonGroup](/components/button-group) · [Toggle](/components/toggle) · [TimeGrain](/components/time-grain) — see also the [Filters](/filters) concept page.
 - [SiteSearch](/components/site-search) — full-text search across all pages.

@@ -11,6 +11,14 @@ A free-text filter. Its value lands in `filters[name]`; reference it in SQL with
 `${name}`. This is a **query filter** — for searching across *pages*, use
 [SiteSearch](/components/site-search) instead.
 
+```sql
+SELECT channel, SUM(downloads) AS downloads
+FROM downloads
+WHERE '${q}' = '' OR channel ILIKE '%' || '${q}' || '%'
+GROUP BY channel
+ORDER BY downloads DESC
+```
+
 :::query name=channel_like connector=main
 SELECT channel, SUM(downloads) AS downloads
 FROM downloads

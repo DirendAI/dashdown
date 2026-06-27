@@ -10,6 +10,8 @@ import { initAllCharts, resizeAllCharts } from "./components/chart.js";
 import { initAllDropdowns } from "./components/dropdown.js";
 import { initAllSearches } from "./components/search.js";
 import { initAllToggles } from "./components/toggle.js";
+import { initAllButtonGroups } from "./components/button_group.js";
+import { initAllComboboxes } from "./components/combobox.js";
 import { initAllTimeGrains } from "./components/timegrain.js";
 import { initAllValues } from "./components/value.js";
 import { initAllCounters } from "./components/counter.js";
@@ -58,6 +60,12 @@ function initComponents() {
 
   // Process toggle (boolean) filters (URL sync + chip suppression + default seed)
   initAllToggles();
+
+  // Process button-group (segmented single-select) filters
+  initAllButtonGroups();
+
+  // Process combobox (searchable high-cardinality single-select) filters
+  initAllComboboxes();
 
   // Process time-grain pickers (URL sync + chip suppression + default seed)
   initAllTimeGrains();

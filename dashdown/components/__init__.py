@@ -19,6 +19,10 @@ from dashdown.components.builtin import search  # noqa: F401
 from dashdown.components.builtin import toggle  # noqa: F401
 from dashdown.components.builtin import timegrain  # noqa: F401
 from dashdown.components.builtin import date_range  # noqa: F401
+from dashdown.components.builtin import range_slider  # noqa: F401
+from dashdown.components.builtin import slider  # noqa: F401
+from dashdown.components.builtin import button_group  # noqa: F401
+from dashdown.components.builtin import combobox  # noqa: F401
 from dashdown.components.builtin import calendar_heatmap  # noqa: F401
 from dashdown.components.builtin import box_plot  # noqa: F401
 from dashdown.components.builtin import map_chart  # noqa: F401

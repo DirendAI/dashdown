@@ -273,6 +273,45 @@ export async function fetchQueryData(queryName, params = {}, filters = {}) {
 }
 
 /**
+ * Fetch a page of distinct, server-side-searched column values for a <Combobox>.
+ * Hits the options endpoint, which runs a DISTINCT … ILIKE … LIMIT against the
+ * warehouse — so a high-cardinality column never ships whole to the browser.
+ * Resolves the connector + embed token the same way fetchQueryData does, and
+ * threads active filters so options can cascade off other controls.
+ * @param {string} queryName
+ * @param {string} column
+ * @param {string} search - substring to match (server escapes it)
+ * @param {Object} opts - { limit, filters }
+ * @returns {Promise<Array<string>>}
+ */
+export async function fetchQueryOptions(queryName, column, search = "", opts = {}) {
+  const { limit, filters = {} } = opts;
+  const queryDef = readQueryDefs()[queryName];
+  const connectorName = queryDef ? queryDef.connector : "main";
+
+  const params = {
+    ...readRouteParams(),
+    ...filters,
+    _connector: connectorName,
+    _column: column,
+  };
+  if (search) params._search = search;
+  if (limit) params._limit = String(limit);
+  const embedToken = readEmbedToken();
+  if (embedToken) params._embed = embedToken;
+
+  const url =
+    `/_dashdown/api/options/${queryName}?` +
+    new URLSearchParams(params).toString();
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  }
+  const data = await response.json();
+  return Array.isArray(data.options) ? data.options : [];
+}
+
+/**
  * Convert dataset to array of record objects
  * @param {Object} ds - Dataset with columns and rows
  * @returns {Array<Object>} - Array of record objects
