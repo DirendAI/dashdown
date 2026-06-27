@@ -241,6 +241,14 @@ def test_mistral_mirrors_claude_skill_layout(tmp_path: Path) -> None:
     assert (vibe_skill.parent / "../../../AGENTS.md").resolve() == (tmp_path / "AGENTS.md").resolve()
 
 
+def test_copilot_wrapper_location(tmp_path: Path) -> None:
+    # GitHub Copilot reads repo-wide instructions from .github/copilot-instructions.md.
+    _install_agent_docs(tmp_path, refresh=False, targets=["copilot"])
+    instr = tmp_path / ".github" / "copilot-instructions.md"
+    assert instr.is_file()
+    assert "AGENTS.md" in instr.read_text(encoding="utf-8")  # routes into the shared guide
+
+
 def test_target_resolution_precedence(tmp_path: Path) -> None:
     cfg = tmp_path / "dashdown.yaml"
     # Fallback when there's nothing to go on.

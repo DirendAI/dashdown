@@ -5041,6 +5041,7 @@ slow and expensive; a map plus per-topic shards is not.
   | `mistral` | `.vibe/skills/dashdown-authoring/SKILL.md` (same skill layout) |
   | `cursor` | `.cursor/rules/dashdown.mdc` (an always-applied project rule) |
   | `gemini` | `GEMINI.md` |
+  | `copilot` | `.github/copilot-instructions.md` |
 
   Tools that read `AGENTS.md` natively (Codex, …) need no wrapper — the map alone covers
   them. Pick tools with `--target` (below).

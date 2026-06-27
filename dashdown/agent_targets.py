@@ -126,6 +126,16 @@ def _gemini_detect(root: Path) -> bool:
     return (root / ".gemini").is_dir() or (root / "GEMINI.md").is_file()
 
 
+def _copilot_emit(src: Path) -> list[EmittedFile]:
+    return [_pointer(".github/copilot-instructions.md", header="# Dashdown — authoring guide")]
+
+
+def _copilot_detect(root: Path) -> bool:
+    # The specific instructions file, not `.github/` itself — that exists in many repos
+    # (CI, issue templates) without anyone using Copilot custom instructions.
+    return (root / ".github" / "copilot-instructions.md").is_file()
+
+
 def _mistral_emit(src: Path) -> list[EmittedFile]:
     # Mistral's `.vibe/` mirrors `.claude/`'s skill layout, so it ships the same skill.
     return _skill_tree(src, ".vibe")
@@ -144,6 +154,14 @@ register_agent_target(
 )
 register_agent_target(
     AgentTarget("gemini", "Gemini guide (GEMINI.md)", _gemini_emit, _gemini_detect)
+)
+register_agent_target(
+    AgentTarget(
+        "copilot",
+        "GitHub Copilot instructions (.github/copilot-instructions.md)",
+        _copilot_emit,
+        _copilot_detect,
+    )
 )
 register_agent_target(
     AgentTarget(

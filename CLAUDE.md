@@ -445,8 +445,9 @@ only the one shard a task needs.
   `claude` (the real skill, copied `scaffold/claude/` → `.claude/` — the dotted rename happens here,
   on install, since setuptools' `**` glob skips the dot) and `mistral` (the **same** skill tree under
   `.vibe/`, which mirrors `.claude`'s `skills/<name>/SKILL.md` layout — both share `_skill_tree`), plus
-  pointer-stub wrappers `cursor` (`.cursor/rules/dashdown.mdc`) and `gemini` (`GEMINI.md`). Codex et al.
-  need no wrapper — they read the baseline `AGENTS.md`. Add a tool = one `register_agent_target(...)`.
+  pointer-stub wrappers `cursor` (`.cursor/rules/dashdown.mdc`), `gemini` (`GEMINI.md`), and `copilot`
+  (`.github/copilot-instructions.md`). Codex et al. need no wrapper — they read the baseline
+  `AGENTS.md`. Add a tool = one `register_agent_target(...)`.
 - **Target selection (`_resolve_targets` in `cli.py`).** Precedence: explicit `--target a,b` → the
   project's `dashdown.yaml` `agents:` list → auto-detected tools (a marker dir already present) →
   `["claude"]`. `dashdown new --target …` can't detect (fresh dir), so it takes the flag (default
