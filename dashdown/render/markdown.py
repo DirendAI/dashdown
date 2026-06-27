@@ -238,6 +238,107 @@ def _render_table_close(self, tokens, idx, options, env):  # noqa: ANN001
     return self.renderToken(tokens, idx, options, env) + "</div>"
 
 
+# --- PascalCase component blocks -------------------------------------------
+#
+# CommonMark's built-in HTML block (type 7) treats any tag as a block that
+# **terminates at the first blank line**. That is wrong for our component tags:
+# an author who writes
+#
+#     <Grid cols=2>
+#       <Counter ... />
+#
+#       <Counter ... />
+#     </Grid>
+#
+# (a blank line between the children, often with indentation) would have the
+# `<Grid>` block chopped at the blank line — the trailing children get
+# re-parsed as ordinary markdown, so an indented child becomes an escaped
+# `<pre><code>` block (the component is silently lost) and a `</Grid>` lands in
+# its own block, breaking the layout. `render_components` runs *after* this, so
+# by then the damage (escaping) is already done.
+#
+# This block rule runs *before* `html_block` and swallows a whole **balanced**
+# PascalCase component — `<Tag …>…</Tag>` (nesting-aware) or a self-closing
+# `<Tag … />` — into a single raw `html_block` token, blank lines and all. The
+# children stay verbatim for `render_components` to pick up. This matches the
+# behavior CommonMark already gives the *no-blank-line* form, just made robust
+# to internal blank lines and indentation.
+_COMPONENT_LINE_START_RE = re.compile(r"^<[A-Z][A-Za-z0-9_]*")
+# Mirror `render/components.py`'s tag grammar (it also stops at the first `>`,
+# so attribute values may not contain a literal `>` — a shared limitation).
+_COMPONENT_TAG_RE = re.compile(r"<(/?)([A-Z][A-Za-z0-9_]*)\s*([^>]*?)(/?)>", re.DOTALL)
+
+
+def _scan_component_end(src: str, open_match: re.Match[str]) -> int | None:
+    """Return the offset just past a balanced PascalCase component whose opening
+    tag is ``open_match``, or ``None`` if it isn't well-formed (so the caller can
+    fall back to the default rules).
+
+    Self-closing tags (`<Tag … />`) end at their own `>`; paired tags consume
+    through the matching `</Tag>`, counting same-named opens so nesting works.
+    """
+    target = open_match.group(2)
+    if open_match.group(4) == "/":  # self-closing — done at this tag's `>`
+        return open_match.end()
+
+    depth = 1
+    pos = open_match.end()
+    while depth > 0:
+        nxt = _COMPONENT_TAG_RE.search(src, pos)
+        if nxt is None:
+            return None  # unbalanced — let html_block handle it as before
+        if nxt.group(2) == target:
+            if nxt.group(1) == "/":
+                depth -= 1
+            elif nxt.group(4) != "/":
+                depth += 1
+        pos = nxt.end()
+    return pos
+
+
+def _component_block(state, startLine: int, endLine: int, silent: bool) -> bool:  # noqa: ANN001
+    if state.is_code_block(startLine):
+        return False
+    if not state.md.options.get("html", None):
+        return False
+
+    pos = state.bMarks[startLine] + state.tShift[startLine]
+    if state.src[pos : pos + 1] != "<":
+        return False
+    line_end = state.eMarks[startLine]
+    if not _COMPONENT_LINE_START_RE.match(state.src[pos:line_end]):
+        return False
+    # Like HTML block type 7, a component block does not interrupt a paragraph.
+    if silent:
+        return False
+
+    open_match = _COMPONENT_TAG_RE.match(state.src, pos)
+    if open_match is None or open_match.group(1) == "/":
+        return False
+    # Only the *block* form is ours: the opening tag must be alone on its line
+    # (nothing but whitespace after `>`). When content follows on the same line
+    # (`<Ask …>text</Ask>`) it's inline usage — leave it to the paragraph rule
+    # so the inner markdown still renders, exactly as before.
+    if state.src[open_match.end() : line_end].strip():
+        return False
+
+    abs_end = _scan_component_end(state.src, open_match)
+    if abs_end is None:
+        return False  # fall through to the default html_block rule
+
+    # Map the end offset back to the first line that lies past it.
+    next_line = startLine
+    while next_line < endLine and state.eMarks[next_line] < abs_end:
+        next_line += 1
+    next_line += 1
+
+    state.line = next_line
+    token = state.push("html_block", "", 0)
+    token.map = [startLine, next_line]
+    token.content = state.getLines(startLine, next_line, state.blkIndent, True)
+    return True
+
+
 def build_md(queries_sink: list[QuerySpec]) -> MarkdownIt:
     md = MarkdownIt(
         "commonmark",
@@ -248,6 +349,12 @@ def build_md(queries_sink: list[QuerySpec]) -> MarkdownIt:
             # Server-side syntax highlighting for fenced code (Pygments).
             "highlight": highlight_code,
         },
+    )
+    # Treat a balanced PascalCase component (`<Grid>…</Grid>`, `<Counter … />`)
+    # as a single HTML block so internal blank lines / indentation don't chop it
+    # apart before `render_components` sees it (see `_component_block`).
+    md.block.ruler.before(
+        "html_block", "component_block", _component_block, {"alt": ["paragraph"]}
     )
     md.enable("table")
     # Wrap each rendered table in a horizontal-scroll container (see helpers above).

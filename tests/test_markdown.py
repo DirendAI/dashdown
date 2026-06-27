@@ -183,6 +183,88 @@ def test_render_markdown_text_has_no_page_extensions():
     assert "dashdown-code" not in out2
 
 
+# --- PascalCase component blocks survive internal blank lines ---------------
+#
+# CommonMark's HTML block (type 7) ends at the first blank line, which used to
+# chop a `<Grid>` apart when its children were blank-line-separated (and lose an
+# indented child to an escaped code block). `_component_block` swallows the whole
+# balanced component instead. See `render/markdown.py::_component_block`.
+
+
+def test_component_block_keeps_blank_separated_children_intact():
+    html = _html(
+        "<Grid cols=2>\n"
+        "<Counter data={q} column=\"c\" />\n"
+        "\n"
+        "<Counter data={q} column=\"c\" />\n"
+        "</Grid>\n"
+    )
+    # Both children stay as real component tags (not escaped, not code blocks).
+    assert html.count("<Counter ") == 2
+    assert "&lt;Counter" not in html
+    assert "<pre>" not in html
+
+
+def test_component_block_keeps_many_blank_separated_children():
+    # Not limited to two children: the rule consumes through the matching close
+    # tag, so any number of blank-separated children stay intact.
+    children = "\n\n".join("<Counter data={q} column=\"c\" />" for _ in range(6))
+    html = _html(f"<Grid cols=3>\n{children}\n</Grid>\n")
+    assert html.count("<Counter ") == 6
+    assert "&lt;Counter" not in html
+    assert "<pre>" not in html
+
+
+def test_component_block_keeps_indented_blank_separated_children():
+    # An indented child after a blank line previously became a `<pre><code>`
+    # block with the tag escaped — the component was silently lost.
+    html = _html(
+        "<Grid cols=2>\n"
+        "\t<Counter data={q} />\n"
+        "\n"
+        "\t<Counter data={q} />\n"
+        "</Grid>\n"
+    )
+    assert html.count("<Counter ") == 2
+    assert "&lt;Counter" not in html
+    assert "<pre><code>" not in html
+
+
+def test_component_block_handles_nesting():
+    html = _html(
+        "<Grid cols=2>\n"
+        "<Grid cols=1>\n"
+        "<Counter data={q} />\n"
+        "</Grid>\n"
+        "\n"
+        "<Counter data={q} />\n"
+        "</Grid>\n"
+    )
+    assert html.count("<Grid ") == 2
+    assert html.count("</Grid>") == 2
+    assert html.count("<Counter ") == 2
+
+
+def test_self_closing_components_stay_separate_blocks():
+    # Two top-level self-closing components with a blank line between them must
+    # not be merged — each is its own block.
+    html = _html("<Counter data={q} />\n\n<Counter data={q} />\n")
+    assert html.count("<Counter ") == 2
+
+
+def test_inline_component_with_content_still_renders_inner_markdown():
+    # `<Ask …>text</Ask>` on one line is inline usage: the paragraph rule owns
+    # it so the inner markdown still renders. The block rule must not hijack it.
+    html = _html("<Ask data={q}>Which region **leads**?</Ask>\n")
+    assert "<strong>leads</strong>" in html
+
+
+def test_component_examples_inside_fenced_code_are_untouched():
+    # A `<Grid>` shown as a code sample must stay escaped source, not get parsed.
+    html = _html("```markdown\n<Grid cols=2>\n<Counter data={q} />\n</Grid>\n```\n")
+    assert "&lt;Grid cols=2&gt;" in html
+
+
 # --- Mermaid bundle is vendored offline (Stage 14b) -------------------------
 
 def test_mermaid_bundle_is_vendored():
