@@ -29,8 +29,12 @@ const FILTER_SELECTORS = [
   '[data-async-component="dropdown"]',
   '[data-dashdown-dropdown]',
   '[data-async-component="daterange"]',
+  '[data-async-component="rangeslider"]',
+  '[data-async-component="slider"]',
   '[data-async-component="search"]',
   '[data-async-component="toggle"]',
+  '[data-async-component="buttongroup"]',
+  '[data-async-component="combobox"]',
 ];
 
 /** Max controls kept inline before overflow routes to the drawer. */
@@ -51,6 +55,10 @@ function isSearchFilter(el) {
 function filterKeysFor(el) {
   if (el.matches('[data-async-component="daterange"]')) {
     return [el.dataset.startParam, el.dataset.endParam].filter(Boolean);
+  }
+  // A RangeSlider owns its min/max param pair (one control, two keys).
+  if (el.matches('[data-async-component="rangeslider"]')) {
+    return [el.dataset.minParam, el.dataset.maxParam].filter(Boolean);
   }
   if (el.dataset.filterName) return [el.dataset.filterName];
   if (el.dataset.name) return [el.dataset.name];

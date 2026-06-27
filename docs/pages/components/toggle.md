@@ -12,6 +12,13 @@ only X", "include archived", "paid only". It writes a string into the filter
 store under `name`, exactly like the other filters, so your SQL reads it with
 `${name}`.
 
+```sql
+SELECT date, visits
+FROM daily
+WHERE '${busy}' = '' OR visits >= 500
+ORDER BY date
+```
+
 :::query name=daily_traffic connector=main
 SELECT date, visits
 FROM daily
@@ -44,6 +51,14 @@ The default `on_value="true"` / `off_value=""` is the **all-guard** above — of
 shows everything. Because `on_value` / `off_value` are **arbitrary strings**, a
 non-empty `off_value` turns it into a **two-state** filter where both directions
 narrow the data — including a text column that stores something like `Yes`/`No`:
+
+```sql
+SELECT date, visits
+FROM daily
+WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')
+           ELSE weekday NOT IN ('Sat','Sun') END
+ORDER BY date
+```
 
 :::query name=daily_weekend connector=main
 SELECT date, visits

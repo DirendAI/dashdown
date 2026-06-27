@@ -6,6 +6,8 @@ import pytest
 from dashdown.render.pipeline import (
     _substitute_params,
     _expand_in_list,
+    build_options_sql,
+    MAX_OPTIONS_LIMIT,
     MAX_IN_VALUES,
     register_query_def,
     get_query_def,
@@ -262,6 +264,72 @@ class TestInListExpansion:
     def test_expand_helper_empty(self):
         assert _expand_in_list("") == "NULL"
         assert _expand_in_list("  ,  , ") == "NULL"
+
+
+class TestBuildOptionsSql:
+    """The <Combobox> distinct-values wrap — the only new SQL surface the
+    searchable filter adds. Locks its injection-safety (column whitelist +
+    search escaping) and shape."""
+
+    INNER = "SELECT * FROM customers WHERE region = 'East'"
+
+    def test_basic_shape(self):
+        out = build_options_sql(self.INNER, "name")
+        assert 'SELECT DISTINCT CAST("name" AS VARCHAR) AS value' in out
+        assert f"FROM (\n{self.INNER}\n) AS _dd_opt" in out
+        assert '"name" IS NOT NULL' in out
+        assert "ORDER BY value" in out
+        assert out.rstrip().endswith("LIMIT 50")  # default
+
+    def test_search_is_escaped_and_added(self):
+        out = build_options_sql(self.INNER, "name", "Smith")
+        assert "ILIKE '%' || 'Smith' || '%'" in out
+
+    def test_search_single_quote_is_doubled(self):
+        # A crafted search term can only ever be a quoted string literal.
+        out = build_options_sql(self.INNER, "name", "O'Reilly")
+        assert "'O''Reilly'" in out
+        # The raw, unescaped single quote never appears as a lone literal break.
+        assert "'O'Reilly'" not in out
+
+    def test_search_injection_attempt_is_inert(self):
+        out = build_options_sql(self.INNER, "name", "x' OR '1'='1")
+        # Doubled quotes neutralize the break-out attempt.
+        assert "'x'' OR ''1''=''1'" in out
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            'name"; DROP TABLE users; --',
+            "name OR 1=1",
+            "name; DELETE",
+            "(SELECT 1)",
+            "a-b",
+            "a b",
+            "",
+            "1name",
+            "name)",
+        ],
+    )
+    def test_invalid_column_raises(self, bad):
+        with pytest.raises(ValueError):
+            build_options_sql(self.INNER, bad)
+
+    @pytest.mark.parametrize("good", ["name", "_id", "Region", "col_2", "a"])
+    def test_valid_columns_accepted(self, good):
+        out = build_options_sql(self.INNER, good)
+        assert f'"{good}"' in out
+
+    def test_limit_is_clamped(self):
+        assert build_options_sql(self.INNER, "name", limit=99999).rstrip().endswith(
+            f"LIMIT {MAX_OPTIONS_LIMIT}"
+        )
+        assert build_options_sql(self.INNER, "name", limit=0).rstrip().endswith("LIMIT 1")
+        assert build_options_sql(self.INNER, "name", limit="bad").rstrip().endswith("LIMIT 50")
+
+    def test_trailing_semicolon_stripped(self):
+        out = build_options_sql("SELECT * FROM t;", "name")
+        assert "FROM (\nSELECT * FROM t\n) AS _dd_opt" in out
 
 
 class TestQueryDefCache:

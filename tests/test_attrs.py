@@ -236,6 +236,40 @@ class TestEdgeCases:
         result = parse_attrs(_attrs("data={query123}"))
         assert result == {"data": DataRef("query123")}
 
+
+class TestArrayLiteral:
+    """`key={[...]}` parses to a Python list (not a DataRef)."""
+
+    def test_int_list(self):
+        result = parse_attrs(_attrs("default={[0, 10000]}"))
+        assert result == {"default": [0, 10000]}
+
+    def test_no_spaces(self):
+        result = parse_attrs(_attrs("default={[1,2,3]}"))
+        assert result == {"default": [1, 2, 3]}
+
+    def test_float_and_mixed(self):
+        result = parse_attrs(_attrs("range={[0.5, 2.5]}"))
+        assert result == {"range": [0.5, 2.5]}
+
+    def test_string_list_json(self):
+        result = parse_attrs(_attrs('items={["a", "b"]}'))
+        assert result == {"items": ["a", "b"]}
+
+    def test_single_quoted_items_fall_back_to_split(self):
+        # Not valid JSON; the comma-split fallback coerces each item.
+        result = parse_attrs(_attrs("items={['a', 'b']}"))
+        assert result == {"items": ["a", "b"]}
+
+    def test_empty_list(self):
+        result = parse_attrs(_attrs("items={[]}"))
+        assert result == {"items": []}
+
+    def test_list_does_not_shadow_data_ref(self):
+        # A bare identifier in braces is still a DataRef, not a list.
+        result = parse_attrs(_attrs("data={my_query}"))
+        assert result == {"data": DataRef("my_query")}
+
     def test_zero_value(self):
         """Zero is parsed correctly."""
         result = parse_attrs(_attrs("count=0"))

@@ -21,8 +21,12 @@ Pick a channel above — the chart re-queries. The `'${channel}' = ''` guard mak
 | Component     | Purpose                                                   |
 | ------------- | -------------------------------------------------------- |
 | `<Dropdown>`  | Single- or multi-select (`multi`). Multi feeds `IN (…)`. |
+| `<Combobox>`  | Searchable single-select for high-cardinality columns (server-side search). See [Combobox](/components/combobox). |
 | `<Search>`    | A free-text filter value.                                |
 | `<DateRange>` | A start/end date pair with presets.                      |
+| `<RangeSlider>` | A numeric low/high range, dual-handle slider. See [RangeSlider](/components/range-slider). |
+| `<Slider>`    | A single-value numeric threshold, one-handle slider. See [Slider](/components/slider). |
+| `<ButtonGroup>` | A single-select segmented control for a few fixed options. See [ButtonGroup](/components/button-group). |
 | `<Toggle>`    | A boolean on/off switch — "show only X". See [Toggle](/components/toggle). |
 
 :::note
@@ -51,6 +55,9 @@ To gather page-wide filters into a single row at the top instead, add **`bar`**:
 ```markdown
 <DateRange name="period" bar />
 <Dropdown name="region" data={regions} column="region" bar />
+<RangeSlider name="price" min={0} max={1000} bar />
+<ButtonGroup name="tier" options="High,Mid,Budget" bar />
+<Toggle name="paid" label="Paid only" bar />
 <Search name="q" bar />
 ```
 

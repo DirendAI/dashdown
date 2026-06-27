@@ -51,7 +51,10 @@ from dashdown.render.pipeline import (
     get_cached_result,
     cache_result,
     serialize_result,
+    serialize_value,
+    build_options_sql,
     DEFAULT_CACHE_TTL,
+    DEFAULT_OPTIONS_LIMIT,
 )
 from dashdown.python_query import run_python_query
 from dashdown.streaming import DISCONNECT, hub as stream_hub, watch_disconnect
@@ -67,6 +70,7 @@ _STATIC_DIR = _PKG_DIR / "static"
 _AUTH_EXEMPT_PATHS = frozenset({"/_dashdown/health"})
 
 _DATA_API_PREFIX = "/_dashdown/api/data/"
+_OPTIONS_API_PREFIX = "/_dashdown/api/options/"
 _ASK_API_PREFIX = "/_dashdown/api/ask/"
 
 
@@ -132,6 +136,11 @@ def _embed_authorizes(proj: "Project", request: Request) -> bool:
     # Data API: the requested query must be in the token's scope.
     if path.startswith(_DATA_API_PREFIX):
         name = path[len(_DATA_API_PREFIX):]
+        connector = str(request.query_params.get("_connector", "main"))
+        return token_allows_query(payload, connector, name)
+    # Options API (Combobox): scoped to the same query it reads from.
+    if path.startswith(_OPTIONS_API_PREFIX):
+        name = path[len(_OPTIONS_API_PREFIX):]
         connector = str(request.query_params.get("_connector", "main"))
         return token_allows_query(payload, connector, name)
     # Ask API: resolve the opaque id to its underlying query, then scope-check.
@@ -406,6 +415,92 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 status_code=500,
                 detail=f"Query execution failed: {type(e).__name__}: {e}"
             )
+
+    @app.get("/_dashdown/api/options/{query_name}")
+    async def get_query_options(query_name: str, request: Request):
+        """Distinct, server-side-searchable column values for a ``<Combobox>``.
+
+        Wraps the named query's SQL (the same one a chart/table reads) into a
+        DISTINCT lookup (`build_options_sql`) so a high-cardinality column is
+        searched **in the warehouse** with a ``LIMIT`` rather than shipping every
+        value to the browser — the gap a plain ``<Dropdown>`` can't fill. The
+        search term and column are the only new inputs; both go through the same
+        injection-safe rules as ``${param}`` substitution (`build_options_sql`).
+        SQL connectors only.
+
+        ``_column`` (required), ``_search`` (optional substring), ``_limit``
+        (optional) are read from the query string; every other non-``_`` param is
+        an active filter value substituted into the wrapped query (so options can
+        cascade off other filters), exactly like the data API.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+        from urllib.parse import unquote
+
+        proj: Project = request.app.state.project
+        connector_name = str(request.query_params.get("_connector", "main"))
+        column = str(request.query_params.get("_column", ""))
+        search = unquote(str(request.query_params.get("_search", "")))
+        try:
+            limit = int(request.query_params.get("_limit", DEFAULT_OPTIONS_LIMIT))
+        except (TypeError, ValueError):
+            limit = DEFAULT_OPTIONS_LIMIT
+
+        # SQL-only: a Python query has no SQL body to wrap as a subquery.
+        if get_python_query_def(query_name, connector_name) is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Combobox options are not supported for Python queries",
+            )
+
+        query_def = get_query_def(query_name, connector_name)
+        if query_def is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Query '{query_name}' not found for connector '{connector_name}'",
+            )
+
+        connector = proj.connectors.get(connector_name)
+        if connector is None:
+            raise HTTPException(
+                status_code=400, detail=f"Connector '{connector_name}' not found"
+            )
+
+        sql, default_params, _ = query_def
+
+        # Active filters (so options can cascade off other controls), merged over
+        # the query's defaults — same precedence as the data API.
+        filter_params = {}
+        for key, value in request.query_params.items():
+            if key.startswith("_"):
+                continue
+            filter_params[key] = unquote(str(value))
+        all_params = {**default_params, **filter_params}
+
+        inner_sql = _substitute_params(sql, all_params)
+        try:
+            options_sql = build_options_sql(inner_sql, column, search, limit)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        try:
+            result = await asyncio.to_thread(connector.query, options_sql)
+        except Exception as e:
+            log.exception("Options query failed for %s: %s", query_name, e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Options query failed: {type(e).__name__}: {e}",
+            )
+
+        values = [
+            serialize_value(row[0])
+            for row in result.rows
+            if row and row[0] is not None
+        ]
+        return JSONResponse(
+            {"options": values, "query": query_name},
+            headers={"Cache-Control": "max-age=30"},
+        )
 
     @app.websocket("/_dashdown/ws/data/{query_name}")
     async def stream_query_data(websocket: WebSocket, query_name: str):
