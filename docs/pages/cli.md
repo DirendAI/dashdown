@@ -56,8 +56,8 @@ full project reload (connectors are rebuilt). See [Getting started](getting-star
 ## new
 
 Scaffold a new project directory — a `dashdown.yaml`, `sources.yaml`, a sample
-page and data, and a tool-agnostic `AGENTS.md` authoring guide (plus a Claude Code
-skill) so a coding agent opening the project knows the platform.
+page and data, and a tool-agnostic `AGENTS.md` authoring guide (plus a per-tool skill)
+so a coding agent opening the project knows the platform.
 
 ```bash
 dashdown new my-dashboard
@@ -65,10 +65,20 @@ cd my-dashboard
 dashdown serve .
 ```
 
+`--target` picks which coding agents to set up a wrapper for (default `claude`); the
+choice is recorded in `dashdown.yaml` as `agents:`, so later `dashdown skill` runs keep
+them in sync. `AGENTS.md` + `references/` are always installed regardless.
+
+```bash
+dashdown new my-dashboard --target claude,cursor   # set up both wrappers
+```
+
+See [Coding agents](/ai/coding-agents) for the supported tools.
+
 ## skill
 
 Install or update the bundled coding-agent guide (`AGENTS.md` + the `references/`
-shards + the Claude Code authoring skill) in an **existing** project. The guide is
+shards + a per-tool authoring skill) in an **existing** project. The guide is
 versioned with the framework, so a project scaffolded on an older release pulls the
 current one without re-scaffolding. See [Coding agents](/ai/coding-agents) for the full
 story.
@@ -77,7 +87,12 @@ story.
 dashdown skill                 # fill in anything missing (keeps your local edits)
 dashdown skill --refresh       # overwrite to this version's guide (prunes stale shards)
 dashdown skill -p ./dashboard  # target another project directory
+dashdown skill --target cursor # also/instead install the Cursor wrapper
 ```
+
+Which tools it installs for resolves by precedence: an explicit `--target a,b` → the
+project's `dashdown.yaml` `agents:` list → tools it auto-detects (a marker dir like
+`.claude/` or `.cursor/` already present) → `claude`.
 
 ## check
 

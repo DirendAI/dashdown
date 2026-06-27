@@ -161,10 +161,23 @@ slow and expensive; a map plus per-topic shards is not.
   agent opens only the one shard its task needs. `references/catalog.md` is special: it
   is introspected straight from the component/connector registries (the same data
   `dashdown components` prints), so it can't drift.
-- **`.claude/skills/dashdown-authoring/SKILL.md`** — a thin Claude Code *router*: a
-  decision tree ("editing X → read `references/Y`, verify with `dashdown Z`") plus task
-  playbooks (add-a-chart, add-a-connector, define-a-metric, debug-no-data, …). It links
-  the map and shards rather than duplicating them.
+- **A per-tool *wrapper*** — a thin *router* into the map and shards: a decision tree
+  ("editing X → read `references/Y`, verify with `dashdown Z`") plus task playbooks
+  (add-a-chart, add-a-connector, define-a-metric, debug-no-data, …). It links the map
+  and shards rather than duplicating them. The map and shards above are tool-agnostic and
+  always installed; only this wrapper differs per tool, in the format and location each
+  expects:
+
+  | `--target` | Wrapper |
+  |---|---|
+  | `claude` | `.claude/skills/dashdown-authoring/SKILL.md` (a Claude Code skill) |
+  | `mistral` | `.vibe/skills/dashdown-authoring/SKILL.md` (same skill layout) |
+  | `cursor` | `.cursor/rules/dashdown.mdc` (an always-applied project rule) |
+  | `gemini` | `GEMINI.md` |
+  | `copilot` | `.github/copilot-instructions.md` |
+
+  Tools that read `AGENTS.md` natively (Codex, …) need no wrapper — the map alone covers
+  them. Pick tools with `--target` (below).
 
 The whole tree is generated from this documentation site by release tooling, so it
 stays in sync with what you're reading now.
@@ -178,12 +191,35 @@ pulls the current guide without re-scaffolding:
 dashdown skill                 # fill in anything missing (keeps your local edits)
 dashdown skill --refresh       # overwrite to this version's guide (prunes stale shards)
 dashdown skill -p ./dashboard  # target another project directory
+dashdown skill --target cursor # also/instead install the Cursor wrapper
 ```
 
 Without `--refresh`, existing files are left untouched, so your own edits survive an
 install that just fills in missing pieces. With `--refresh`, every file is overwritten
 to the current version and any `references/*.md` left behind by a renamed topic is
 removed.
+
+### Choosing which tools
+
+You rarely need `--target` by hand. Which wrappers get installed resolves by precedence:
+
+1. an explicit **`--target a,b`** on the command,
+2. else the project's **`dashdown.yaml` `agents:`** list,
+3. else any tool it **auto-detects** (a marker dir like `.claude/` or `.cursor/` already
+   in the project),
+4. else **`claude`**.
+
+`dashdown new --target …` is where the choice is usually made: a fresh directory has
+nothing to detect, so `new` takes the flag (default `claude`) and **records it** into the
+scaffolded `dashdown.yaml`:
+
+```yaml
+title: My Analytics
+agents: [claude, cursor]   # coding-agent guides to keep in sync via `dashdown skill`
+```
+
+From then on, a plain `dashdown skill` in that project honors the list — so a team picks
+its tools once at scaffold time and every later refresh keeps them in sync.
 
 ## The CLI loop — facts from the tool, not from memory
 

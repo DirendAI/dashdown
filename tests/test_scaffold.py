@@ -13,9 +13,10 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from dashdown.cli import _install_agent_docs, _scaffold, app
+from dashdown.cli import _install_agent_docs, _resolve_targets, _scaffold, app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 runner = CliRunner()
@@ -197,6 +198,94 @@ def test_skill_command_runs(tmp_path: Path) -> None:
     res2 = runner.invoke(app, ["skill", "-p", str(tmp_path)])
     assert res2.exit_code == 0
     assert "up to date" in res2.output.lower() or "Kept" in res2.output
+
+
+# --- Multi-tool targets (--target / dashdown.yaml `agents:`) ------------------------------
+
+
+def test_scaffold_seeds_agents_default_claude(tmp_path: Path) -> None:
+    # `dashdown new` with no flag records its default so a later `dashdown skill` honors it.
+    _scaffold(tmp_path)
+    cfg = (tmp_path / "dashdown.yaml").read_text(encoding="utf-8")
+    assert "agents: [claude]" in cfg
+
+
+def test_baseline_always_installed_regardless_of_target(tmp_path: Path) -> None:
+    # The tool-agnostic content ships for every target; only the wrapper varies.
+    written, _ = _install_agent_docs(tmp_path, refresh=False, targets=["cursor"])
+    assert "AGENTS.md" in written
+    assert any(w.startswith("references/") for w in written)
+    assert (tmp_path / "references" / "components.md").is_file()
+
+
+def test_explicit_target_installs_only_that_wrapper(tmp_path: Path) -> None:
+    (tmp_path / "dashdown.yaml").write_text("title: X\n", encoding="utf-8")
+    _install_agent_docs(tmp_path, refresh=False, targets=["cursor"])
+    rule = tmp_path / ".cursor" / "rules" / "dashdown.mdc"
+    assert rule.is_file()
+    assert not (tmp_path / ".claude").exists()  # claude not requested
+    body = rule.read_text(encoding="utf-8")
+    assert "alwaysApply: true" in body  # a real Cursor rule …
+    assert "AGENTS.md" in body  # … that routes into the shared guide
+
+
+def test_mistral_mirrors_claude_skill_layout(tmp_path: Path) -> None:
+    # `.vibe/` uses the same `skills/<name>/SKILL.md` layout as `.claude/`, so it ships the
+    # identical skill — including the `../../../AGENTS.md` links, which resolve to the project
+    # root from either location (same depth).
+    _install_agent_docs(tmp_path, refresh=False, targets=["claude", "mistral"])
+    claude_skill = tmp_path / ".claude" / "skills" / "dashdown-authoring" / "SKILL.md"
+    vibe_skill = tmp_path / ".vibe" / "skills" / "dashdown-authoring" / "SKILL.md"
+    assert claude_skill.is_file() and vibe_skill.is_file()
+    assert vibe_skill.read_text(encoding="utf-8") == claude_skill.read_text(encoding="utf-8")
+    assert (vibe_skill.parent / "../../../AGENTS.md").resolve() == (tmp_path / "AGENTS.md").resolve()
+
+
+def test_copilot_wrapper_location(tmp_path: Path) -> None:
+    # GitHub Copilot reads repo-wide instructions from .github/copilot-instructions.md.
+    _install_agent_docs(tmp_path, refresh=False, targets=["copilot"])
+    instr = tmp_path / ".github" / "copilot-instructions.md"
+    assert instr.is_file()
+    assert "AGENTS.md" in instr.read_text(encoding="utf-8")  # routes into the shared guide
+
+
+def test_target_resolution_precedence(tmp_path: Path) -> None:
+    cfg = tmp_path / "dashdown.yaml"
+    # Fallback when there's nothing to go on.
+    assert _resolve_targets(tmp_path, None) == ["claude"]
+    # dashdown.yaml `agents:` drives it …
+    cfg.write_text("title: X\nagents: [cursor, gemini]\n", encoding="utf-8")
+    assert _resolve_targets(tmp_path, None) == ["cursor", "gemini"]
+    # … an explicit --target overrides the config …
+    assert _resolve_targets(tmp_path, ["gemini"]) == ["gemini"]
+    # … and with neither, an existing marker dir is auto-detected.
+    cfg.write_text("title: X\n", encoding="utf-8")
+    (tmp_path / ".cursor").mkdir()
+    assert _resolve_targets(tmp_path, None) == ["cursor"]
+
+
+def test_unknown_target_errors(tmp_path: Path) -> None:
+    with pytest.raises(typer.BadParameter):
+        _resolve_targets(tmp_path, ["bogus"])
+
+
+def test_new_target_installs_multiple_and_seeds_yaml(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    res = runner.invoke(app, ["new", str(proj), "--target", "claude,cursor"])
+    assert res.exit_code == 0, res.output
+    assert (proj / ".claude" / "skills" / "dashdown-authoring" / "SKILL.md").is_file()
+    assert (proj / ".cursor" / "rules" / "dashdown.mdc").is_file()
+    assert (proj / "AGENTS.md").is_file()  # baseline always present
+    # The choice is recorded so `dashdown skill` later keeps both in sync.
+    assert "agents: [claude, cursor]" in (proj / "dashdown.yaml").read_text(encoding="utf-8")
+
+
+def test_skill_command_honors_yaml_agents(tmp_path: Path) -> None:
+    (tmp_path / "dashdown.yaml").write_text("title: X\nagents: [cursor]\n", encoding="utf-8")
+    res = runner.invoke(app, ["skill", "-p", str(tmp_path)])
+    assert res.exit_code == 0, res.output
+    assert (tmp_path / ".cursor" / "rules" / "dashdown.mdc").is_file()
+    assert not (tmp_path / ".claude").exists()
 
 
 # --- llms.txt / llms-full.txt (published on the docs static build) -----------------------
