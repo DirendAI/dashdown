@@ -1942,6 +1942,21 @@ body {
   max-width: 100% !important;
 }
 
+/* A <video> can't play on paper, so its native control chrome (play button +
+   scrubber) just reads as a broken player overlaid on the poster. Hide the
+   controls so the poster frame prints as a clean image, and keep the element
+   whole on a page. (Chromium-only pseudo-elements — which is exactly the engine
+   for both PDF paths: Playwright headless print and the static-build
+   `window.print()` fallback.) */
+.dashdown-print video::-webkit-media-controls,
+.dashdown-print video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+.dashdown-print video {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 /* Gradient cover page (injected by print.js). Fills one printed page, palette
    colors via the --dashdown-cover-* custom props the script sets per page. */
 .dashdown-print-cover {
@@ -1974,14 +1989,19 @@ body {
   opacity: 0.85;
   margin-bottom: 1.5rem;
 }
-.dashdown-print-cover-title {
-  font-size: 4rem;
+/* Scoped under `.dashdown-print` (specificity 0,0,2,0) AND marked `!important`
+   so it beats the general `.dashdown-main h1` rule — that one is `!important`
+   too (so plain specificity can't win it) and would otherwise force the cover
+   title to the small, dark, semibold page-heading style, leaving it nearly
+   invisible on the gradient. */
+.dashdown-print .dashdown-print-cover-title {
+  font-size: 4rem !important;
   line-height: 1.08;
-  font-weight: 800;
-  margin: 0 0 1.75rem;
+  font-weight: 800 !important;
+  margin: 0 0 1.75rem !important;
   padding: 0;
   border: 0;
-  color: #fff;
+  color: #fff !important;
 }
 .dashdown-print-cover-date {
   font-size: 1.375rem;
