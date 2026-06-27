@@ -7,7 +7,7 @@ dashboard. Do not edit by hand — regenerate with `python tooling/gen-agent-doc
 against the `docs/` project.
 
 Dashdown renders Markdown files (with embedded SQL and `<Component />` tags) as
-interactive analytics dashboards: no build step, no JS framework, no npm. You write
+interactive analytics dashboards: no JavaScript to write, no frontend toolchain. You write
 `.md` under `pages/`, point the CLI at the folder (`dashdown serve .`), and get a
 live dashboard.
 

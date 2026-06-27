@@ -16,7 +16,7 @@ Your browser can't play this video — <a href="/assets/dashdown-demo.mp4">downl
 # Dashdown Documentation
 
 **Dashdown turns Markdown files — with embedded SQL and component tags — into
-interactive analytics dashboards.** No build step, no JS framework, no npm. You
+interactive analytics dashboards.** No JavaScript to write, no frontend toolchain. You
 write `.md`, point the CLI at the folder, and get a live dashboard.
 
 > These docs are *themselves* a Dashdown project. Every page here is a

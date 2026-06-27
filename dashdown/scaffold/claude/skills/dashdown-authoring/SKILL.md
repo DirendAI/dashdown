@@ -7,7 +7,7 @@ description: Author this Dashdown analytics dashboard — pages, embedded SQL qu
 
 This project is a **Dashdown** dashboard: Markdown files under `pages/` with embedded SQL
 (`:::query` blocks) and `<Component />` tags render to an interactive analytics app — no
-build step, no JS framework, no npm.
+JavaScript to write, no frontend toolchain.
 
 ## Start here — don't read everything
 

@@ -24,7 +24,7 @@
 </p>
 
 Write a `.md` file with some SQL and a few component tags. Dashdown serves it as a
-live, interactive dashboard — no build step, no JavaScript framework, no npm.
+live, interactive dashboard — no JavaScript to write, no frontend toolchain.
 
 ```markdown
 :::query name=monthly_sales connector=main
