@@ -73,6 +73,87 @@ reports `N/M chart(s) drew`, exits non-zero if any stayed blank or errored — y
 **Ship a build.** `dashdown build . --out dist` (static export — queries run once at build) or
 `dashdown pdf .` (presentation PDF; needs the `[pdf]` extra). See [exporting](../../../references/exporting.md).
 
+## A complete page, end to end (copy this shape)
+
+A polished page: a filter bar on top, a KPI row, sections of charts each with its own `title=`, then a
+table. Controls marked `bar` **collect into the page's filter bar automatically — so there is no
+"Filters" heading to add**. Queries live in `queries/*.sql` (referenced by name) or inline `:::query` at
+the top; either way the query text renders nothing itself.
+
+````markdown
+---
+title: Sales
+---
+
+<DateRange name="period" start_param="date_start" end_param="date_end" bar />
+<Dropdown name="region" data={regions} column="region" label="Region" bar />
+
+## Key metrics
+
+<Grid cols=3>
+<Counter data={kpis} column="revenue" format="currency" currency="USD" decimals=0 label="Revenue" />
+<Counter data={kpis} column="orders"  format="number"   decimals=0 label="Orders" />
+<Counter data={kpis} column="aov"     format="currency" currency="USD" decimals=2 label="Avg order" />
+</Grid>
+
+## Revenue over time
+
+<LineChart data={revenue_by_month} x="month" y="revenue" title="Monthly revenue" format="currency" />
+
+## By region
+
+<Grid cols=2>
+<BarChart data={by_region} x="region" y="revenue" title="Revenue by region" format="currency" />
+<PieChart data={by_region} x="region" y="revenue" title="Share by region" />
+</Grid>
+
+<Table data={recent_orders} title="Recent orders" format="amount=currency, ordered_at=date" />
+````
+
+Make each filtered query guard its filter so "no selection" means "all":
+`WHERE ('${region}' = '' OR region = '${region}') AND ('${date_start}' = '' OR day >= '${date_start}')`.
+
+## Gotchas that cost iterations (read this first)
+
+The mistakes coding agents make most on Dashdown — avoid them up front:
+
+- **A filter's `name=` IS the `${param}` — not the column.** `<Dropdown name="region" column="region">`
+  writes `${region}`; the control's `name` must exactly equal the placeholder your SQL guards on. The
+  `column=` only says which column to list values from — it does **not** name the param. So
+  `<Dropdown name="weather_filter" column="weather">` writes `${weather_filter}`, and the SQL must read
+  `('${weather_filter}' = '' OR weather = '${weather_filter}')` — **not** `${weather}`. A name/param
+  mismatch makes the filter silently do nothing (the page still renders, so `check` won't catch it).
+- **`format=` is an enum, not a format string.** It takes one of `number | currency | percent | date |
+  datetime`, tuned by separate attrs `decimals=`, `prefix=`, `suffix=`, `currency=`, `date_format=`,
+  `locale=`. It is **not** a Python/printf pattern — `format="{:,.1f}°C"` is silently ignored and the raw
+  number shows. For a KPI in °C or mm, write the unit as a `suffix`:
+  `<Counter data={k} column="avg_high" format="number" decimals=1 suffix="°C" label="Avg high" />`.
+  Project-wide defaults go in a **`format:`** block in `dashdown.yaml` (`locale` / `currency` /
+  `date_format`) — there is **no** `theme:` / `theme.formats` config. See [formatting](../../../references/formatting.md).
+- **Default to NO unit suffix — never guess one.** A raw numeric column (`wind`, `speed`, `pressure`, a
+  count, an amount) carries whatever unit the source uses, and the CSV almost never states it — so your
+  guess is frequently wrong. **Concretely: a weather `wind` column is m/s, not km/h** (labeling it `km/h`
+  overstates it ~3.6×); a `pressure` is often hPa; money may not be USD. Unless the unit is written in the
+  brief or data, or you converted it yourself in SQL (`ROUND(MAX(wind) * 3.6, 1) AS wind_kmh`), leave the
+  `suffix` **off** (`label="Max wind"`, not `suffix="km/h"`). A `suffix` is only a label — it never scales
+  the value (same for `$`/`%`).
+- **Attribute names are exact-match — a wrong one is silently ignored, not an error.** A misspelled or
+  non-existent attr is dropped with no warning, and `dashdown check` won't catch it: `page_size` (the real
+  attr is **`page-size`**), or `include_all` / `all_label` on a `<Dropdown>` (those are `<ButtonGroup>`'s), or
+  `series="A,B"` used as a *rename* for a multi-metric `y` (it isn't — `series` groups by a column). Confirm
+  every attr against `dashdown components` / [catalog](../../../references/catalog.md). (`<Dropdown>` already
+  emits an "All" option for single-select; empty value = all — you don't add one.)
+- **No Markdown headings or prose inside a `<Grid>` (or any component tag).** A `### Title` sitting
+  between `<Grid …>` and its child components renders as **literal text**, not a heading. Put the section
+  heading on its own line *above* the grid, give each chart its own `title="…"`, and keep a grid's children
+  to components — one per line, blank-line-separated.
+- **`:::query` blocks are invisible.** Their SQL is collected and stripped — they render nothing on the
+  page. Never give them a heading of their own (any heading — "Queries", "Query Definitions", …) — it just
+  leaves a dangling empty section. Put the blocks at the very top of the page (above the first heading) or
+  in `queries/*.sql`, and let the components below display the data.
+- **A `bar` filter lifts into the page's filter bar**, so don't also add a redundant `## Filters` heading —
+  the control won't sit under it.
+
 ## The CLI loop
 
 ```bash
