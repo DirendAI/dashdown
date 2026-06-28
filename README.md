@@ -167,6 +167,19 @@ or ship it as a pip-installable plugin.
 
 ---
 
+## Examples
+
+Real, runnable dashboards built with Dashdown — clone one and `dashdown serve` it:
+
+- **[dashdown-csv-demo](https://github.com/DirendAI/dashdown-csv-demo)** — a
+  dashboard over plain CSV files, the quickest way to see the basics.
+- **[dashdown-excel-demo](https://github.com/DirendAI/dashdown-excel-demo)** —
+  charts and tables backed by an Excel workbook.
+- **[dashdown-world-cup-demo](https://github.com/DirendAI/dashdown-world-cup-demo)** —
+  a richer, multi-page dashboard exploring World Cup data.
+
+---
+
 ## Documentation
 
 📖 **Read them online at [direndai.github.io/dashdown](https://direndai.github.io/dashdown/)** — itself a Dashdown site, built and deployed from `docs/` by CI.
