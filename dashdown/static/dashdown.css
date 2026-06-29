@@ -790,6 +790,10 @@ body {
   color: var(--fallback-bc, oklch(var(--bc) / 1));
   background: var(--fallback-b2, oklch(var(--b2) / 1));
 }
+/* `display: inline-flex` above would otherwise beat the UA `[hidden]` rule, so
+   the button stays visible (and inert) on static builds where ask.js never
+   reveals it. Honor `hidden` explicitly. */
+.dashdown-ask-refresh[hidden] { display: none; }
 .dashdown-ask-refresh svg { width: 0.875rem; height: 0.875rem; }
 /* Model attribution: a muted footer line naming the model that wrote the answer. */
 .dashdown-ask-model {
