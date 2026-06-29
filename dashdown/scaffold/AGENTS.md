@@ -79,6 +79,7 @@ Open the one shard your task needs:
 - [Catalog](references/catalog.md) — every component's attributes + every connector's config keys, introspected from the registries (the `dashdown components` data; **facts, not prose**)
 - [Getting started](references/getting-started.md) — Dashdown is published to PyPI as the `dashdown-md` package, with a CLI entry point named `dashdown`
 - [Installation](references/installation.md) — Dashdown is published to PyPI as **`dashdown-md`**, and the CLI it installs is the command **`dashdown`**
+- [Examples](references/examples.md) — Real, end-to-end dashboards built with Dashdown
 - [Writing pages](references/pages.md) — Every file under `pages/` is a route
 - [Configuration](references/configuration.md) — Every project has a `dashdown.yaml` at its root — the single config file for the whole dashboard
 - [Connectors](references/connectors.md) — Connectors are declared in `sources.yaml` and loaded **lazily** the first time a query asks for that type

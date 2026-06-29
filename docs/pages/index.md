@@ -76,6 +76,7 @@ Point an agent straight at a task:
 
 - **[Installation](/installation)** — install the CLI globally, `uvx`, extras, PATH.
 - **[Getting started](/getting-started)** — install, scaffold, run.
+- **[Examples](/examples)** — real demo dashboards, live and cloneable.
 - **[Configuration](/configuration)** — every `dashdown.yaml` block in one place.
 - **[Writing pages](/pages)** — frontmatter, callouts, Mermaid, includes.
 - **[Detail pages](/detail-pages)** — drill-down sub pages with clickable table rows.
