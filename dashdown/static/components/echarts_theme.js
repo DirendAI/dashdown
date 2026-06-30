@@ -9,7 +9,7 @@
 // placeholder here — currentDefaultPalette() swaps in the live DaisyUI `--p`
 // token so single-series charts follow the project's primary color.
 const LIGHT_PALETTE = [
-  "#7c3aed", "#14b8a6", "#f59e0b", "#f43f5e",
+  "#6d28d9", "#14b8a6", "#f59e0b", "#f43f5e",
   "#3b82f6", "#d946ef", "#84cc16", "#f97316",
 ];
 const DARK_PALETTE = [

@@ -3751,14 +3751,16 @@ Lay widgets out in equal-width columns. Wrap any components in `<Grid>`; set
 
 ```markdown
 <Grid cols=2>
-  <Counter data={downloads_total} column="downloads" label="Downloads" />
-  <Counter data={downloads_total} column="months" label="Months" />
+  <Counter data={downloads_total} column="downloads" label="Downloads" delta="12.4"
+           sparkline={downloads_by_month} sparkline-column="downloads" color="primary" />
+  <Counter data={downloads_total} column="months" label="Months tracked" />
 </Grid>
 ```
 
 <Grid cols=2>
-  <Counter data={downloads_total} column="downloads" label="Downloads" />
-  <Counter data={downloads_total} column="months" label="Months" />
+  <Counter data={downloads_total} column="downloads" label="Downloads" delta="12.4"
+           sparkline={downloads_by_month} sparkline-column="downloads" color="primary" />
+  <Counter data={downloads_total} column="months" label="Months tracked" />
 </Grid>
 
 A child can span more than one column with `col-span=`:
