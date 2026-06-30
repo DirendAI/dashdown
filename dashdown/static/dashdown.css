@@ -1992,9 +1992,115 @@ body {
   }
 }
 
-/* Smooth transitions for theme changes */
-* {
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+/* Theme-switch colour crossfade. Previously a permanent universal transition on
+   `*`, which also fed every hover/focus colour change through a 300ms fade — so
+   ordinary interactions read as slightly laggy. Instead, scope the crossfade to
+   a transient class the theme switcher toggles on <html> for ~360ms (see
+   page.html's __dashdownThemeFlash). Light/dark now glides; interactive states
+   keep their own short transitions and feel snappy. The reduced-motion guard
+   below short-circuits both this and the JS that adds the class. */
+html.dashdown-theme-anim,
+html.dashdown-theme-anim *,
+html.dashdown-theme-anim *::before,
+html.dashdown-theme-anim *::after {
+  transition: background-color 0.3s ease, color 0.3s ease,
+    border-color 0.3s ease, fill 0.3s ease !important;
+}
+
+/* --- Reduced motion ----------------------------------------------------- */
+/* Honor the OS "reduce motion" setting: neutralize the framework's animations
+   (page view-transitions, the filter-drawer slide-in, the card hover lift, the
+   KPI count-up, the theme crossfade). One blanket near-instant override plus the
+   handful of named animations that need an explicit `none`. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+  .dashdown-filter-drawer-panel {
+    animation: none !important;
+  }
+  .dashdown-counter:hover {
+    transform: none !important;
+  }
+}
+
+/* --- Surface polish ----------------------------------------------------- */
+/* Crisper text rendering for the Inter face (geometric digits + disambiguated
+   letterforms via Inter's character variants — adjustable from custom.css). */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv05" 1, "cv11" 1, "ss01" 1;
+}
+
+/* Brand-tinted text selection in place of the OS default blue. */
+::selection {
+  background: oklch(var(--p) / 0.22);
+}
+
+/* Thin, theme-tinted scrollbars for the app's in-page scroll regions (Firefox
+   `scrollbar-*` + WebKit `::-webkit-scrollbar`). Kept off the document root so
+   the page's own scrollbar stays the familiar OS one; applied to the sidebar,
+   overflow panels, and scroll boxes where a chunky default bar reads as heavy. */
+.dashdown-sidebar,
+.dashdown-table-scroll,
+.dashdown-code,
+.dashdown-filter-drawer-body,
+.dashdown-combobox-panel,
+.dashdown-multiselect-panel,
+.dashdown-site-search-results {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(var(--bc) / 0.25) transparent;
+}
+.dashdown-sidebar::-webkit-scrollbar,
+.dashdown-table-scroll::-webkit-scrollbar,
+.dashdown-code::-webkit-scrollbar,
+.dashdown-filter-drawer-body::-webkit-scrollbar,
+.dashdown-combobox-panel::-webkit-scrollbar,
+.dashdown-multiselect-panel::-webkit-scrollbar,
+.dashdown-site-search-results::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.dashdown-sidebar::-webkit-scrollbar-thumb,
+.dashdown-table-scroll::-webkit-scrollbar-thumb,
+.dashdown-code::-webkit-scrollbar-thumb,
+.dashdown-filter-drawer-body::-webkit-scrollbar-thumb,
+.dashdown-combobox-panel::-webkit-scrollbar-thumb,
+.dashdown-multiselect-panel::-webkit-scrollbar-thumb,
+.dashdown-site-search-results::-webkit-scrollbar-thumb {
+  background: oklch(var(--bc) / 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dashdown-sidebar::-webkit-scrollbar-thumb:hover,
+.dashdown-table-scroll::-webkit-scrollbar-thumb:hover,
+.dashdown-code::-webkit-scrollbar-thumb:hover,
+.dashdown-filter-drawer-body::-webkit-scrollbar-thumb:hover,
+.dashdown-combobox-panel::-webkit-scrollbar-thumb:hover,
+.dashdown-multiselect-panel::-webkit-scrollbar-thumb:hover,
+.dashdown-site-search-results::-webkit-scrollbar-thumb:hover {
+  background: oklch(var(--bc) / 0.38);
+}
+.dashdown-sidebar::-webkit-scrollbar-track,
+.dashdown-table-scroll::-webkit-scrollbar-track,
+.dashdown-code::-webkit-scrollbar-track,
+.dashdown-filter-drawer-body::-webkit-scrollbar-track,
+.dashdown-combobox-panel::-webkit-scrollbar-track,
+.dashdown-multiselect-panel::-webkit-scrollbar-track,
+.dashdown-site-search-results::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* --- Empty States (Task 3.5) ------------------------------------------------ */

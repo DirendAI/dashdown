@@ -60,6 +60,21 @@
       var collapsed = sc === null ? {{ sidebar_collapsed_default }} : sc === '1';
       if (collapsed) document.documentElement.classList.add('dashdown-sidebar-collapsed');
     })();
+    // Theme-switch colour crossfade: add a transient class so the scoped
+    // transition in dashdown.css glides light<->dark for ~360ms, then remove it
+    // so ordinary hovers stay snappy. No-op under prefers-reduced-motion. Called
+    // by the Alpine theme $watch and the OS-preference listener below — never on
+    // the initial pre-paint theme set, so first load doesn't fade in.
+    window.__dashdownThemeFlash = function () {
+      var el = document.documentElement;
+      if (window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      el.classList.add('dashdown-theme-anim');
+      window.clearTimeout(el._dashdownThemeTimer);
+      el._dashdownThemeTimer = window.setTimeout(function () {
+        el.classList.remove('dashdown-theme-anim');
+      }, 360);
+    };
   </script>
   <!-- Auto-detect OS theme changes while the page is open, unless the user
        has explicitly picked a theme (stored in localStorage). Alpine's
@@ -70,6 +85,7 @@
       var onChange = function(e) {
         if (localStorage.getItem('theme')) return; // user override wins
         var t = e.matches ? 'dark' : 'light';
+        if (window.__dashdownThemeFlash) window.__dashdownThemeFlash();
         document.documentElement.setAttribute('data-theme', t);
         var body = document.body;
         if (body && body._x_dataStack) {
@@ -120,7 +136,7 @@
   sidebarCollapsed: (function(){ var s = localStorage.getItem('dashdown-sidebar-collapsed'); return s === null ? {{ sidebar_collapsed_default }} : s === '1'; })()
 }"
       x-init="document.documentElement.setAttribute('data-theme', theme);
-             $watch('theme', value => { document.documentElement.setAttribute('data-theme', value); });
+             $watch('theme', value => { if (window.__dashdownThemeFlash) window.__dashdownThemeFlash(); document.documentElement.setAttribute('data-theme', value); });
              $watch('sidebarCollapsed', value => { localStorage.setItem('dashdown-sidebar-collapsed', value ? '1' : '0'); document.documentElement.classList.toggle('dashdown-sidebar-collapsed', value); });">
   {# Embed mode (?_embed): the app shell — header, sidebar, breadcrumbs — is
      omitted so a page can be <iframe>'d into an external site. The page content

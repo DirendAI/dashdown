@@ -498,7 +498,76 @@ export function buildChartOption(config, records) {
       option.color = currentDefaultPalette();
     }
   }
+  if (option) applyAreaGradients(option);
   return option;
+}
+
+/**
+ * Convert a hex (`#rgb`/`#rrggbb`) or `rgb()/rgba()` color plus an alpha into an
+ * `rgba(...)` string. Returns "transparent" at alpha 0 (so a gradient fades to
+ * nothing) and the input unchanged for anything we can't parse (named colors).
+ * @param {string} color
+ * @param {number} alpha
+ * @returns {string}
+ */
+function colorWithAlpha(color, alpha) {
+  if (alpha <= 0) return "transparent";
+  if (typeof color !== "string") return color;
+  let m = color.match(/^#([0-9a-f]{3})$/i);
+  if (m) {
+    const h = m[1];
+    const r = parseInt(h[0] + h[0], 16);
+    const g = parseInt(h[1] + h[1], 16);
+    const b = parseInt(h[2] + h[2], 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  m = color.match(/^#([0-9a-f]{6})$/i);
+  if (m) {
+    const h = m[1];
+    return `rgba(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)}, ${alpha})`;
+  }
+  m = color.match(/^rgba?\(([^)]+)\)$/i);
+  if (m) {
+    const parts = m[1].split(",").map((s) => s.trim());
+    if (parts.length >= 3) return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+  }
+  return color;
+}
+
+/**
+ * Upgrade the flat-opacity area fills the line builder sets (`areaStyle:
+ * { opacity }`) to a vertical gradient that fades each series' own colour to
+ * transparent toward the axis — the signature modern line-chart look. Runs
+ * after the palette is resolved so each series' concrete colour is known (the
+ * series index maps to option.color exactly as ECharts assigns it). Skips
+ * series whose areaStyle already carries an explicit colour, and never touches
+ * non-line area fills (e.g. radar polygons, whose areaStyle is per-data-item).
+ * @param {Object} option - A resolved ECharts option (with option.color set)
+ */
+function applyAreaGradients(option) {
+  if (!Array.isArray(option.series) || typeof echarts === "undefined") return;
+  if (!echarts.graphic || !echarts.graphic.LinearGradient) return;
+  const palette = Array.isArray(option.color) ? option.color : [];
+  const isAreaLine = (s) =>
+    s && s.type === "line" && s.areaStyle &&
+    s.areaStyle.color == null && typeof s.areaStyle.opacity === "number";
+  // Grouped lines overlap, so keep their fills fainter than a lone trend's.
+  const peak = option.series.filter(isAreaLine).length > 1 ? 0.14 : 0.26;
+  option.series.forEach((s, i) => {
+    if (!isAreaLine(s)) return;
+    const color =
+      (s.lineStyle && s.lineStyle.color) ||
+      (s.itemStyle && s.itemStyle.color) ||
+      palette[i % (palette.length || 1)] ||
+      palette[0];
+    if (!color) return; // no resolvable colour — keep the flat fill
+    s.areaStyle = {
+      color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: colorWithAlpha(color, peak) },
+        { offset: 1, color: colorWithAlpha(color, 0) },
+      ]),
+    };
+  });
 }
 
 /**

@@ -28,6 +28,14 @@ function extractValue(records, rowIndex, column, colIndex) {
   return row[keys[0]];
 }
 
+/** Count the decimal places in a finite number (0 for integers). Used to keep
+ * the count-up animation's frames at the same precision as the final value. */
+function decimalPlaces(n) {
+  if (!isFinite(n)) return 0;
+  const i = String(n).indexOf(".");
+  return i === -1 ? 0 : String(n).length - i - 1;
+}
+
 /** Percent change from `previous` to `current`, or null if not computable. */
 function computeDelta(current, previous) {
   const c = Number(current);
@@ -76,7 +84,7 @@ export function initCounter(el) {
         .then((data) => {
         const records = recordsOf(data);
         const value = extractValue(records, rowIndex, column, colIndex);
-        updateCounter(el, displayNumber(value, config), prefix, suffix);
+        setCounterValue(el, value, config, prefix, suffix);
 
         // Delta badge: explicit value wins, else derive from the compare query.
         if (config.delta !== undefined) {
@@ -145,6 +153,70 @@ function updateCounter(el, value, prefix, suffix) {
   const valueEl = el.querySelector(".dashdown-counter-value");
   if (!valueEl) return;
   valueEl.textContent = `${prefix}${value}${suffix}`;
+}
+
+/**
+ * Set the headline value, animating a count-up on the *first* reveal of a
+ * finite number (a brief ease-out from 0 → value, re-formatted every frame so
+ * currency/percent/separators stay correct). Sentinels ("-"/Error), non-numeric
+ * values, prefers-reduced-motion, and every subsequent update render instantly —
+ * so a filter change or a live tick snaps rather than re-animating.
+ * @param {HTMLElement} el - Counter element
+ * @param {*} value - Raw value pulled from the record set
+ * @param {Object} cfg - Counter config (format/currency/decimals…)
+ * @param {string} prefix
+ * @param {string} suffix
+ */
+function setCounterValue(el, value, cfg, prefix, suffix) {
+  const valueEl = el.querySelector(".dashdown-counter-value");
+  if (!valueEl) return;
+  const num = Number(value);
+  const prefersReduced =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const setText = (v) => {
+    valueEl.textContent = `${prefix}${displayNumber(v, cfg)}${suffix}`;
+  };
+
+  // Instant path: anything not a fresh finite number, or motion is unwanted.
+  if (
+    value === null ||
+    value === undefined ||
+    !isFinite(num) ||
+    prefersReduced ||
+    el._dashdownCounted
+  ) {
+    if (el._dashdownCountRaf) cancelAnimationFrame(el._dashdownCountRaf);
+    el._dashdownCounted = true;
+    setText(value);
+    return;
+  }
+
+  el._dashdownCounted = true;
+  const DURATION = 750;
+  // Round every in-between frame to the final value's precision: an explicit
+  // `decimals=`, else the target's own decimal places (capped to shrug off
+  // float noise). Without this the eased float renders a long, jittery decimal
+  // tail that's wider than the final number.
+  const explicit = cfg.decimals;
+  const stepDecimals =
+    explicit != null && explicit !== ""
+      ? Number(explicit)
+      : Math.min(decimalPlaces(num), 4);
+  const now = () =>
+    window.performance && performance.now ? performance.now() : Date.now();
+  const start = now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3); // ease-out cubic
+  const frame = () => {
+    const t = Math.min(1, (now() - start) / DURATION);
+    if (t < 1) {
+      setText(Number((num * ease(t)).toFixed(stepDecimals)));
+      el._dashdownCountRaf = requestAnimationFrame(frame);
+    } else {
+      setText(num); // land exactly on the final formatted value
+    }
+  };
+  if (el._dashdownCountRaf) cancelAnimationFrame(el._dashdownCountRaf);
+  el._dashdownCountRaf = requestAnimationFrame(frame);
 }
 
 /**

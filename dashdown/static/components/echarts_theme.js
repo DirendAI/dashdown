@@ -48,6 +48,12 @@ const ECHARTS_DARK_THEME = {
     },
     borderColor: "#334155",
     borderWidth: 1,
+    // Rounded card + soft shadow + breathing room, mirroring the dark theme's
+    // --dashdown-shadow-hover token so tooltips read as part of the surface set.
+    borderRadius: 10,
+    padding: [8, 12],
+    extraCssText:
+      "box-shadow: 0 10px 28px -6px rgba(0,0,0,0.55), 0 4px 10px -4px rgba(0,0,0,0.4);",
   },
   grid: {
     borderColor: "#334155",
@@ -139,6 +145,12 @@ const ECHARTS_LIGHT_THEME = {
     },
     borderColor: "#e2e8f0",
     borderWidth: 1,
+    // Rounded card + soft slate-tinted shadow + breathing room, mirroring the
+    // light theme's --dashdown-shadow-hover token.
+    borderRadius: 10,
+    padding: [8, 12],
+    extraCssText:
+      "box-shadow: 0 8px 24px -6px rgba(15,23,42,0.16), 0 3px 8px -4px rgba(15,23,42,0.10);",
   },
   grid: {
     borderColor: "#e2e8f0",
