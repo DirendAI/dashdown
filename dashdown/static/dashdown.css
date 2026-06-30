@@ -2519,6 +2519,32 @@ body {
 }
 .dashdown-print .dashdown-main {
   padding: 0 !important;
+  /* Constrain the content column to the chosen page's printable width (set as
+     a CSS var by print.js::setPageRule) so ECharts canvases render at the final
+     page size, not the user's window width. The server PDF engine sizes its
+     headless viewport to the paper instead, so it leaves the var unset and this
+     falls back to the full width (no centering effect). */
+  width: var(--dashdown-print-width, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Print the deck's surfaces + gradient cover even when the browser's "Background
+   graphics" toggle is OFF (the default for the client window.print() fallback in
+   static exports). print-color-adjust:exact overrides that toggle per element,
+   so the cover gradient, card/table/counter surfaces, callouts and code blocks
+   keep their fills. The server engine already passes print_background=True, so
+   this is a harmless no-op there. */
+.dashdown-print .dashdown-print-cover,
+.dashdown-print .dashdown-chart,
+.dashdown-print .dashdown-table,
+.dashdown-print .dashdown-counter,
+.dashdown-print .dashdown-pivot,
+.dashdown-print .dashdown-callout,
+.dashdown-print .dashdown-code,
+.dashdown-print .card {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 .dashdown-print .dashdown-main > .dashdown-prose {
   /* The on-screen max-w-7xl/centering would leave wide margins on a print page;
@@ -2591,7 +2617,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  min-height: 100vh;
+  /* One page tall. On the client window.print() path the on-screen viewport
+     isn't the paper, so `100vh` would over/undershoot (a tall window spills the
+     cover onto a blank second page); print.js publishes the page's printable
+     height as a var. The server engine's viewport IS the paper, so it leaves the
+     var unset and `100vh` is exactly one page. */
+  min-height: var(--dashdown-print-height, 100vh);
   margin: 0;
   padding: 4rem 3.5rem;
   color: #fff;
