@@ -59,7 +59,10 @@ A page request flows through `server.py` → `render/pipeline.py` → `render/ma
    block in the same shell; `mermaid` is special-cased to an explicit `dashdown-mermaid` marker block,
    never highlighted, which the client upgrades to a diagram). Highlighting is static HTML, so it ships
    in `dashdown build` exports/embeds with no client JS. Styling is plain CSS under `.dashdown-prose`
-   in `static/dashdown.css`. The separate `render_markdown_text()` (untrusted `<Ask />` LLM answers)
+   in `static/dashdown.css`. A copy-to-clipboard button is layered on **client-side**
+   (`static/components/copy_code.js` wraps each non-mermaid `<pre class="dashdown-code">` and injects
+   the button) — a pure progressive enhancement, so this server-side shell stays untouched. The
+   separate `render_markdown_text()` (untrusted `<Ask />` LLM answers)
    stays minimal and `html: False` — these page extensions are deliberately **not** applied there.
 2. `render_components()` (`render/components.py`) scans the HTML for PascalCase tags
    (`<LineChart .../>`, `<Table>…</Table>`) with a stack-based parser and replaces each with the

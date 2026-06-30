@@ -2076,6 +2076,74 @@ body {
   white-space: pre;
 }
 
+/* Copy-to-clipboard button injected by static/components/copy_code.js. The
+   wrapper is a non-scrolling relative container so the button stays pinned
+   top-right while the code scrolls horizontally (the <pre> is overflow-x:auto).
+   The wrapper takes over the block's vertical rhythm; the <pre> resets its own
+   margin so spacing isn't doubled. */
+.dashdown-code-wrap {
+  position: relative;
+  margin: var(--dashdown-space-section) 0;
+}
+.dashdown-code-wrap > .dashdown-code {
+  margin: 0;
+}
+.dashdown-code-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border-radius: var(--dashdown-radius-control);
+  border: 1px solid oklch(var(--bc) / 0.12);
+  background: oklch(var(--b1) / 0.85);
+  color: oklch(var(--bc) / 0.6);
+  cursor: pointer;
+  line-height: 0;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease,
+    border-color 0.15s ease;
+}
+.dashdown-code-copy:hover {
+  color: oklch(var(--bc) / 0.9);
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  border-color: oklch(var(--bc) / 0.22);
+}
+.dashdown-code-copy:focus-visible {
+  outline: 2px solid oklch(var(--p) / 0.5);
+  outline-offset: 2px;
+  opacity: 1;
+}
+.dashdown-code-copy.dashdown-copied,
+.dashdown-code-copy.dashdown-copied:hover {
+  color: oklch(var(--su) / 1);
+  border-color: oklch(var(--su) / 0.4);
+}
+/* Off-screen scratch field for the execCommand clipboard fallback. */
+.dashdown-code-copy-scratch {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+}
+/* Reveal on hover only where hovering is possible; touch devices (no hover)
+   keep the button always visible since there's nothing to hover. */
+@media (hover: hover) {
+  .dashdown-code-copy {
+    opacity: 0;
+  }
+  .dashdown-code-wrap:hover .dashdown-code-copy {
+    opacity: 1;
+  }
+}
+
 /* Inline code (`like this`) — only the inline kind, not the <code> inside a
    highlighted block. */
 .dashdown-prose :not(pre) > code {
@@ -2335,7 +2403,8 @@ body {
 .dashdown-print .dashdown-filter-bar,
 .dashdown-print .dashdown-filter-badge,
 .dashdown-print .dashdown-build-stamp,
-.dashdown-print .dashdown-made-with {
+.dashdown-print .dashdown-made-with,
+.dashdown-print .dashdown-code-copy {
   display: none !important;
 }
 .dashdown-print .dashdown-layout {

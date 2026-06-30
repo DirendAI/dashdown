@@ -21,6 +21,7 @@ import { initPageHeader, initBuildStamp } from "./components/page_header.js";
 import { initEmbedFrame } from "./components/embed_frame.js";
 import { initEmbedUI } from "./components/embed_ui.js";
 import { initAllMermaid } from "./components/mermaid.js";
+import { initAllCopyCode } from "./components/copy_code.js";
 import { initAllSiteSearches } from "./components/site_search.js";
 import { initPrint, initPdfButton } from "./components/print.js";
 import { initLegacy } from "./legacy.js";
@@ -206,6 +207,11 @@ function init() {
   // of the async-component path — a docs page with only a diagram and no
   // charts/tables still needs them rendered. Self-gates + lazy-loads.
   initAllMermaid();
+
+  // Copy buttons on fenced code blocks — static HTML enhancement (no data API),
+  // so init independently of the async-component path for prose-only docs pages.
+  // Self-gates when the page has no code blocks.
+  initAllCopyCode();
 
   // Site search is plain DOM (no Alpine, no data API), so init it independently
   // of the async-component path — a prose-only docs page must still get search.
