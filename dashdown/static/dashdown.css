@@ -21,6 +21,16 @@
   --dashdown-radius-control: 0.5rem;  /* nav links, inputs, small boxes (mockup rounded-lg) */
   --dashdown-grid-gap: 1rem;          /* Grid / KPI-row cell gap (mockup gap-4) */
   --dashdown-space-section: 1.5rem;   /* vertical rhythm between dashboard blocks */
+
+  /* Elevation scale. Cards used to sit flat (border only) on a single surface,
+     which read undifferentiated; these give a soft resting shadow plus a lift on
+     hover so data widgets feel like raised objects. Slate-tinted (not pure
+     black) so the shadow harmonizes with the slate palette in light mode. The
+     dark theme redefines these (black, higher alpha) since a slate shadow is
+     invisible on the slate-950 page — see the [data-theme="dark"] block. */
+  --dashdown-shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px -1px rgb(15 23 42 / 0.07);
+  --dashdown-shadow-raised: 0 4px 12px rgb(15 23 42 / 0.10);
+  --dashdown-shadow-hover: 0 8px 24px -6px rgb(15 23 42 / 0.16), 0 3px 8px -4px rgb(15 23 42 / 0.10);
 }
 
 /* Graft the radius tokens onto DaisyUI's own radius variables for the shipped
@@ -43,7 +53,7 @@
    faint text tints (referenced throughout this file).
    Like the radii: scoped to light/dark, overridable from custom.css. */
 [data-theme="light"] {
-  --p: 51.06% 0.2301 276.97;    /* indigo-600 #4f46e5 */
+  --p: 49.1% 0.27 292.58;       /* violet-700 #6d28d9 — distinctive vs. stock indigo, deep/premium */
   --pc: 100% 0 0;
   --b2: 98.42% 0.0034 247.86;   /* slate-50  #f8fafc */
   --b3: 92.88% 0.0126 255.51;   /* slate-200 #e2e8f0 */
@@ -53,7 +63,7 @@
 }
 
 [data-theme="dark"] {
-  --p: 68.01% 0.1583 276.93;    /* indigo-400 #818cf8 */
+  --p: 70.2% 0.183 293.54;      /* violet-400 #a78bfa */
   --pc: 100% 0 0;
   --b1: 20.77% 0.0398 265.75;   /* slate-900 #0f172a */
   --b2: 12.88% 0.0406 264.70;   /* slate-950 #020617 */
@@ -61,6 +71,12 @@
   --bc: 92.88% 0.0126 255.51;   /* slate-200 #e2e8f0 */
   --bc2: 71.07% 0.0351 256.79;  /* slate-400 #94a3b8 */
   --bc3: 55.44% 0.0407 257.42;  /* slate-500 #64748b */
+
+  /* A slate-tinted shadow is invisible on the slate-950 page; use black with
+     higher alpha so dark-mode cards still read as raised on hover. */
+  --dashdown-shadow-card: 0 1px 2px rgb(0 0 0 / 0.30);
+  --dashdown-shadow-raised: 0 6px 18px rgb(0 0 0 / 0.45);
+  --dashdown-shadow-hover: 0 10px 28px -6px rgb(0 0 0 / 0.55), 0 4px 10px -4px rgb(0 0 0 / 0.4);
 }
 
 * { box-sizing: border-box; }
@@ -726,10 +742,15 @@ body {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* Layout/typography come from the component's Tailwind classes; keep only a
-   tight line-height so the big value doesn't add vertical slack. */
+/* Layout/typography come from the component's Tailwind classes; we bump the
+   headline a step larger than the markup's text-2xl, pin tabular figures so KPI
+   rows align digit-for-digit, and tighten tracking so the big number reads as a
+   confident data point rather than body copy. */
 .dashdown-counter-value {
   line-height: 1.1;
+  font-size: 1.875rem;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Counter grid layout */
@@ -867,6 +888,34 @@ body {
 /* Ensure card-body has relative positioning */
 .card-body {
   position: relative;
+}
+
+/* --- Card elevation ---------------------------------------------------- */
+/* Every data widget shares `.card bg-base-100 border border-base-300` plus a
+   `.dashdown-*` class. Cards previously sat flat (border only) on one surface,
+   so the eye had nothing to anchor on. Give them a soft resting shadow and a
+   lift on hover. Charts/tables/pivots only deepen the shadow + tint the border
+   (no transform — they host ECharts tooltips / overlays that a transformed
+   ancestor would shift); the small KPI cards add a 1px rise for a tactile feel. */
+.dashdown-chart,
+.dashdown-table,
+.dashdown-pivot,
+.dashdown-counter,
+.dashdown-ask {
+  box-shadow: var(--dashdown-shadow-card);
+  transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+.dashdown-chart:hover,
+.dashdown-table:hover,
+.dashdown-pivot:hover,
+.dashdown-ask:hover {
+  box-shadow: var(--dashdown-shadow-raised);
+  border-color: oklch(var(--bc) / 0.16);
+}
+.dashdown-counter:hover {
+  box-shadow: var(--dashdown-shadow-raised);
+  border-color: oklch(var(--bc) / 0.16);
+  transform: translateY(-1px);
 }
 
 /* --- Filter Bar -------------------------------------------------------- */
