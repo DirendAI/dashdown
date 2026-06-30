@@ -8,8 +8,8 @@ icon: "\U0001F4D8"
 ![Dashdown](/assets/dashdown-logo-indigo.svg)
 
 <div align="center">
-<video src="/assets/dashdown-demo.mp4" poster="/assets/dashdown-demo-poster.png" controls muted loop playsinline preload="metadata" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;border-radius:12px;border:1px solid var(--b3,#e2e8f0);box-shadow:var(--dashdown-shadow-card,0 1px 3px rgba(0,0,0,.1));">
-Your browser can't play this video — <a href="/assets/dashdown-demo.mp4">download the demo</a> instead.
+<video src="/assets/dashdown.mp4" poster="/assets/dashdown-demo-poster.png" controls muted loop playsinline preload="metadata" style="width:100%;max-width:960px;display:block;margin:1.5rem auto;border-radius:12px;border:1px solid var(--b3,#e2e8f0);box-shadow:var(--dashdown-shadow-card,0 1px 3px rgba(0,0,0,.1));">
+Your browser can't play this video — <a href="/assets/dashdown.mp4">download the demo</a> instead.
 </video>
 </div>
 

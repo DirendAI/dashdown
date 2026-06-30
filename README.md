@@ -15,12 +15,12 @@
 </p>
 
 <p align="center">
-  <a href="docs/assets/dashdown-demo.mp4">
+  <a href="docs/assets/dashdown.mp4">
     <img src="docs/assets/dashdown-demo.gif" width="860"
          alt="Dashdown demo — a Markdown + SQL dashboard with KPIs, charts and live filters re-querying the data" />
   </a>
   <br />
-  <sub><b><a href="docs/assets/dashdown-demo.mp4">▶ Watch the full 60-second tour</a></b> — Markdown&nbsp;+&nbsp;SQL → a live, filterable dashboard</sub>
+  <sub><b><a href="docs/assets/dashdown.mp4">▶ Watch the full 60-second tour</a></b> — Markdown&nbsp;+&nbsp;SQL → a live, filterable dashboard</sub>
 </p>
 
 Write a `.md` file with some SQL and a few component tags. Dashdown serves it as a
