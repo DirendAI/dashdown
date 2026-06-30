@@ -190,7 +190,13 @@ but Alpine `x-model` on a checkbox binds a *boolean*, so the toggle binds explic
 design palette there. Reference tokens in new CSS rather than hard-coding radii/gaps/colors, and keep
 such overrides scoped to `[data-theme="light"|"dark"]` so other DaisyUI themes keep their own look.
 ECharts styling (palette, axis tones, transparent canvas) lives in `static/components/echarts_theme.js`
-and must stay visually in sync with those surfaces.
+and must stay visually in sync with those surfaces. **Don't reintroduce a global `* { transition }`**
+for theme changes: that also dulls every hover/focus into a 300ms fade. The light/dark crossfade is a
+small cross-file contract instead — `page.html`'s `__dashdownThemeFlash()` adds a transient
+`dashdown-theme-anim` class to `<html>` (on the Alpine `theme` `$watch` + the OS-preference listener)
+that a scoped `html.dashdown-theme-anim *` rule in `dashdown.css` animates for ~360ms; a
+`prefers-reduced-motion` block neutralizes it (and the rest of the framework's motion). Interactive
+states keep their own short transitions.
 
 ## Data connectors
 
