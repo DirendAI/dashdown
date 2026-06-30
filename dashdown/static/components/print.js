@@ -138,22 +138,66 @@ function buildCover() {
   main.insertBefore(cover, main.firstChild);
 }
 
-/** Dress the page for print: the print stylesheet class + the gradient cover. */
+/**
+ * Dress the page for print: force the light (printable) theme, add the print
+ * stylesheet class, and inject the gradient cover. Forcing light is deliberate —
+ * a reader viewing the dashboard in dark mode would otherwise print near-white
+ * text on background-less white paper. The `data-theme` change is observed by
+ * echarts_theme.js, which disposes + re-inits every live chart with the light
+ * ECharts theme (animation-free, since `window.__dashdownPrint` is set first).
+ */
 function enterPrintMode() {
+  document.documentElement.setAttribute("data-theme", "light");
   document.documentElement.classList.add("dashdown-print");
   buildCover();
 }
 
 /** Restore the interactive view after an on-demand print. */
-function leavePrintMode() {
+function leavePrintMode(prevTheme, scrollY) {
   document.documentElement.classList.remove("dashdown-print");
+  if (prevTheme == null) document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", prevTheme);
   const cover = document.querySelector(".dashdown-print-cover");
   if (cover) cover.remove();
   const pageStyle = document.getElementById("dashdown-print-page");
   if (pageStyle) pageStyle.remove();
+  document.documentElement.style.removeProperty("--dashdown-print-width");
+  document.documentElement.style.removeProperty("--dashdown-print-height");
+  if (typeof scrollY === "number") window.scrollTo(0, scrollY);
 }
 
-/** Set the printed page geometry via an injected ``@page`` rule. */
+// Page geometry, kept in lock-step with the server engine (pdf.py): same page
+// sizes and asymmetric margins (L/R 12mm, T/B 14mm) so the client window.print()
+// fallback produces the same layout as `dashdown pdf`.
+const PAGE_MM = {
+  A4: [210, 297],
+  A3: [297, 420],
+  Letter: [215.9, 279.4],
+  Legal: [215.9, 355.6],
+};
+const MARGIN_LR_MM = 12;
+const MARGIN_TB_MM = 14;
+const PX_PER_MM = 96 / 25.4;
+
+/** Printable area (CSS px) for a page format/orientation — page minus margins. */
+function printableArea(orientation, format) {
+  let [w, h] = PAGE_MM[format] || PAGE_MM.A4;
+  if (orientation === "landscape") [w, h] = [h, w];
+  return {
+    width: Math.round((w - 2 * MARGIN_LR_MM) * PX_PER_MM),
+    height: Math.max(Math.round((h - 2 * MARGIN_TB_MM) * PX_PER_MM), 600),
+  };
+}
+
+/**
+ * Set the printed page geometry via an injected ``@page`` rule, and publish the
+ * printable area as CSS vars. The vars let the print stylesheet size the content
+ * column (and the cover) to the *final page* — so ECharts canvases render at the
+ * page width instead of the user's window width (which Chromium would otherwise
+ * rescale to the paper, making chart legibility depend on window size). The
+ * server engine sizes its headless viewport to the paper instead, so it leaves
+ * the vars unset and the CSS falls back to 100% / 100vh.
+ */
 function setPageRule(orientation, format) {
   let style = document.getElementById("dashdown-print-page");
   if (!style) {
@@ -161,7 +205,11 @@ function setPageRule(orientation, format) {
     style.id = "dashdown-print-page";
     document.head.appendChild(style);
   }
-  style.textContent = `@page { size: ${format || "A4"} ${orientation || "portrait"}; margin: 12mm; }`;
+  style.textContent = `@page { size: ${format || "A4"} ${orientation || "portrait"}; margin: ${MARGIN_TB_MM}mm ${MARGIN_LR_MM}mm; }`;
+  const { width, height } = printableArea(orientation, format);
+  const root = document.documentElement.style;
+  root.setProperty("--dashdown-print-width", `${width}px`);
+  root.setProperty("--dashdown-print-height", `${height}px`);
 }
 
 const PDF_FIELDS = [
@@ -286,27 +334,44 @@ function triggerDownload(blob, filename) {
  * "Save as PDF"). Restores the interactive view afterwards.
  */
 async function clientPrint(settings) {
+  const prevTheme = document.documentElement.getAttribute("data-theme");
+  const scrollY = window.scrollY;
+  // Set the print flag BEFORE entering print mode: forcing the light theme
+  // re-renders every chart, and forPrint() (chart.js) reads this flag to skip
+  // the entry animation so the canvas is final when we print.
+  window.__dashdownPrint = true;
   enterPrintMode();
   setPageRule(settings.orientation, settings.format);
-  // The print layout changes container widths (vertical grid, full width), so
-  // nudge ECharts to redraw its canvases at the new size before printing.
+  // The print layout changes container widths (vertical grid, page-width column),
+  // so nudge ECharts to redraw its canvases at the new size before printing.
   window.dispatchEvent(new Event("resize"));
 
   let cleanedUp = false;
+  const mql = window.matchMedia ? window.matchMedia("print") : null;
+  const onMediaChange = (e) => {
+    if (!e.matches) cleanup();
+  };
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
     window.removeEventListener("afterprint", cleanup);
-    leavePrintMode();
+    if (mql && mql.removeEventListener) mql.removeEventListener("change", onMediaChange);
+    window.__dashdownPrint = false;
+    leavePrintMode(prevTheme, scrollY);
     window.dispatchEvent(new Event("resize"));
   };
+  // Restore as soon as printing ends. `afterprint` is reliable across modern
+  // desktop browsers (where this button is shown); the `matchMedia('print')`
+  // change is a redundant backstop. We deliberately DON'T blind-revert on a
+  // short timer: window.print() blocks on desktop, so a fixed timeout could fire
+  // while the user is still in the save dialog and flip the page (and the PDF)
+  // back to the interactive layout mid-export.
   window.addEventListener("afterprint", cleanup);
+  if (mql && mql.addEventListener) mql.addEventListener("change", onMediaChange);
 
-  // Let the reflow + canvas resize settle, then print. Fallback cleanup in case
-  // `afterprint` never fires (varies by browser / "save as PDF" flow).
-  await new Promise((r) => setTimeout(r, 300));
+  // Let the theme re-render + reflow settle so the first paint is final.
+  await new Promise((r) => setTimeout(r, 400));
   window.print();
-  setTimeout(cleanup, 2000);
 }
 
 /** Wire the header "Export PDF" button. No-op when the button isn't present. */
@@ -363,8 +428,8 @@ export function initPrint() {
   if (!print && !capture) return;
 
   if (print) {
-    enterPrintMode();
     window.__dashdownPrint = true;
+    enterPrintMode();
   }
   armReady();
 }
