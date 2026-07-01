@@ -84,6 +84,25 @@ def attr_float(attrs: dict[str, Any], key: str, default: float | None = None) ->
         return default
 
 
+def resolve_debounce(attrs: dict[str, Any], ctx: RenderContext) -> int:
+    """The effective debounce (ms) for a filter control: the per-instance
+    ``debounce=`` attr if the author set one, else the project-wide default
+    (``filters.debounce`` in ``dashdown.yaml``, carried on ``ctx.filter_debounce``).
+
+    Every interactive filter (Search / Combobox / Slider / RangeSlider /
+    DateRange) resolves its debounce through this one helper and bakes the result
+    into its ``data-config`` (Search also into its ``x-model.debounce``), so the
+    client waits this long after the last keystroke or drag tick before committing
+    the value to the store — coalescing a burst of input into a single re-fetch.
+    A non-negative integer; a bad value falls back to the project default.
+    """
+    if "debounce" in attrs:
+        val = attr_int(attrs, "debounce", ctx.filter_debounce)
+        if val is not None and val >= 0:
+            return val
+    return ctx.filter_debounce
+
+
 def grid_span_style(attrs: dict[str, Any]) -> str:
     """CSS fragment letting a `<Grid>` child span multiple columns.
 

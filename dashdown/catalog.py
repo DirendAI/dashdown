@@ -53,6 +53,7 @@ _HELPER_ATTRS = {
     "resolve_dataset": {"data"},
     "filter_bar_marker": {"bar", "filter_bar"},
     "to_filter_bar": {"bar", "filter_bar"},
+    "resolve_debounce": {"debounce"},
     # The multi-measure semantic helper for *role* charts (Candlestick/Heatmap/
     # Sankey/Graph/Parallel/Combo). Its measures/by/series come from the caller's
     # role attrs (surfaced where the render method reads them), but it always reads

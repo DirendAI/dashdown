@@ -8,7 +8,7 @@
 
 "use strict";
 
-import { parseUrlParams, formatValue, resolveFormatOpts } from "../core.js";
+import { parseUrlParams, formatValue, resolveFormatOpts, debounce } from "../core.js";
 
 /**
  * Mirror the value to the URL (always present — a threshold is always a concrete
@@ -49,6 +49,7 @@ window.sliderComponent = function (name) {
     step: 1,
     urlSync: true,
     format: null,
+    syncDebounced: null,
 
     init() {
       let config = {};
@@ -63,6 +64,14 @@ window.sliderComponent = function (name) {
       this.step = toNum(config.step, 1) || 1;
       this.urlSync = this.$el.dataset.urlSync === "true";
       this.format = config.format || null;
+      // Debounce the store write (data re-fetch) so a drag settles into one fetch;
+      // the handle + readout (bound to `value`) stay live. The seed push below is
+      // immediate so the first fetch is already filtered.
+      const debounceMs = toNum(config.debounce, 300);
+      this.syncDebounced = debounce(() => {
+        this.pushToFilters();
+        if (this.urlSync) this.syncUrl();
+      }, debounceMs);
 
       // First-load seed: URL param wins over the author's default.
       const urlParams = parseUrlParams();
@@ -89,10 +98,9 @@ window.sliderComponent = function (name) {
       }
 
       // Single reactive path: the handle writes `value`, this watcher mirrors it
-      // to the store + URL.
+      // to the store + URL — debounced so a drag coalesces into one re-fetch.
       this.$watch("value", () => {
-        this.pushToFilters();
-        if (this.urlSync) this.syncUrl();
+        this.syncDebounced();
       });
     },
 

@@ -25,9 +25,9 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `CandlestickChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Candlestick (OHLC) chart for price/range series. |
 | `Chart` | `auto`, `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Auto-recommended chart: picks line/bar/scatter from the result shape. |
 | `ComboChart` | `bar_color`, `bars`, `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `empty_message`, `format`, `grain`, `height`, `line_color`, `lines`, `locale`, `right_axis`, `right_currency`, `right_decimals`, `right_format`, `right_locale`, `series`, `sort_by`, `span`, `title`, `x` | Combo chart — bars and lines together, with an optional second y-axis. |
-| `Combobox` \* | `bar`, `column`, `data`, `filter_bar`, `label`, `limit`, `min_chars`, `multi`, `name`, `placeholder`, `url_sync` | Searchable single-select filter for a **high-cardinality** column — type-to-filter over thousands of customers / SKUs / users where a plain `<Dropdown>` (which loads *every* distinct value) would cho… |
+| `Combobox` \* | `bar`, `column`, `data`, `debounce`, `filter_bar`, `label`, `limit`, `min_chars`, `multi`, `name`, `placeholder`, `url_sync` | Searchable single-select filter for a **high-cardinality** column — type-to-filter over thousands of customers / SKUs / users where a plain `<Dropdown>` (which loads *every* distinct value) would cho… |
 | `Counter` | `by`, `col-span`, `color`, `column`, `compare`, `compare-column`, `compare-index`, `compare-row`, `currency`, `data`, `date_format`, `decimals`, `delta`, `format`, `grain`, `index`, `invert-delta`, `label`, `locale`, `metric`, `prefix`, `row`, `series`, `span`, `sparkline`, `sparkline-by`, `sparkline-column`, `suffix` | Display a single value as a large counter/KPI. |
-| `DateRange` \* | `bar`, `default`, `end_param`, `filter_bar`, `label`, `name`, `persist`, `presets`, `start_param`, `url_sync` | Date range picker component with preset ranges and custom selection. |
+| `DateRange` \* | `bar`, `debounce`, `default`, `end_param`, `filter_bar`, `label`, `name`, `persist`, `presets`, `start_param`, `url_sync` | Date range picker component with preset ranges and custom selection. |
 | `Dropdown` \* | `bar`, `column`, `data`, `filter_bar`, `label`, `multi`, `name`, `options`, `url_sync` | Dropdown filter. Populates options from the distinct values of a column. |
 | `FunnelChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Funnel chart — stage labels (`x`) with descending values (`y`). |
 | `GaugeChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `max`, `metric`, `min`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Speedometer-style gauge for a single KPI value. |
@@ -40,12 +40,12 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `PieChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
 | `PivotTable` | `agg`, `data`, `empty_message`, `title`, `values` | Interactive cross-tabulation with drag-and-drop row/column axes. |
 | `RadarChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Radar (spider) chart for comparing several metrics on one shape. |
-| `RangeSlider` \* | `bar`, `currency`, `date_format`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `max_param`, `min`, `min_param`, `name`, `step`, `url_sync` | Numeric range filter — a dual-handle slider for a *between* bound on a numeric column (price, age, score, …). |
+| `RangeSlider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `max_param`, `min`, `min_param`, `name`, `step`, `url_sync` | Numeric range filter — a dual-handle slider for a *between* bound on a numeric column (price, age, score, …). |
 | `SankeyChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Sankey flow diagram from an edge-list query. |
 | `ScatterChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Scatter plot — two numeric columns as points (`x` vs `y`). |
 | `Search` \* | `bar`, `debounce`, `filter_bar`, `label`, `name`, `placeholder`, `url_sync` | Search input component for filtering. |
 | `SiteSearch` | `label`, `max_results`, `placeholder` | Full-text search across every page of the project. |
-| `Slider` \* | `bar`, `currency`, `date_format`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
+| `Slider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
 | `SunburstChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
 | `Table` | `by`, `col-span`, `currency`, `data`, `date_format`, `detail_slug`, `empty_message`, `export`, `export_filename`, `filename`, `format`, `grain`, `headers`, `heatmap`, `heatmap_scheme`, `limit`, `link_column`, `link_pattern`, `locale`, `metric`, `page-size`, `row_link`, `search`, `series`, `sort`, `span`, `title` | Data table — renders a query result as a sortable, searchable grid. |
 | `ThemeRiver` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
@@ -655,6 +655,9 @@ global_filters:                # → Filters
     start_param: date_start
     end_param: date_end
 
+filters:                       # → Filters
+  debounce: 300                # ms of quiet before a filter change re-fetches
+
 search:                        # → Full-text search
   enabled: true
   placeholder: "Search…"
@@ -739,6 +742,26 @@ opts in by using the `${date_start}` / `${date_end}` placeholders. The selection
 persists across navigation.
 
 → **[Filters & parameters](/filters)** for presets, params and how queries opt in.
+
+## `filters`
+
+Cross-cutting behavior for the interactive filter controls (`<Search>`,
+`<Combobox>`, `<Slider>`, `<RangeSlider>`, `<DateRange>`).
+
+```yaml
+filters:
+  debounce: 300   # ms of quiet after the last keystroke / slider drag before
+                  # a filter change commits its value and re-fetches data
+```
+
+| Key        | Default | Purpose                                                            |
+| ---------- | ------- | ----------------------------------------------------------------- |
+| `debounce` | `300`   | Project-wide quiet period (ms) before a filter change re-fetches. A burst of keystrokes or slider drag ticks coalesces into a single fetch. Raise it for a slow, per-query-expensive warehouse (e.g. BigQuery) where firing on partial input piles up requests; lower it for a snappy local backend. |
+
+Any single control overrides this with its own `debounce=` attribute
+(`<Search name="q" debounce={600} />`).
+
+→ **[Filters & parameters](/filters)** for the controls themselves.
 
 ## `search`
 
@@ -4404,6 +4427,29 @@ fixed snapshot. `dashdown build` strips them from static exports automatically.
 The [full-text `<SiteSearch>`](/search) is **not** a filter — it searches a
 static index and ships in exports.
 :::
+
+### Debouncing
+
+Typing in a `<Search>` / `<Combobox>` or dragging a `<Slider>` / `<RangeSlider>`
+doesn't fire a query on every keystroke or pixel. A change waits for a short
+**quiet period** (default **300 ms**) before it commits and re-fetches, so a burst
+of input coalesces into one fetch — the handle and readout still move instantly.
+
+Set the project-wide default in `dashdown.yaml`, and override per control with a
+`debounce=` attribute (both in milliseconds):
+
+```yaml
+filters:
+  debounce: 500   # raise it for a slow, per-query-expensive warehouse (BigQuery)
+```
+
+```markdown
+<Search name="q" debounce={800} />   <!-- this control only -->
+```
+
+Raise it when each query is slow or billed so deliberate typing can't fan out a
+wave of partial-input queries; lower it (even `0` = immediate) for a snappy local
+backend. → **[Configuration](/configuration#filters)**.
 
 ## Where filters appear
 

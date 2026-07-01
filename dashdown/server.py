@@ -841,6 +841,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 library=proj.queries,
                 python_library=proj.python_queries,
                 semantic_models=proj.semantic_models,
+                filter_debounce=proj.config.filters.debounce,
             )
         except Exception as e:  # noqa: BLE001
             log.exception("Embed-token render failed for %s", md_path)
@@ -905,6 +906,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 global_date=proj.config.global_date,
                 embed=embed_on,
                 embed_enabled=embed_cfg.enabled,
+                filter_debounce=proj.config.filters.debounce,
             )
         except Exception as e:  # noqa: BLE001
             log.exception("Render failed for %s", md_path)

@@ -17,6 +17,37 @@ export const pendingComponents = new Map();
 export let allDatasets = {};
 
 /**
+ * Trailing-edge debounce: returns a wrapper that delays calling `fn` until `ms`
+ * have elapsed since the LAST call, coalescing a burst (keystrokes, slider drag
+ * ticks) into one invocation. `ms <= 0` calls through synchronously (no timer).
+ * The returned wrapper exposes `.cancel()` to drop a pending call. Shared by the
+ * filter controls that write the store from JS (slider/range/daterange); Search
+ * uses Alpine's own `x-model.debounce` instead.
+ * @param {Function} fn
+ * @param {number} ms
+ * @returns {Function & {cancel: () => void}}
+ */
+export function debounce(fn, ms) {
+  let timer = null;
+  const wrapped = function (...args) {
+    if (!ms || ms <= 0) {
+      fn.apply(this, args);
+      return;
+    }
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      fn.apply(this, args);
+    }, ms);
+  };
+  wrapped.cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+  };
+  return wrapped;
+}
+
+/**
  * Parse URL query parameters
  * @returns {Object} - Key-value pairs of query parameters
  */
