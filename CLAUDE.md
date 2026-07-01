@@ -219,12 +219,13 @@ no core change needed. Connector families:
   (`FatalException`/`InternalException`), `query()` rebuilds the connection (re-running `_setup()` to
   restore views) and retries once; ordinary transient errors are raised as normal retryable failures
   (`_is_fatal_duckdb_error()` draws that line).
-- **SQL DB-API** (`postgres`, `mysql`, `mssql`, `snowflake`, `bigquery`) share `data/dbapi.py` — each
-  is a thin subclass implementing `_connect()`, with lazy connect + driver import, JSON-safe value
-  coercion, and one reconnect-and-retry on a dropped connection. `mssql` (pyodbc) builds an ODBC
-  connection string from discrete config keys (SQL login, Azure AD service principal, managed identity,
-  AD password, or a raw `connection_string`/`url` escape hatch); needs Microsoft's ODBC driver on the
-  host.
+- **SQL DB-API** (`postgres`, `mysql`, `mssql`, `snowflake`, `bigquery`, `clickhouse`) share
+  `data/dbapi.py` — each is a thin subclass implementing `_connect()`, with lazy connect + driver
+  import, JSON-safe value coercion, and one reconnect-and-retry on a dropped connection. `mssql`
+  (pyodbc) builds an ODBC connection string from discrete config keys (SQL login, Azure AD service
+  principal, managed identity, AD password, or a raw `connection_string`/`url` escape hatch); needs
+  Microsoft's ODBC driver on the host. `clickhouse` rides clickhouse-connect's PEP 249 wrapper
+  (HTTP protocol; `secure: true` for ClickHouse Cloud).
 - **Tabular spreadsheets** (`excel`, `sheets`) share `data/tabular.py`: a subclass returns
   `{table_name: DataFrame}` from `_load_tables()` (lazy, on first query); the base loads each into an
   in-memory DuckDB so spreadsheets answer the same SQL as everything else.
@@ -233,7 +234,7 @@ no core change needed. Connector families:
   `load(json_query)` + `meta()` over HTTP+JWT (used by the Cube semantic backend below).
 
 Each backend-specific connector's heavy deps are an **optional extra** (`pip install
-'dashdown-md[postgres|mysql|snowflake|bigquery|excel|sheets|dax|cube]'`); a missing-dep load raises a
+'dashdown-md[postgres|mysql|snowflake|bigquery|clickhouse|excel|sheets|dax|cube]'`); a missing-dep load raises a
 friendly install hint. `load_connectors()` reads the user's `sources.yaml`, injecting `_project_root`
 into each connector's config.
 

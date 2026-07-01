@@ -1,7 +1,7 @@
 ---
 title: DAX / Fabric
 sidebar_label: DAX / Fabric
-sidebar_position: 14
+sidebar_position: 15
 ---
 
 # DAX connector (Microsoft Fabric / Power BI)

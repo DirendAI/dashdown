@@ -27,7 +27,7 @@ from dashdown.data.base import QueryResult
 
 #: Schemas/catalogs that hold engine metadata rather than user tables — excluded
 #: from ``list_tables``. This is the *union* of the system schemas across
-#: DuckDB / Postgres / MySQL / MSSQL / Snowflake; the comparison is
+#: DuckDB / Postgres / MySQL / MSSQL / Snowflake / ClickHouse; the comparison is
 #: case-insensitive (MSSQL's ``INFORMATION_SCHEMA`` is upper-cased), so listing
 #: them here once covers every ``information_schema``-speaking backend.
 SYSTEM_SCHEMAS = frozenset(
@@ -38,6 +38,7 @@ SYSTEM_SCHEMAS = frozenset(
         "mysql",
         "performance_schema",
         "sys",
+        "system",
     }
 )
 
