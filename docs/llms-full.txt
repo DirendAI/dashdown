@@ -4311,9 +4311,10 @@ choke.
 Options are fetched **server-side as you type**: the browser hits
 `/_dashdown/api/options/{query}` and the backend runs a `SELECT DISTINCT … WHERE
 col ILIKE '%term%' LIMIT N` against the warehouse, so only a small matching page
-is ever shipped. The picked value lands in `filters[name]` like every other
-filter, so your SQL reads it with `${name}` and the empty (nothing picked) value
-trips the all-guard:
+is ever shipped. Results rank **prefix matches first** (typing `num` surfaces
+`numpy` above `abnum`), alphabetical within each band. The picked value lands in
+`filters[name]` like every other filter, so your SQL reads it with `${name}` and
+the empty (nothing picked) value trips the all-guard:
 
 ```sql
 SELECT country, downloads
