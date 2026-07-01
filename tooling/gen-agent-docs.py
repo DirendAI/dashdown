@@ -39,7 +39,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_ROOT = REPO_ROOT / "docs"
 DOCS_PAGES = DOCS_ROOT / "pages"
 SCAFFOLD_DIR = REPO_ROOT / "dashdown" / "scaffold"
-REFERENCES_SUBDIR = "references"  # relative to the project root / SCAFFOLD_DIR
+# Where the shards are *stored* in the package: dotless, so setuptools' `scaffold/**/*`
+# glob ships them (a hidden `.references/` would be skipped — same reason `.claude` is
+# stored as `claude/`, see dashdown/agent_targets.py).
+REFERENCES_SUBDIR = "references"  # relative to SCAFFOLD_DIR (the package copy)
+# Where the shards *land* in a user's project — hidden, to keep the project root clean.
+# `cli.py::_agent_doc_files` renames `references/` → `.references/` on install, so the
+# map/skill links must point here, not at the storage subdir.
+REFERENCES_LINK_SUBDIR = ".references"
 
 # Reuse the framework's own frontmatter splitter so the parse matches the renderer.
 sys.path.insert(0, str(REPO_ROOT))
@@ -297,7 +304,7 @@ live dashboard.
 ## How to use this guide
 
 This is a **map**, not the whole manual. Skim the cheat-sheet below, then open **only the
-one reference shard** your task needs (see the index) — each shard under `references/` is the
+one reference shard** your task needs (see the index) — each shard under `.references/` is the
 full, flattened docs for one topic. Don't read every shard; that's the token cost this
 structure exists to avoid.
 
@@ -330,7 +337,7 @@ FROM orders GROUP BY month, region ORDER BY month
 - `:::query name=… connector=… [cache_ttl=60] [live] [interval=5]` — `connector` is a key
   in `sources.yaml` (default `main`). The SQL is collected, not run at render.
 - A query can instead live once in `queries/<name>.sql` (or `.py` for Python) and be
-  referenced by name from any page — see `references/queries.md`.
+  referenced by name from any page — see `.references/queries.md`.
 - `data={query_name}` wires a component to a result; `column="col"` picks one column.
 
 ### Parameters & filters (the security-critical bit)
@@ -346,12 +353,12 @@ FROM orders GROUP BY month, region ORDER BY month
 
 - **Charts** share `data={} x="" y="" [series=""] [title=""]`: `<LineChart>` `<BarChart>`
   `<PieChart>` `<ScatterChart>` (+ box plot, heatmap, sankey, gauge, map, radar, treemap,
-  funnel, … — all in `references/components.md`). Multiple series: `y="a,b"` **or** `series=`.
+  funnel, … — all in `.references/components.md`). Multiple series: `y="a,b"` **or** `series=`.
 - `<Counter data={q} column="amount" label="Revenue" />` — one big KPI number.
 - `<Value>` — an inline metric. `<Table data={q} />` — sortable, CSV-exportable grid.
 - `<Grid cols=2>…</Grid>` — lay widgets side by side.
 - With a `semantic/` model, components can take **metrics** instead of a query:
-  `<BarChart metric={sales.revenue} by={sales.region} />` — see `references/semantic-layer.md`.
+  `<BarChart metric={sales.revenue} by={sales.region} />` — see `.references/semantic-layer.md`.
 """
 
 CLI_LOOP = """\
@@ -372,7 +379,7 @@ dashdown build . --out dist          # static export; dashdown pdf .  → presen
 dashdown screenshot /page            # PNG + verdict: did the chart canvases draw? (needs [pdf])
 ```
 
-Typical loop: **read** the relevant `references/<topic>.md` for the concept → **edit** the
+Typical loop: **read** the relevant `.references/<topic>.md` for the concept → **edit** the
 page/query/config → **`dashdown check`** it renders → **`dashdown query`/`connectors --test`**
 the data is real → **`dashdown serve`** to see it. (Charts draw client-side, so `check`
 confirms render, not paint — **`dashdown screenshot <page>`** captures a PNG and reports whether
@@ -383,12 +390,12 @@ the chart canvases actually drew, exiting non-zero if any failed.)
 def _render_map(shards: list[Shard]) -> str:
     toc_lines = ["## Reference index", "", "Open the one shard your task needs:", ""]
     toc_lines.append(
-        f"- [Catalog]({REFERENCES_SUBDIR}/{CATALOG_SLUG}.md) — every component's attributes "
+        f"- [Catalog]({REFERENCES_LINK_SUBDIR}/{CATALOG_SLUG}.md) — every component's attributes "
         "+ every connector's config keys, introspected from the registries "
         "(the `dashdown components` data; **facts, not prose**)"
     )
     for shard in shards:
-        href = f"{REFERENCES_SUBDIR}/{shard.slug}.md"
+        href = f"{REFERENCES_LINK_SUBDIR}/{shard.slug}.md"
         hint = f" — {shard.lede}" if shard.lede else ""
         toc_lines.append(f"- [{shard.title}]({href}){hint}")
     toc = "\n".join(toc_lines) + "\n"

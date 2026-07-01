@@ -1,7 +1,10 @@
 """Scaffold (`dashdown new`) drops a working project plus the coding-agent guide.
 
 The guide is progressive-disclosure: a slim `AGENTS.md` *map* (cheat-sheet + a table of
-contents) plus per-topic `references/<topic>.md` shards, routed by the Claude skill.
+contents) plus per-topic `.references/<topic>.md` shards, routed by the Claude skill. The
+shards ship dotless under `scaffold/references/` in the wheel but install hidden as
+`.references/` (like `.claude`), so storage-path assertions stay `references/` while
+install-path assertions use `.references/`.
 """
 from __future__ import annotations
 
@@ -72,14 +75,15 @@ def test_scaffold_includes_agents_map(tmp_path: Path) -> None:
     # It's the slim *map*, not the old monolith: a cheat-sheet + an index into the shards.
     assert "Cheat-sheet" in text
     assert "## Reference index" in text
-    assert "references/components.md" in text  # the TOC links into the shards
+    assert ".references/components.md" in text  # the TOC links into the shards
     # Live `:::query` data blocks are stripped; only fenced examples survive.
     assert ":::query" not in text or "```" in text
 
 
 def test_scaffold_includes_reference_shards(tmp_path: Path) -> None:
     _scaffold(tmp_path)
-    refs = tmp_path / "references"
+    # Installed hidden as `.references/` (dotless `references/` in the wheel) to keep the root clean.
+    refs = tmp_path / ".references"
     assert refs.is_dir()
     # Core topics each get a shard (one per top-level entry in docs/pages/).
     for slug in ("components", "connectors", "queries", "semantic-layer", "cli", "filters"):
@@ -88,7 +92,7 @@ def test_scaffold_includes_reference_shards(tmp_path: Path) -> None:
     assert (refs / "components.md").stat().st_size > 5000
     # Every reference link in the map resolves to an emitted shard.
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
-    hrefs = re.findall(r"\]\((references/[\w.\-]+\.md)\)", agents)
+    hrefs = re.findall(r"\]\((\.references/[\w.\-]+\.md)\)", agents)
     assert hrefs, "the map should link to reference shards"
     for href in hrefs:
         assert (tmp_path / href).is_file(), href
@@ -96,7 +100,7 @@ def test_scaffold_includes_reference_shards(tmp_path: Path) -> None:
 
 def test_scaffold_includes_registry_catalog(tmp_path: Path) -> None:
     _scaffold(tmp_path)
-    catalog = tmp_path / "references" / "catalog.md"
+    catalog = tmp_path / ".references" / "catalog.md"
     assert catalog.is_file()
     text = catalog.read_text(encoding="utf-8")
     # Registry-introspected (not a docs/ page) — the same data `dashdown components` prints.
@@ -107,7 +111,7 @@ def test_scaffold_includes_registry_catalog(tmp_path: Path) -> None:
     assert "`postgres`" in text and "`host`" in text
     # The map links to it.
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
-    assert "references/catalog.md" in agents
+    assert ".references/catalog.md" in agents
 
 
 def test_scaffold_includes_skill_router(tmp_path: Path) -> None:
@@ -119,9 +123,9 @@ def test_scaffold_includes_skill_router(tmp_path: Path) -> None:
     # The skill routes to the map and into the reference shards; the relative links must resolve.
     assert "../../../AGENTS.md" in body
     assert (skill.parent / "../../../AGENTS.md").resolve() == (tmp_path / "AGENTS.md").resolve()
-    assert "../../../references/" in body
-    assert (skill.parent / "../../../references/components.md").resolve() == (
-        tmp_path / "references" / "components.md"
+    assert "../../../.references/" in body
+    assert (skill.parent / "../../../.references/components.md").resolve() == (
+        tmp_path / ".references" / "components.md"
     ).resolve()
 
 
@@ -156,11 +160,11 @@ def test_skill_installs_guide_into_existing_project(tmp_path: Path) -> None:
     written, skipped = _install_agent_docs(tmp_path, refresh=False)
 
     assert "AGENTS.md" in written
-    assert any(w.startswith("references/") for w in written)
+    assert any(w.startswith(".references/") for w in written)
     assert any(".claude/skills/dashdown-authoring/SKILL.md" in w for w in written)
     assert skipped == []
     assert (tmp_path / "AGENTS.md").is_file()
-    assert (tmp_path / "references" / "components.md").is_file()
+    assert (tmp_path / ".references" / "components.md").is_file()
     assert (tmp_path / ".claude" / "skills" / "dashdown-authoring" / "SKILL.md").is_file()
 
 
@@ -179,7 +183,7 @@ def test_skill_is_idempotent_without_refresh(tmp_path: Path) -> None:
 def test_skill_refresh_overwrites_and_prunes_ghosts(tmp_path: Path) -> None:
     _install_agent_docs(tmp_path, refresh=False)
     (tmp_path / "AGENTS.md").write_text("STALE\n", encoding="utf-8")
-    ghost = tmp_path / "references" / "old-removed-topic.md"
+    ghost = tmp_path / ".references" / "old-removed-topic.md"
     ghost.write_text("ghost\n", encoding="utf-8")
 
     written, _ = _install_agent_docs(tmp_path, refresh=True)
@@ -214,8 +218,8 @@ def test_baseline_always_installed_regardless_of_target(tmp_path: Path) -> None:
     # The tool-agnostic content ships for every target; only the wrapper varies.
     written, _ = _install_agent_docs(tmp_path, refresh=False, targets=["cursor"])
     assert "AGENTS.md" in written
-    assert any(w.startswith("references/") for w in written)
-    assert (tmp_path / "references" / "components.md").is_file()
+    assert any(w.startswith(".references/") for w in written)
+    assert (tmp_path / ".references" / "components.md").is_file()
 
 
 def test_explicit_target_installs_only_that_wrapper(tmp_path: Path) -> None:

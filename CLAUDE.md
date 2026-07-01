@@ -435,19 +435,23 @@ Both backends — and the semantic layer as a whole — are still **preview**.
 
 `dashdown new` drops a **tool-agnostic** authoring guide into every project so any coding agent
 (Claude Code, Cursor, Codex, …) knows the platform — **progressive disclosure**: a small map
-(`AGENTS.md`) + per-topic shards (`references/<topic>.md`), so an agent reads the map first and loads
-only the one shard a task needs.
+(`AGENTS.md`) + per-topic shards (`.references/<topic>.md`), so an agent reads the map first and loads
+only the one shard a task needs. The shards install as a **hidden `.references/`** to keep the project
+root clean; like `.claude`, they ship dotless as `scaffold/references/` in the wheel (setuptools' `**`
+glob skips dotfiles) and are renamed to `.references/` on install (`cli.py::_agent_doc_files`), so the
+map/skill links point at `.references/` while `build_outputs()` keys and the freshness test stay
+`references/`.
 
 - These artifacts are **generated** from the `docs/` project by release-only tooling
   `tooling/gen-agent-docs.py` (like `tooling/build-assets.mjs` regenerates vendored assets). The core
   is a pure `build_outputs() -> {relpath: content}` seam; `main()` writes them and evicts stale shards.
   **Re-run it after editing `docs/`** or the shipped guide goes stale —
   `tests/test_scaffold.py::test_agent_docs_are_freshly_generated` fails on drift.
-- The generated tree lives in the package under `dashdown/scaffold/` (`AGENTS.md`, `references/*.md`,
-  and a Claude Code skill under `scaffold/claude/`). The same generator emits `docs/llms.txt` (the
+- The generated tree lives in the package under `dashdown/scaffold/` (`AGENTS.md`, `references/*.md`
+  — dotless in the wheel, installed as `.references/`, and a Claude Code skill under `scaffold/claude/`). The same generator emits `docs/llms.txt` (the
   network-fetchable map) and `docs/llms-full.txt` (the monolith); `build.py` copies any root-level
   `llms.txt`/`llms-full.txt` into the static-build root.
-- **Content vs. wrapper (`dashdown/agent_targets.py`).** The `AGENTS.md` + `references/` content is
+- **Content vs. wrapper (`dashdown/agent_targets.py`).** The `AGENTS.md` + `.references/` content is
   **always** installed (it's tool-agnostic); only the thin per-tool **wrapper** that routes into it
   varies by tool. Each tool is an `AgentTarget` (`name`, `emit(scaffold_src) -> [EmittedFile]`,
   `detect(root)`) in a small registry — same shape as the connector/component registries. Built-ins:

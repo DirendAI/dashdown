@@ -156,13 +156,14 @@ slow and expensive; a map plus per-topic shards is not.
   `:::query` / `${param}` / component syntax), a table of contents linking each
   reference shard, and the "CLI loop" framing. ~120 lines, read first. Any agent that
   reads `AGENTS.md` natively (Claude Code, Cursor, Codex) picks this up.
-- **`references/<topic>.md`** — the *shards*. One per documentation topic (components,
+- **`.references/<topic>.md`** — the *shards*. One per documentation topic (components,
   connectors, queries, semantic layer, …), the full flattened docs for that topic. An
-  agent opens only the one shard its task needs. `references/catalog.md` is special: it
+  agent opens only the one shard its task needs. Installed as a hidden folder to keep the
+  project root clean. `.references/catalog.md` is special: it
   is introspected straight from the component/connector registries (the same data
   `dashdown components` prints), so it can't drift.
 - **A per-tool *wrapper*** — a thin *router* into the map and shards: a decision tree
-  ("editing X → read `references/Y`, verify with `dashdown Z`") plus task playbooks
+  ("editing X → read `.references/Y`, verify with `dashdown Z`") plus task playbooks
   (add-a-chart, add-a-connector, define-a-metric, debug-no-data, …). It links the map
   and shards rather than duplicating them. The map and shards above are tool-agnostic and
   always installed; only this wrapper differs per tool, in the format and location each
@@ -196,7 +197,7 @@ dashdown skill --target cursor # also/instead install the Cursor wrapper
 
 Without `--refresh`, existing files are left untouched, so your own edits survive an
 install that just fills in missing pieces. With `--refresh`, every file is overwritten
-to the current version and any `references/*.md` left behind by a renamed topic is
+to the current version and any `.references/*.md` left behind by a renamed topic is
 removed.
 
 ### Choosing which tools
@@ -244,7 +245,7 @@ render server-side yet show a blank chart. `dashdown screenshot` drives headless
 Chromium, waits for the chart-render handshake, and reports how many canvases drew —
 exiting non-zero if any failed, so it works as a verification gate.
 
-A typical loop: **read** the relevant `references/<topic>.md` for the concept →
+A typical loop: **read** the relevant `.references/<topic>.md` for the concept →
 **edit** the page → **`dashdown check`** it renders → **`dashdown query`** the data is
 real → **`dashdown screenshot`** the chart drew.
 
