@@ -205,7 +205,17 @@ export function initCombobox(el) {
           ? set.filter((x) => x !== v)
           : set.concat(v);
         commit(next.join(","));
-        renderOptions(options); // refresh checkmarks without a refetch
+        if (input.value !== "") {
+          // A pick consumes the search text (token-field UX): clear it, drop
+          // any pending debounced fetch for the stale term, and show the
+          // unfiltered list again for the next pick.
+          clearTimeout(debounceTimer);
+          input.value = "";
+          if (minChars === 0) fetchAndShow("");
+          else close();
+        } else {
+          renderOptions(options); // refresh checkmarks without a refetch
+        }
         input.focus();
       } else {
         commit(v);
