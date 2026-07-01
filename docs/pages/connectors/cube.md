@@ -1,7 +1,7 @@
 ---
 title: Cube
 sidebar_label: Cube
-sidebar_position: 15
+sidebar_position: 16
 ---
 
 # Cube connector

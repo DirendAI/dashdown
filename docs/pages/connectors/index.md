@@ -41,6 +41,7 @@ warehouse:
 | `mssql` | SQL DB-API | `dashdown-md[mssql]` | [SQL Server](/connectors/mssql) |
 | `snowflake` | SQL DB-API | `dashdown-md[snowflake]` | [Snowflake](/connectors/snowflake) |
 | `bigquery` | SQL DB-API | `dashdown-md[bigquery]` | [BigQuery](/connectors/bigquery) |
+| `clickhouse` | SQL DB-API | `dashdown-md[clickhouse]` | [ClickHouse](/connectors/clickhouse) |
 | `excel` | Tabular | `dashdown-md[excel]` | [Excel](/connectors/excel) |
 | `sheets` | Tabular | `dashdown-md[sheets]` | [Google Sheets](/connectors/sheets) |
 | `dax` | REST (Fabric/PBI) | `dashdown-md[dax]` | [DAX / Fabric](/connectors/dax) |

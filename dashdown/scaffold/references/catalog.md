@@ -50,13 +50,14 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `Value` | `by`, `column`, `currency`, `data`, `date_format`, `decimals`, `format`, `grain`, `index`, `locale`, `metric`, `prefix`, `row`, `series`, `suffix` | Display a single value from a query result. |
 | `Violin` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Violin (kernel density) distribution chart; same attributes as BoxPlot. |
 
-## Connectors (15)
+## Connectors (16)
 
 `type:` in `sources.yaml`. Install the listed extra before using a non-core connector; config keys support `${ENV_VAR}` expansion.
 
 | Type | Install | Config keys | Summary |
 |---|---|---|---|
 | `bigquery` | `pip install 'dashdown-md[bigquery]'` | `connect_args`, `credentials_file`, `credentials_path`, `dataset`, `location`, `project` | Google BigQuery connector (via google-cloud-bigquery). |
+| `clickhouse` | `pip install 'dashdown-md[clickhouse]'` | `connect_args`, `database`, `db`, `dsn`, `host`, `password`, `port`, `secure`, `url`, `user`, `username` | ClickHouse connector (via clickhouse-connect). |
 | `csv` | core | `directory`, `files` | CSV source: an always-in-memory DuckDB with one table per file. |
 | `cube` | `pip install 'dashdown-md[cube]'` | `algorithm`, `api_path`, `private_key`, `secret`, `security_context`, `timeout`, `token`, `token_ttl`, `url` | HTTP client for a Cube deployment — driven by the Cube semantic backend. |
 | `dax` | `pip install 'dashdown-md[dax]'` | `client_id`, `client_secret`, `dataset_id`, `tenant_id`, `workspace_id` | Executes DAX queries against a Fabric / Power BI dataset. |

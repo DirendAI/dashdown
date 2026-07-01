@@ -53,6 +53,9 @@ mysql = ["pymysql>=1.1"]
 mssql = ["pyodbc>=5.0"]
 snowflake = ["snowflake-connector-python>=3.0"]
 bigquery = ["google-cloud-bigquery>=3.0"]
+# ClickHouse Inc.'s official client (HTTP protocol); its DB-API wrapper covers
+# self-hosted ClickHouse and ClickHouse Cloud alike.
+clickhouse = ["clickhouse-connect>=0.7"]
 # Spreadsheet connectors. Rows are loaded into an in-memory DuckDB for SQL.
 excel = ["openpyxl>=3.1"]
 sheets = ["gspread>=6.0"]
@@ -112,6 +115,7 @@ mysql = "dashdown.data.mysql_connector:MySQLConnector"
 mssql = "dashdown.data.mssql_connector:MSSQLConnector"
 snowflake = "dashdown.data.snowflake_connector:SnowflakeConnector"
 bigquery = "dashdown.data.bigquery_connector:BigQueryConnector"
+clickhouse = "dashdown.data.clickhouse_connector:ClickHouseConnector"
 excel = "dashdown.data.excel_connector:ExcelConnector"
 sheets = "dashdown.data.sheets_connector:GoogleSheetsConnector"
 cube = "dashdown.data.cube_connector:CubeConnector"

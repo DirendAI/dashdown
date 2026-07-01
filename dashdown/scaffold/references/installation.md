@@ -112,7 +112,7 @@ A few common ones — see **[Connectors](/connectors)** for the full list, or ru
 
 | Extra | Brings |
 |---|---|
-| `postgres`, `mysql`, `mssql`, `snowflake`, `bigquery` | SQL database connectors |
+| `postgres`, `mysql`, `mssql`, `snowflake`, `bigquery`, `clickhouse` | SQL database connectors |
 | `excel`, `sheets` | Spreadsheet connectors |
 | `dax` | Microsoft Fabric / Power BI |
 | `pdf` | Presentation PDF export (`dashdown pdf`) |
