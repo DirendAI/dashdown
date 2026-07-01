@@ -15,27 +15,27 @@ The guide is **sharded for cheap reading**. Load only what the task needs:
 
 1. **[`AGENTS.md`](../../../AGENTS.md)** (project root) — the *map*: a one-screen cheat-sheet
    (`:::query` / `${param}` / component syntax) + an index of per-topic references. Skim it first.
-2. **`references/<topic>.md`** (project root, linked below) — the full docs for one topic. Open the
+2. **`.references/<topic>.md`** (project root, linked below) — the full docs for one topic. Open the
    **one** shard your task needs, not the whole set.
 3. **The `dashdown` CLI** — for *facts* (a component's attrs, a connector's keys, real data),
    prefer the CLI over re-reading prose. **Concepts from references, facts from the CLI.** With no
-   shell, [`references/catalog.md`](../../../references/catalog.md) is the file-readable form of
+   shell, [`references/catalog.md`](../../../.references/catalog.md) is the file-readable form of
    `dashdown components` (every component's attrs + every connector's config keys).
 
 ## Decision tree — what to read, how to verify
 
 | You're editing… | Read | Verify with |
 |---|---|---|
-| A page / chart / table / counter | [components](../../../references/components.md) (or `dashdown components`) | `dashdown check`, then `dashdown screenshot <page>` (did it draw?) |
-| `sources.yaml` (a connector) | [connectors](../../../references/connectors.md) (or `dashdown components --connectors`) | `dashdown connectors --test` |
-| A shared query in `queries/*.sql` | [queries](../../../references/queries.md) | `dashdown query "…" -c <conn>` |
-| A query as Python (`queries/*.py`) | [python-queries](../../../references/python-queries.md) | `dashdown check` |
-| A `semantic/*.yml` metric model | [semantic-layer](../../../references/semantic-layer.md) | `dashdown metric --list` |
-| A dropdown / search / date filter | [filters](../../../references/filters.md) | `dashdown serve .` (interact) |
-| Number / date display | [formatting](../../../references/formatting.md) | `dashdown serve .` |
-| `dashdown.yaml` (theme/auth/search/embed) | [configuration](../../../references/configuration.md) (+ [theming](../../../references/theming.md), [authentication](../../../references/authentication.md), [embedding](../../../references/embedding.md)) | `dashdown check` |
-| A custom component or connector | [extending](../../../references/extending.md) | `dashdown check` |
-| Static export / PDF / CSV | [exporting](../../../references/exporting.md) | `dashdown build . --out dist` |
+| A page / chart / table / counter | [components](../../../.references/components.md) (or `dashdown components`) | `dashdown check`, then `dashdown screenshot <page>` (did it draw?) |
+| `sources.yaml` (a connector) | [connectors](../../../.references/connectors.md) (or `dashdown components --connectors`) | `dashdown connectors --test` |
+| A shared query in `queries/*.sql` | [queries](../../../.references/queries.md) | `dashdown query "…" -c <conn>` |
+| A query as Python (`queries/*.py`) | [python-queries](../../../.references/python-queries.md) | `dashdown check` |
+| A `semantic/*.yml` metric model | [semantic-layer](../../../.references/semantic-layer.md) | `dashdown metric --list` |
+| A dropdown / search / date filter | [filters](../../../.references/filters.md) | `dashdown serve .` (interact) |
+| Number / date display | [formatting](../../../.references/formatting.md) | `dashdown serve .` |
+| `dashdown.yaml` (theme/auth/search/embed) | [configuration](../../../.references/configuration.md) (+ [theming](../../../.references/theming.md), [authentication](../../../.references/authentication.md), [embedding](../../../.references/embedding.md)) | `dashdown check` |
+| A custom component or connector | [extending](../../../.references/extending.md) | `dashdown check` |
+| Static export / PDF / CSV | [exporting](../../../.references/exporting.md) | `dashdown build . --out dist` |
 
 ## Task playbooks
 
@@ -49,7 +49,7 @@ required keys + install extra from `dashdown components --connectors`. Install t
 
 **Write a shared query.** Drop a `.sql` (or `.py`) under `queries/`; the name is its path with
 `/`→`.` (`queries/finance/mrr.sql` → `finance.mrr`). Reference it from any page as `data={finance.mrr}`.
-Test the SQL with `dashdown query "…" -c <conn>`. Details: [queries](../../../references/queries.md).
+Test the SQL with `dashdown query "…" -c <conn>`. Details: [queries](../../../.references/queries.md).
 
 **Define a metric.** Add a `semantic/*.yml` model (measures + dimensions), then use
 `<BarChart metric={model.measure} by={model.dimension} />` — no per-chart SQL. List what exists
@@ -71,7 +71,7 @@ not that a chart *painted*. Full loop: `dashdown check` (renders, no bad tags/at
 reports `N/M chart(s) drew`, exits non-zero if any stayed blank or errored — your visual gate).
 
 **Ship a build.** `dashdown build . --out dist` (static export — queries run once at build) or
-`dashdown pdf .` (presentation PDF; needs the `[pdf]` extra). See [exporting](../../../references/exporting.md).
+`dashdown pdf .` (presentation PDF; needs the `[pdf]` extra). See [exporting](../../../.references/exporting.md).
 
 ## A complete page, end to end (copy this shape)
 
@@ -129,7 +129,7 @@ The mistakes coding agents make most on Dashdown — avoid them up front:
   number shows. For a KPI in °C or mm, write the unit as a `suffix`:
   `<Counter data={k} column="avg_high" format="number" decimals=1 suffix="°C" label="Avg high" />`.
   Project-wide defaults go in a **`format:`** block in `dashdown.yaml` (`locale` / `currency` /
-  `date_format`) — there is **no** `theme:` / `theme.formats` config. See [formatting](../../../references/formatting.md).
+  `date_format`) — there is **no** `theme:` / `theme.formats` config. See [formatting](../../../.references/formatting.md).
 - **Default to NO unit suffix — never guess one.** A raw numeric column (`wind`, `speed`, `pressure`, a
   count, an amount) carries whatever unit the source uses, and the CSV almost never states it — so your
   guess is frequently wrong. **Concretely: a weather `wind` column is m/s, not km/h** (labeling it `km/h`
@@ -141,7 +141,7 @@ The mistakes coding agents make most on Dashdown — avoid them up front:
   non-existent attr is dropped with no warning, and `dashdown check` won't catch it: `page_size` (the real
   attr is **`page-size`**), or `include_all` / `all_label` on a `<Dropdown>` (those are `<ButtonGroup>`'s), or
   `series="A,B"` used as a *rename* for a multi-metric `y` (it isn't — `series` groups by a column). Confirm
-  every attr against `dashdown components` / [catalog](../../../references/catalog.md). (`<Dropdown>` already
+  every attr against `dashdown components` / [catalog](../../../.references/catalog.md). (`<Dropdown>` already
   emits an "All" option for single-select; empty value = all — you don't add one.)
 - **No Markdown headings or prose inside a `<Grid>` (or any component tag).** A `### Title` sitting
   between `<Grid …>` and its child components renders as **literal text**, not a heading. Put the section

@@ -1,6 +1,6 @@
 """Coding-agent targets: where each tool wants its guide wrapper, and what to put there.
 
-The *content* of the authoring guide — `AGENTS.md` (the map) + `references/<topic>.md`
+The *content* of the authoring guide — `AGENTS.md` (the map) + `.references/<topic>.md`
 (the shards) — is tool-agnostic and is **always** installed. Only the thin **invocation
 wrapper** is per-tool: a Claude Code skill under `.claude/`, a Cursor rule under
 `.cursor/rules/`, a `GEMINI.md`, … — and each wrapper is just a router that points back at
@@ -68,14 +68,14 @@ _POINTER_BODY = (
     "This project is a **Dashdown** dashboard (Markdown pages with embedded SQL and\n"
     "`<Component />` tags). The authoring guide is already in this repo, at the project root:\n\n"
     "- **`AGENTS.md`** — the map: a one-screen cheat-sheet plus an index of topics.\n"
-    "- **`references/<topic>.md`** — full docs for one topic; open only the shard a task needs.\n\n"
+    "- **`.references/<topic>.md`** — full docs for one topic; open only the shard a task needs.\n\n"
     "Read `AGENTS.md` first, then the single relevant shard — don't read every shard. Prefer\n"
     "the `dashdown` CLI for facts (`dashdown components`, `dashdown check`, `dashdown query`).\n"
 )
 
 
 def _pointer(dest: str, *, header: str, front: str = "") -> EmittedFile:
-    """A wrapper that just redirects into the shared `AGENTS.md` + `references/`."""
+    """A wrapper that just redirects into the shared `AGENTS.md` + `.references/`."""
     return EmittedFile(dest=Path(dest), content=f"{front}{header}\n\n{_POINTER_BODY}")
 
 

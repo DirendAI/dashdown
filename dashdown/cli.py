@@ -1011,7 +1011,7 @@ def skill(
 ) -> None:
     """Install or update the bundled coding-agent guide in an existing project.
 
-    Adds (or, with `--refresh`, updates) `AGENTS.md`, the `references/` shards, and a
+    Adds (or, with `--refresh`, updates) `AGENTS.md`, the `.references/` shards, and a
     per-tool wrapper — the same progressive-disclosure guide `dashdown new` scaffolds. The
     guide is versioned with the framework, so a project scaffolded on an older release can
     pull the current one without re-scaffolding:
@@ -1020,7 +1020,7 @@ def skill(
         dashdown skill --target cursor    # also/instead install the Cursor rule
         dashdown skill --refresh          # overwrite to this version's guide
 
-    `AGENTS.md` + `references/` are always installed (tool-agnostic); `--target` only
+    `AGENTS.md` + `.references/` are always installed (tool-agnostic); `--target` only
     chooses which per-tool wrappers ride on top.
     """
     root = project.resolve()
@@ -1051,8 +1051,9 @@ def _agent_doc_files(targets: list[str]) -> list[EmittedFile]:
 
     Always ships the progressive-disclosure guide generated from `docs/` by
     `tooling/gen-agent-docs.py`: `AGENTS.md` (the tool-agnostic *map* — cheat-sheet +
-    a table of contents) alongside `references/<topic>.md` (the per-topic detail shards
-    the map links to). That content is **tool-agnostic**, so it's the baseline regardless
+    a table of contents) alongside `.references/<topic>.md` (the per-topic detail shards
+    the map links to; stored dotless in the wheel, installed hidden). That content is
+    **tool-agnostic**, so it's the baseline regardless
     of ``targets``. On top, each name in ``targets`` contributes its per-tool **wrapper**
     (a Claude skill, a Cursor rule, …) — a thin router into the shared content, emitted by
     its `AgentTarget` (see `dashdown/agent_targets.py`).
@@ -1064,8 +1065,11 @@ def _agent_doc_files(targets: list[str]) -> list[EmittedFile]:
         items.append(EmittedFile(dest=Path("AGENTS.md"), source=agents))
     references = src / "references"
     if references.is_dir():
+        # Stored dotless in the package (so setuptools' `scaffold/**/*` ships it), installed
+        # hidden under `.references/` to keep the project root clean — the AGENTS.md map and
+        # the skill wrappers link to `.references/` (see tooling/gen-agent-docs.py).
         for ref in sorted(references.glob("*.md")):
-            items.append(EmittedFile(dest=Path("references") / ref.name, source=ref))
+            items.append(EmittedFile(dest=Path(".references") / ref.name, source=ref))
     for name in targets:
         target = get_agent_target(name)
         if target is None:  # defensive — callers validate via `_resolve_targets`
@@ -1124,10 +1128,10 @@ def _install_agent_docs(
     """Install the bundled guide into ``root``; return ``(written, skipped)`` rel paths.
 
     ``targets`` selects which per-tool wrappers to add on top of the always-installed
-    `AGENTS.md` + `references/` baseline; ``None`` resolves them from config/detection.
+    `AGENTS.md` + `.references/` baseline; ``None`` resolves them from config/detection.
     Without ``refresh`` an existing file is left untouched (so a project's local edits
     survive an install that just fills in missing pieces); with ``refresh`` every file is
-    overwritten to the wheel's current version and any ghost `references/*.md` a renamed
+    overwritten to the wheel's current version and any ghost `.references/*.md` a renamed
     docs topic left behind is pruned (mirroring `gen-agent-docs.py`'s stale-shard evict).
     """
     if targets is None:
@@ -1135,9 +1139,9 @@ def _install_agent_docs(
     items = _agent_doc_files(targets)
     if refresh:
         shipped_refs = {
-            it.dest.name for it in items if it.dest.parent.as_posix() == "references"
+            it.dest.name for it in items if it.dest.parent.as_posix() == ".references"
         }
-        refs_dir = root / "references"
+        refs_dir = root / ".references"
         if refs_dir.is_dir():
             for existing in refs_dir.glob("*.md"):
                 if existing.name not in shipped_refs:

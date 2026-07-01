@@ -67,7 +67,7 @@ dashdown serve .
 
 `--target` picks which coding agents to set up a wrapper for (default `claude`); the
 choice is recorded in `dashdown.yaml` as `agents:`, so later `dashdown skill` runs keep
-them in sync. `AGENTS.md` + `references/` are always installed regardless.
+them in sync. `AGENTS.md` + `.references/` are always installed regardless.
 
 ```bash
 dashdown new my-dashboard --target claude,cursor   # set up both wrappers
@@ -77,7 +77,7 @@ See [Coding agents](/ai/coding-agents) for the supported tools.
 
 ## skill
 
-Install or update the bundled coding-agent guide (`AGENTS.md` + the `references/`
+Install or update the bundled coding-agent guide (`AGENTS.md` + the `.references/`
 shards + a per-tool authoring skill) in an **existing** project. The guide is
 versioned with the framework, so a project scaffolded on an older release pulls the
 current one without re-scaffolding. See [Coding agents](/ai/coding-agents) for the full
