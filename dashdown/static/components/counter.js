@@ -5,6 +5,7 @@
 "use strict";
 
 import { fetchQueryData, recordsOf, queryUsesFilters, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts } from "../core.js";
+import { showLoading, hideLoading } from "../loading.js";
 import { mountFilterBadge } from "./filter_badge.js";
 
 function getQueryDefs() {
@@ -79,32 +80,42 @@ export function initCounter(el) {
     // flaky source, and avoids a redundant request. (A live counter's delta
     // badge therefore comes from a static `delta=` only; compare-query deltas
     // need the non-live fetch.) The sparkline still fetches independently.
-    if (!isLiveQuery(queryName))
+    if (!isLiveQuery(queryName)) {
+      // First load: the server-rendered skeleton is the loading state
+      // (showLoading self-gates on it). Re-fetches float the shared spinner
+      // overlay over the card, so a slow query is visibly in flight instead
+      // of silently showing the stale value.
+      showLoading(el);
       fetchQueryData(queryName, {}, filters)
         .then((data) => {
-        const records = recordsOf(data);
-        const value = extractValue(records, rowIndex, column, colIndex);
-        setCounterValue(el, value, config, prefix, suffix);
+          hideLoading(el);
+          const records = recordsOf(data);
+          const value = extractValue(records, rowIndex, column, colIndex);
+          setCounterValue(el, value, config, prefix, suffix);
 
-        // Delta badge: explicit value wins, else derive from the compare query.
-        if (config.delta !== undefined) {
-          updateDelta(el, parseFloat(config.delta), invert);
-        } else if (config.compare_query) {
-          fetchQueryData(config.compare_query, {}, filters)
-            .then((cmp) => {
-              const prev = extractValue(
-                recordsOf(cmp),
-                config.compare_row || 0,
-                config.compare_column || column,
-                config.compare_index !== undefined ? config.compare_index : colIndex,
-              );
-              const pct = computeDelta(value, prev);
-              if (pct !== null) updateDelta(el, pct, invert);
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => updateCounter(el, "Error", prefix, suffix));
+          // Delta badge: explicit value wins, else derive from the compare query.
+          if (config.delta !== undefined) {
+            updateDelta(el, parseFloat(config.delta), invert);
+          } else if (config.compare_query) {
+            fetchQueryData(config.compare_query, {}, filters)
+              .then((cmp) => {
+                const prev = extractValue(
+                  recordsOf(cmp),
+                  config.compare_row || 0,
+                  config.compare_column || column,
+                  config.compare_index !== undefined ? config.compare_index : colIndex,
+                );
+                const pct = computeDelta(value, prev);
+                if (pct !== null) updateDelta(el, pct, invert);
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {
+          hideLoading(el);
+          updateCounter(el, "Error", prefix, suffix);
+        });
+    }
 
     // Sparkline fetches independently of the headline value.
     if (config.sparkline_query) {

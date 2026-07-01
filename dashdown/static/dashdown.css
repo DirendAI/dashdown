@@ -885,6 +885,12 @@ body {
   border-radius: var(--dashdown-radius-card);
 }
 
+/* On compact KPI cards the shared lg spinner reads oversized — scale it down.
+   (Only loading-lg ships in the Tailwind bundle, so size here, not via class.) */
+.dashdown-counter > .dashdown-loading-overlay .loading {
+  width: 1.5rem;
+}
+
 /* Ensure card-body has relative positioning */
 .card-body {
   position: relative;
