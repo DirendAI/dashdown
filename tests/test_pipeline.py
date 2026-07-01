@@ -285,6 +285,34 @@ class TestBuildOptionsSql:
         out = build_options_sql(self.INNER, "name", "Smith")
         assert "ILIKE '%' || 'Smith' || '%'" in out
 
+    def test_search_ranks_prefix_matches_first(self):
+        # Typing "num" must surface "numpy" above "abnum": prefix matches sort
+        # ahead of substring matches, case-insensitively alphabetical within each
+        # band (so "numpy" also beats "NumPyX", and an exact match comes first).
+        out = build_options_sql(self.INNER, "name", "num")
+        assert (
+            "ORDER BY CASE WHEN value ILIKE 'num' || '%' THEN 0 ELSE 1 END, LOWER(value), value"
+            in out
+        )
+        # The ranking layer wraps the DISTINCT (Postgres rejects a DISTINCT
+        # query ordered by an expression outside its select list).
+        assert ") AS _dd_vals" in out
+        import duckdb
+
+        rows = duckdb.sql(
+            build_options_sql(
+                "SELECT * FROM (VALUES ('abnum'), ('NumPyX'), ('numpy'), ('numba'), ('zeta')) t(name)",
+                "name",
+                "num",
+            )
+        ).fetchall()
+        assert [r[0] for r in rows] == ["numba", "numpy", "NumPyX", "abnum"]
+
+    def test_no_search_keeps_single_layer_shape(self):
+        out = build_options_sql(self.INNER, "name")
+        assert "_dd_vals" not in out
+        assert "ORDER BY value" in out
+
     def test_search_single_quote_is_doubled(self):
         # A crafted search term can only ever be a quoted string literal.
         out = build_options_sql(self.INNER, "name", "O'Reilly")

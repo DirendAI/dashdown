@@ -917,7 +917,10 @@ def build_options_sql(
 
     Selects up to ``limit`` (clamped to ``MAX_OPTIONS_LIMIT``) distinct, non-null
     values of the column, optionally narrowed by a case-insensitive substring match.
-    SQL connectors only — the wrap is meaningless for a non-SQL backend (e.g. DAX).
+    A search ranks **prefix matches first** (typing ``num`` surfaces ``numpy`` above
+    ``abnum``), case-insensitively alphabetical within each band — which also puts an
+    exact match first, since a string sorts before anything it prefixes. SQL
+    connectors only — the wrap is meaningless for a non-SQL backend (e.g. DAX).
     """
     if not _OPTIONS_COLUMN_RE.match(column or ""):
         raise ValueError(f"invalid column name for options: {column!r}")
@@ -930,12 +933,23 @@ def build_options_sql(
     col = f'"{column}"'
     inner = inner_sql.strip().rstrip(";").strip()
     where = [f"{col} IS NOT NULL"]
+    distinct = f"SELECT DISTINCT CAST({col} AS VARCHAR) AS value\nFROM (\n{inner}\n) AS _dd_opt\n"
     if search:
         esc = search.replace("'", "''")
         where.append(f"CAST({col} AS VARCHAR) ILIKE '%' || '{esc}' || '%'")
+        # Prefix matches rank first. The ranking lives in an extra outer layer
+        # because `SELECT DISTINCT … ORDER BY <expr not in the select list>` is
+        # rejected by Postgres.
+        return (
+            f"SELECT value FROM (\n"
+            f"{distinct}"
+            f"WHERE {' AND '.join(where)}\n"
+            f") AS _dd_vals\n"
+            f"ORDER BY CASE WHEN value ILIKE '{esc}' || '%' THEN 0 ELSE 1 END, LOWER(value), value\n"
+            f"LIMIT {n}"
+        )
     return (
-        f"SELECT DISTINCT CAST({col} AS VARCHAR) AS value\n"
-        f"FROM (\n{inner}\n) AS _dd_opt\n"
+        f"{distinct}"
         f"WHERE {' AND '.join(where)}\n"
         f"ORDER BY value\n"
         f"LIMIT {n}"
