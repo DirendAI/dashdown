@@ -23,19 +23,18 @@ export function showLoading(el) {
   // A skeleton is present only before the first real render — leave it be.
   if (el.querySelector(".skeleton")) return;
 
-  let cardBody = el.querySelector(".card-body");
-  if (!cardBody) {
-    cardBody = document.createElement("div");
-    cardBody.className = "card-body p-2";
-    el.appendChild(cardBody);
-  }
-  cardBody.style.position = "relative";
+  // Overlay host: the card-body when the component has one (charts, tables,
+  // pivots), else the component root itself (counters — their root *is* the
+  // card). An empty synthetic card-body has zero height, so an overlay parked
+  // in one is invisible.
+  const host = el.querySelector(".card-body") || el;
+  host.style.position = "relative";
 
   const overlay = document.createElement("div");
   overlay.className = "dashdown-loading-overlay";
   overlay.innerHTML =
     '<span class="loading loading-spinner loading-lg text-primary"></span>';
-  cardBody.appendChild(overlay);
+  host.appendChild(overlay);
 }
 
 /**
