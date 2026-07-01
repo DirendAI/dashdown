@@ -8,6 +8,7 @@ from dashdown.components.builtin._util import (
     esc,
     filter_bar_marker,
     new_id,
+    resolve_debounce,
     safe_json,
 )
 from dashdown.render.attrs import DataRef
@@ -60,6 +61,10 @@ class Combobox(Component):
     - limit: Optional. Max options per fetch (default 50; server caps at 200).
     - min_chars: Optional. Only search once this many characters are typed
       (default 0 — show the first page of values on focus).
+    - debounce: Optional. Quiet period (ms) after the last keystroke before the
+      options search hits the server. Defaults to the project-wide
+      ``filters.debounce`` (300 unless raised in dashdown.yaml); raise it for a
+      slow / per-query-expensive warehouse so autocomplete requests don't pile up.
     - url_sync: Optional. Mirror the value to the URL (default ``true``).
     - bar: Optional. Relocate into the page's top filter bar (default: inline).
 
@@ -95,6 +100,9 @@ class Combobox(Component):
         placeholder = attr_str(attrs, "placeholder", "Search…")
         limit = attr_int(attrs, "limit", 50)
         min_chars = attr_int(attrs, "min_chars", 0)
+        # Debounce the type-to-search options fetch: per-control `debounce=` wins,
+        # else the project-wide `filters.debounce` default (see resolve_debounce).
+        debounce = resolve_debounce(attrs, ctx)
         url_sync = attrs.get("url_sync", True)
         # Inline by default; `bar` relocates into the top filter row. See
         # filter_bar_marker.
@@ -110,6 +118,7 @@ class Combobox(Component):
             "placeholder": placeholder,
             "limit": limit,
             "min_chars": min_chars,
+            "debounce": debounce,
             "url_sync": url_sync,
         }
 

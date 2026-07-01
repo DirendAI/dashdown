@@ -6,6 +6,7 @@ from dashdown.components.builtin._util import (
     esc,
     filter_bar_marker,
     new_id,
+    resolve_debounce,
     safe_json,
 )
 
@@ -22,7 +23,9 @@ class Search(Component):
     - label: Optional. Display label (defaults to "Search").
     - placeholder: Optional. Input placeholder text (defaults to "Search...")
     - url_sync: Optional. Enable URL sync (default: True)
-    - debounce: Optional. Debounce delay in milliseconds (default: 300)
+    - debounce: Optional. Debounce delay in milliseconds — quiet period after the
+      last keystroke before the value re-fetches data. Defaults to the project-wide
+      `filters.debounce` (300 unless raised in dashdown.yaml).
     - bar: Optional. Relocate this control into the page's top filter bar.
       Default is inline (renders where authored).
 
@@ -45,7 +48,9 @@ class Search(Component):
         label = attr_str(attrs, "label", "Search")
         placeholder = attr_str(attrs, "placeholder", "Search...")
         url_sync = attrs.get("url_sync", True)
-        debounce = attrs.get("debounce", 300)
+        # Quiet period before a keystroke re-fetches: per-control `debounce=` wins,
+        # else the project-wide `filters.debounce` default (see resolve_debounce).
+        debounce = resolve_debounce(attrs, ctx)
         # Inline by default (renders where authored); `bar` relocates it into the
         # top filter row (read by filter_bar.js). See filter_bar_marker.
         filter_bar_attr = filter_bar_marker(attrs, ctx)

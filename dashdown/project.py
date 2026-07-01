@@ -251,6 +251,50 @@ def parse_global_filters_config(raw: Any) -> GlobalDateFilterConfig:
 
 
 @dataclass
+class FiltersConfig:
+    """Optional ``filters`` block — cross-cutting behavior for the interactive
+    filter controls (Search / Combobox / Slider / RangeSlider / DateRange).
+
+        filters:
+          debounce: 500     # ms of quiet after the last keystroke or slider drag
+                            # before a filter change re-fetches data (default 300)
+
+    ``debounce`` is the **project-wide default**: every filter control commits its
+    value to the store — the single reactive path data components re-fetch off —
+    only after this quiet period, coalescing a burst of keystrokes / drag ticks
+    into a single fetch. Raise it for a slow, per-query-expensive warehouse (e.g.
+    BigQuery) where firing on partial input piles up requests; lower it for a
+    snappy local backend (DuckDB/CSV) where instant feedback is free. A single
+    control overrides it with a per-instance ``debounce=`` attribute.
+    """
+
+    debounce: int = 300
+
+
+def parse_filters_config(raw: Any) -> FiltersConfig:
+    """Parse and validate the ``filters:`` block. Raises ValueError when malformed
+    so the server refuses to start half-broken (same policy as ``auth:`` etc.)."""
+    if raw is None:
+        return FiltersConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("filters: must be a mapping (a 'debounce' key)")
+
+    cfg = FiltersConfig()
+    debounce = raw.get("debounce")
+    if debounce is not None:
+        if (
+            not isinstance(debounce, int)
+            or isinstance(debounce, bool)
+            or debounce < 0
+        ):
+            raise ValueError(
+                "filters.debounce must be a non-negative integer (milliseconds)"
+            )
+        cfg.debounce = debounce
+    return cfg
+
+
+@dataclass
 class SearchConfig:
     """Optional ``search`` block — the built-in full-text search box shown in the
     app header (centered) and at the top of the mobile menu on every page.
@@ -382,6 +426,7 @@ class ProjectConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     embed: EmbedConfig = field(default_factory=EmbedConfig)
     global_date: GlobalDateFilterConfig = field(default_factory=GlobalDateFilterConfig)
+    filters: FiltersConfig = field(default_factory=FiltersConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     sidebar: SidebarConfig = field(default_factory=SidebarConfig)
     python_queries: PythonQueriesConfig = field(default_factory=PythonQueriesConfig)
@@ -584,6 +629,7 @@ def load_project(root: Path) -> Project:
             llm=parse_llm_config(raw.get("llm")),
             embed=parse_embed_config(raw.get("embed")),
             global_date=parse_global_filters_config(raw.get("global_filters")),
+            filters=parse_filters_config(raw.get("filters")),
             search=parse_search_config(raw.get("search")),
             sidebar=parse_sidebar_config(raw.get("sidebar")),
             python_queries=parse_python_queries_config(raw.get("python_queries")),

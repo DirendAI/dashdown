@@ -8,6 +8,7 @@ from dashdown.components.builtin._util import (
     filter_bar_marker,
     format_config,
     new_id,
+    resolve_debounce,
     safe_json,
 )
 
@@ -46,6 +47,9 @@ class Slider(Component):
     - default: Optional. Initial value (default: ``min``). URL params still win.
     - format / currency / decimals / locale: Optional. Format the readout value
       (same ``formatValue`` config the other components use).
+    - debounce: Optional. Quiet period (ms) after the last drag tick before the
+      value re-fetches data (the handle/readout still move instantly). Defaults to
+      the project-wide ``filters.debounce`` (300 unless raised in dashdown.yaml).
     - url_sync: Optional. Mirror the value to the URL (default ``true``).
     - bar: Optional. Relocate into the page's top filter bar (default: inline).
 
@@ -78,6 +82,10 @@ class Slider(Component):
         default = max(lo_bound, min(default, hi_bound))
 
         url_sync = attrs.get("url_sync", True)
+        # Debounce the store write (data re-fetch) so a drag settles before firing;
+        # the handle/readout stay live. Per-control `debounce=` wins, else the
+        # project-wide `filters.debounce` default (see resolve_debounce).
+        debounce = resolve_debounce(attrs, ctx)
         fmt = format_config(attrs)
         # Inline by default; `bar` relocates into the top filter row. See
         # filter_bar_marker.
@@ -91,6 +99,7 @@ class Slider(Component):
             "max": hi_bound,
             "step": step,
             "default": default,
+            "debounce": debounce,
             "url_sync": url_sync,
         }
         if fmt:

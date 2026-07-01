@@ -8,7 +8,7 @@
 
 "use strict";
 
-import { parseUrlParams, formatValue, resolveFormatOpts } from "../core.js";
+import { parseUrlParams, formatValue, resolveFormatOpts, debounce } from "../core.js";
 
 /**
  * Mirror the range pair to the URL. A value equal to the track bound is treated
@@ -60,6 +60,7 @@ window.rangeSliderComponent = function (name) {
     maxParam: "",
     urlSync: true,
     format: null,
+    syncDebounced: null,
 
     init() {
       let config = {};
@@ -76,6 +77,14 @@ window.rangeSliderComponent = function (name) {
       this.maxParam = config.max_param || `${name}_max`;
       this.urlSync = this.$el.dataset.urlSync === "true";
       this.format = config.format || null;
+      // Debounce the store write (data re-fetch) so dragging either handle settles
+      // into one fetch; the handles + readout (bound to lo/hi) stay live. The seed
+      // push below is immediate so the first fetch is already filtered.
+      const debounceMs = toNum(config.debounce, 300);
+      this.syncDebounced = debounce(() => {
+        this.pushToFilters();
+        if (this.urlSync) this.syncUrl();
+      }, debounceMs);
 
       // First-load seed: URL params win over the author's default (a shared deep
       // link must override), and the default falls back to the full track.
@@ -115,14 +124,13 @@ window.rangeSliderComponent = function (name) {
       }
 
       // Single reactive path: the handles write lo/hi (clamped in onLoInput/
-      // onHiInput), and these watchers mirror them to the store + URL.
+      // onHiInput), and these watchers mirror them to the store + URL — debounced
+      // so a drag (or a lo/hi pair moving together) coalesces into one re-fetch.
       this.$watch("lo", () => {
-        this.pushToFilters();
-        if (this.urlSync) this.syncUrl();
+        this.syncDebounced();
       });
       this.$watch("hi", () => {
-        this.pushToFilters();
-        if (this.urlSync) this.syncUrl();
+        this.syncDebounced();
       });
     },
 

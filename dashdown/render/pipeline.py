@@ -573,6 +573,7 @@ def render_page(
     global_date: Any = None,
     embed: bool = False,
     embed_enabled: bool = False,
+    filter_debounce: int = 300,
 ) -> RenderedPage:
     params = params or {}
     library = library or {}
@@ -613,6 +614,7 @@ def render_page(
         static_build=static_build,
         query_connectors=query_connectors,
         semantic_models=semantic_models,
+        filter_debounce=filter_debounce,
     )
     body_html = render_components(body_html, ctx)
 

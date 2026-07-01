@@ -6,6 +6,7 @@ from dashdown.components.builtin._util import (
     esc,
     filter_bar_marker,
     new_id,
+    resolve_debounce,
     safe_json,
 )
 
@@ -61,6 +62,9 @@ class DateRange(Component):
       when nothing is set (no URL params and no persisted value).
     - persist: Optional. Remember the selection in localStorage so it survives
       navigation — the mechanism behind the project-wide global date filter.
+    - debounce: Optional. Quiet period (ms) before a change re-fetches data, so a
+      preset (which sets start+end) or a custom edit coalesces into one fetch.
+      Defaults to the project-wide ``filters.debounce`` (300 unless raised).
     - bar: Optional. Relocate this control into the page's top filter bar.
       Default is inline (renders where authored).
 
@@ -91,6 +95,11 @@ class DateRange(Component):
         # project-wide global date filter (see GlobalDateFilterConfig).
         default_preset = attr_str(attrs, "default", "") or None
         persist = bool(attrs.get("persist", False))
+        # Debounce the store write (data re-fetch): a preset sets start+end and a
+        # custom edit touches each input, so coalesce them into one fetch. The
+        # initial seed stays immediate (daterange.js). Per-control `debounce=`
+        # wins, else the project-wide `filters.debounce` (see resolve_debounce).
+        debounce = resolve_debounce(attrs, ctx)
         # Inline by default (renders where authored); `bar` relocates it into the
         # top filter row (read by filter_bar.js). The global date control passes
         # `filter_bar=True` in embed mode to route itself there. See filter_bar_marker.
@@ -125,6 +134,7 @@ class DateRange(Component):
             "url_sync": url_sync,
             "default": default_preset,
             "persist": persist,
+            "debounce": debounce,
         }
 
         # Compact pill: inline label prefix + preset select; the two date inputs

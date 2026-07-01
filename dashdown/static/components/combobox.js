@@ -12,7 +12,10 @@
 
 import { parseUrlParams, fetchQueryOptions } from "../core.js";
 
-const DEBOUNCE_MS = 200;
+// Fallback if a config somehow omits `debounce` (older cached page markup); the
+// component normally reads the resolved value (project `filters.debounce` or the
+// per-control `debounce=`) from its config.
+const DEFAULT_DEBOUNCE_MS = 300;
 
 /** Split a comma-joined store value into a trimmed, non-empty array. */
 function splitValues(v) {
@@ -43,6 +46,7 @@ export function initCombobox(el) {
       multi = false,
       limit = 50,
       min_chars: minChars = 0,
+      debounce: debounceMs = DEFAULT_DEBOUNCE_MS,
       url_sync: urlSync = true,
     } = config;
 
@@ -178,7 +182,7 @@ export function initCombobox(el) {
 
     const scheduleFetch = (term) => {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => fetchAndShow(term), DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => fetchAndShow(term), debounceMs);
     };
 
     const setActive = (i) => {

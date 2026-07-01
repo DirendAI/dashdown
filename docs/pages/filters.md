@@ -50,6 +50,29 @@ The [full-text `<SiteSearch>`](/search) is **not** a filter — it searches a
 static index and ships in exports.
 :::
 
+### Debouncing
+
+Typing in a `<Search>` / `<Combobox>` or dragging a `<Slider>` / `<RangeSlider>`
+doesn't fire a query on every keystroke or pixel. A change waits for a short
+**quiet period** (default **300 ms**) before it commits and re-fetches, so a burst
+of input coalesces into one fetch — the handle and readout still move instantly.
+
+Set the project-wide default in `dashdown.yaml`, and override per control with a
+`debounce=` attribute (both in milliseconds):
+
+```yaml
+filters:
+  debounce: 500   # raise it for a slow, per-query-expensive warehouse (BigQuery)
+```
+
+```markdown
+<Search name="q" debounce={800} />   <!-- this control only -->
+```
+
+Raise it when each query is slow or billed so deliberate typing can't fan out a
+wave of partial-input queries; lower it (even `0` = immediate) for a snappy local
+backend. → **[Configuration](/configuration#filters)**.
+
 ## Where filters appear
 
 A filter renders **inline, exactly where you place it** in the Markdown. So you

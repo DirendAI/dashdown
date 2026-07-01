@@ -3,7 +3,7 @@
 
 "use strict";
 
-import { parseUrlParams } from "../core.js";
+import { parseUrlParams, debounce } from "../core.js";
 
 /**
  * Sync date range to URL
@@ -27,7 +27,12 @@ export function syncDateRangeToUrl(startParam, endParam, startDate, endDate) {
     params.delete(endParam);
   }
 
-  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  const qs = params.toString();
+  const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+  // Only push a history entry (and broadcast) when the URL actually changes —
+  // seeding a URL-provided range, or a debounced no-op, must not add a stray
+  // back-button step or re-fire `url-updated`.
+  if (newUrl === window.location.pathname + window.location.search) return;
   window.history.pushState({}, "", newUrl);
 
   // Trigger custom event for other components
@@ -119,6 +124,8 @@ window.dateRangeComponent = function(name) {
     persist: false,
     defaultPreset: "",
     storageKey: "",
+    debounceMs: 300,
+    flushDates: null,
 
     init() {
       // Read config from data-config attribute (properly HTML-escaped JSON)
@@ -142,6 +149,9 @@ window.dateRangeComponent = function(name) {
       this.persist = !!config.persist;
       this.defaultPreset = config.default || "";
       this.storageKey = `dashdown:date-filter:${startParam}|${endParam}`;
+      // Debounce the store write (data re-fetch): a preset sets start+end and a
+      // custom edit touches each input, so coalesce that burst into one fetch.
+      this.debounceMs = Number.isFinite(config.debounce) ? config.debounce : 300;
 
       // Load from URL on initialization
       const urlParams = parseUrlParams();
@@ -181,6 +191,12 @@ window.dateRangeComponent = function(name) {
         // Mirror a URL-provided range into storage so other pages inherit it.
         this.writeStored();
       }
+
+      // Seed the store synchronously so the first data fetch is already filtered.
+      // A URL-provided range is a no-op here (the guard was seeded from it); a
+      // default/persisted preset commits now, and the debounced watchers take
+      // over for later user changes.
+      if (this.flushDates) this.flushDates();
     },
 
     readStored() {
@@ -210,33 +226,47 @@ window.dateRangeComponent = function(name) {
     setupUrlSync(startParam, endParam) {
       const urlSync = this.$el.dataset.urlSync === "true";
 
-      const pushToFilters = () => {
+      // Seed the change-guard from whatever the URL already provided (which
+      // `initFiltersStore` has already mirrored into the store). This makes the
+      // immediate seed below a no-op for a URL-provided range — no redundant store
+      // write, re-fetch, or history entry — while a default/persisted preset (not
+      // in the URL yet) still commits.
+      this._lastStart = this.startDate || "";
+      this._lastEnd = this.endDate || "";
+
+      // Guarded commit of the current dates to the filters store (+ URL). The
+      // store write is the single reactive path (data components re-fetch off it);
+      // skip-if-unchanged means the debounced trailing call after the seed — and
+      // any no-op change — costs no extra fetch or history entry.
+      const flush = () => {
+        const s = this.startDate || "";
+        const e = this.endDate || "";
+        if (this._lastStart === s && this._lastEnd === e) return;
+        this._lastStart = s;
+        this._lastEnd = e;
         // Mutate the existing store keys rather than replacing the whole store
         // object. Replacing it re-triggers every other filter component's
         // reactive URL-sync effect, which re-dispatches stale `url-updated`
         // events that would clobber the dates we just set (single-path rule).
         const store = window.Alpine && Alpine.store ? Alpine.store("filters") : null;
         if (store) {
-          store[startParam] = this.startDate || "";
-          store[endParam] = this.endDate || "";
+          store[startParam] = s;
+          store[endParam] = e;
         }
         // Persist after each change so the global filter survives navigation.
         this.writeStored();
-        // Writing the store keys above is the single reactive path: data
-        // components subscribe to `$store.filters` via Alpine effects and
-        // re-render on change. No custom broadcast event needed.
+        if (urlSync) syncDateRangeToUrl(startParam, endParam, s, e);
       };
+      // Exposed so init() can seed the store synchronously — a debounced first
+      // write would leave the initial fetch (esp. the global date filter on every
+      // page) unfiltered until the timer lands.
+      this.flushDates = flush;
 
-      // Watch for changes and sync to filters store (and optionally URL)
-      this.$watch("startDate", () => {
-        pushToFilters();
-        if (urlSync) syncDateRangeToUrl(startParam, endParam, this.startDate, this.endDate);
-      });
-
-      this.$watch("endDate", () => {
-        pushToFilters();
-        if (urlSync) syncDateRangeToUrl(startParam, endParam, this.startDate, this.endDate);
-      });
+      // Watch for changes and sync — debounced so a preset (start+end) or a custom
+      // edit coalesces into a single re-fetch.
+      const scheduleFlush = debounce(flush, this.debounceMs);
+      this.$watch("startDate", () => scheduleFlush());
+      this.$watch("endDate", () => scheduleFlush());
 
       if (!urlSync) return;
 

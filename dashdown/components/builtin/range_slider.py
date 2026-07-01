@@ -8,6 +8,7 @@ from dashdown.components.builtin._util import (
     filter_bar_marker,
     format_config,
     new_id,
+    resolve_debounce,
     safe_json,
 )
 from dashdown.render.attrs import DataRef
@@ -61,6 +62,9 @@ class RangeSlider(Component):
       ``{name}_max``).
     - format / currency / decimals / locale: Optional. Format the readout values
       (same ``formatValue`` config the other components use), e.g. ``format="currency"``.
+    - debounce: Optional. Quiet period (ms) after the last drag tick before the
+      pair re-fetches data (the handles/readout still move instantly). Defaults to
+      the project-wide ``filters.debounce`` (300 unless raised in dashdown.yaml).
     - url_sync: Optional. Sync the pair to the URL (default ``true``).
     - bar: Optional. Relocate this control into the page's top filter bar.
       Default is inline (renders where authored).
@@ -97,6 +101,10 @@ class RangeSlider(Component):
         min_param = attr_str(attrs, "min_param", f"{name}_min")
         max_param = attr_str(attrs, "max_param", f"{name}_max")
         url_sync = attrs.get("url_sync", True)
+        # Debounce the store write (data re-fetch) so a drag settles before firing;
+        # the handles/readout stay live. Per-control `debounce=` wins, else the
+        # project-wide `filters.debounce` default (see resolve_debounce).
+        debounce = resolve_debounce(attrs, ctx)
         fmt = format_config(attrs)
         # Inline by default (renders where authored); `bar` relocates it into the
         # top filter row (read by filter_bar.js). See filter_bar_marker.
@@ -114,6 +122,7 @@ class RangeSlider(Component):
             "default_hi": default_hi,
             "min_param": min_param,
             "max_param": max_param,
+            "debounce": debounce,
             "url_sync": url_sync,
         }
         if fmt:

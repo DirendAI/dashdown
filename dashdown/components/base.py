@@ -20,6 +20,7 @@ class RenderContext:
         static_build: bool = False,
         query_connectors: dict[str, str] | None = None,
         semantic_models: dict[str, Any] | None = None,
+        filter_debounce: int = 300,
     ) -> None:
         self.queries = queries
         self.params = params or {}
@@ -27,6 +28,11 @@ class RenderContext:
         # True during `dashdown build`: filter components (which can't re-query a
         # fixed snapshot) are omitted from the output.
         self.static_build = static_build
+        # Project-wide default debounce (ms) for filter controls, from
+        # `dashdown.yaml`'s `filters.debounce`. A control reads it via
+        # `_util.resolve_debounce(attrs, ctx)` unless it sets `debounce=` itself,
+        # so a slow warehouse can widen the quiet-before-refetch window once.
+        self.filter_debounce = filter_debounce
         # query name -> connector name for this page's queries (page-local
         # :::query blocks plus the shared query library), so components that
         # address the data API server-side (e.g. <Ask />) can bind the right

@@ -63,6 +63,9 @@ global_filters:                # → Filters
     start_param: date_start
     end_param: date_end
 
+filters:                       # → Filters
+  debounce: 300                # ms of quiet before a filter change re-fetches
+
 search:                        # → Full-text search
   enabled: true
   placeholder: "Search…"
@@ -147,6 +150,26 @@ opts in by using the `${date_start}` / `${date_end}` placeholders. The selection
 persists across navigation.
 
 → **[Filters & parameters](/filters)** for presets, params and how queries opt in.
+
+## `filters`
+
+Cross-cutting behavior for the interactive filter controls (`<Search>`,
+`<Combobox>`, `<Slider>`, `<RangeSlider>`, `<DateRange>`).
+
+```yaml
+filters:
+  debounce: 300   # ms of quiet after the last keystroke / slider drag before
+                  # a filter change commits its value and re-fetches data
+```
+
+| Key        | Default | Purpose                                                            |
+| ---------- | ------- | ----------------------------------------------------------------- |
+| `debounce` | `300`   | Project-wide quiet period (ms) before a filter change re-fetches. A burst of keystrokes or slider drag ticks coalesces into a single fetch. Raise it for a slow, per-query-expensive warehouse (e.g. BigQuery) where firing on partial input piles up requests; lower it for a snappy local backend. |
+
+Any single control overrides this with its own `debounce=` attribute
+(`<Search name="q" debounce={600} />`).
+
+→ **[Filters & parameters](/filters)** for the controls themselves.
 
 ## `search`
 
