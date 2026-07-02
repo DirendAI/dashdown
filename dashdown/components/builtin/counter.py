@@ -50,7 +50,9 @@ class Counter(Component):
         the named-query path above when `sparkline-by=` is absent.
 
     Number formatting (the headline value):
-        format="currency"      currency | number | percent (thousands-separated)
+        format="currency"      currency | number | compact | percent
+                               (`compact` abbreviates: 3,338,316,067 → "3.34B",
+                               with the exact value shown on hover)
         currency="$"           symbol ("$"/"€") prepended, OR an ISO 4217 code
                                ("EUR") for full locale currency formatting
         locale="de-DE"         BCP-47 tag → European separators (1.157.252,33)
@@ -168,21 +170,24 @@ class Counter(Component):
         span = grid_span_style(attrs)
         style_attr = f' style="{span}"' if span else ""
 
-        # With a sparkline: label on top, value, trend pinned to the bottom
-        # (mt-auto) of the grid-stretched card — and the *sparkline* carries the
-        # `color` while the value stays neutral, per the mockup KPI cards (the
-        # big number reads as data, the trend provides the hue). Without a
+        # Every tile top-aligns (label, then value) so a KPI row that mixes
+        # sparkline and plain counters keeps its labels and values on one line —
+        # a centered plain tile next to a top-aligned sparkline tile reads
+        # ragged. The sparkline is a full-bleed *background layer* pinned to the
+        # card's bottom edge BEHIND the text — no extra card height; the text
+        # floats above with a surface-colored text-shadow halo dimming the
+        # trend around the glyphs (dashdown.css) — and the *sparkline* carries the `color`
+        # while the value stays neutral, per the mockup KPI cards (the big
+        # number reads as data, the trend provides the hue). Without a
         # sparkline the value is colored only when the author explicitly set
         # `color=` (the "primary" default exists for the sparkline); the
         # mockup's plain stats are neutral.
         if spark_name:
-            card_justify = ""
+            card_modifier = " dashdown-counter--spark"
             value_class = "text-base-content"
-            spark_html = (
-                f'<div class="dashdown-counter-spark {color_class} mt-auto pt-3 h-8"></div>'
-            )
+            spark_html = f'<div class="dashdown-counter-spark {color_class}"></div>'
         else:
-            card_justify = " justify-center"
+            card_modifier = ""
             value_class = color_class if "color" in attrs else "text-base-content"
             spark_html = ""
 
@@ -191,8 +196,8 @@ class Counter(Component):
             f'data-async-component="counter" '
             f'data-config="{config_json}" '
             f'data-query-name="{esc(name)}" '
-            f'class="dashdown-counter card bg-base-100 border border-base-300 p-4 flex flex-col{card_justify}">'
-            f'<div class="flex items-center justify-between gap-2">'
+            f'class="dashdown-counter{card_modifier} card bg-base-100 border border-base-300 p-4 flex flex-col">'
+            f'<div class="dashdown-counter-head flex items-center justify-between gap-2">'
             f'<div class="dashdown-counter-label text-xs font-medium uppercase tracking-wide text-base-content/60">{esc(label)}</div>'
             f'<span class="dashdown-counter-delta"></span>'
             f'</div>'

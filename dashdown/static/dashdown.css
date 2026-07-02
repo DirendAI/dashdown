@@ -743,15 +743,71 @@ body {
   font-variant-numeric: tabular-nums;
 }
 /* Layout/typography come from the component's Tailwind classes; we bump the
-   headline a step larger than the markup's text-2xl, pin tabular figures so KPI
-   rows align digit-for-digit, and tighten tracking so the big number reads as a
-   confident data point rather than body copy. */
+   headline a step larger than the markup's text-2xl and tighten tracking so the
+   big number reads as a confident data point rather than body copy. Figures stay
+   proportional: tabular digits (every digit as wide as a "0") only pay off when
+   numbers stack vertically, and they make a large standalone value look loose. */
 .dashdown-counter-value {
   line-height: 1.1;
   font-size: 1.875rem;
   letter-spacing: -0.015em;
-  font-variant-numeric: tabular-nums;
 }
+/* Full-bleed trend: the sparkline is a background layer pinned to the card's
+   bottom edge, spanning its whole width BEHIND the label/value — the card
+   reserves no extra height for it, so a spark tile is exactly as tall as a
+   plain one. The text floats above the layer, and a backdrop blur frosts the
+   trend where it passes under the text, keeping the number legible without
+   hiding the line. The layer clips *itself* to the card's rounded bottom
+   corners — the card can't take overflow:hidden because the "filtered by"
+   tooltip pops above its top edge. */
+/* Lift the two content rows above the spark layer. An allowlist on purpose:
+   a broad `> :not(.dashdown-counter-spark)` outranks the `position: absolute`
+   of overlay children appended later (filter badge, loading overlay), knocking
+   them into the flex flow — anything that isn't one of these two rows must
+   keep whatever positioning it declares for itself. */
+.dashdown-counter--spark > .dashdown-counter-head,
+.dashdown-counter--spark > .dashdown-counter-value {
+  position: relative;
+  z-index: 1;
+}
+/* Keep the text legible where the trend passes beneath it: a stacked
+   text-shadow halo in the card's surface color hugs the glyphs, dimming the
+   line only in their immediate surroundings. NOT backdrop-filter: any box-
+   shaped frost (blurred block children, or a masked pseudo-element) renders a
+   visible band/rectangle over the line — and mask-clipped backdrop-filter is
+   not portable across engines (Safari drops the mask, leaving an opaque box).
+   A halo follows the letterforms exactly, in any theme (--b1 = card surface). */
+.dashdown-counter--spark .dashdown-counter-label,
+.dashdown-counter--spark .dashdown-counter-value {
+  text-shadow:
+    0 0 4px var(--fallback-b1, oklch(var(--b1) / 1)),
+    0 0 8px var(--fallback-b1, oklch(var(--b1) / 1)),
+    0 0 12px var(--fallback-b1, oklch(var(--b1) / 1)),
+    0 1px 16px var(--fallback-b1, oklch(var(--b1) / 1));
+}
+.dashdown-counter-spark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Hug the card's lower half: tall enough to rise under the value text on a
+     compact tile, clamped so a grid-stretched tile doesn't blow the drawing up
+     into a wall of trend. */
+  height: clamp(2.5rem, 55%, 5rem);
+  pointer-events: none;
+  overflow: hidden;
+  /* Match the card's inner radius (its own radius minus the 1px border). */
+  border-radius: 0 0 calc(var(--rounded-box, 1rem) - 1px) calc(var(--rounded-box, 1rem) - 1px);
+}
+.dashdown-counter-spark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* No endpoint marker: an HTML dot pinned to the layer's right edge can't sit
+   exactly on the stretched line's end at every slope (it needs a fixed px
+   inset, the line doesn't), and off-by-a-couple-px reads as a glitch. The
+   line simply runs to the edge. */
 
 /* Counter grid layout */
 .dashdown-counter-grid {

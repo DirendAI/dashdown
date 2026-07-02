@@ -716,8 +716,9 @@ function formatMomentPattern(d, pattern, loc) {
  * chart axes all route through here so a `$63712.895` becomes `$63,712.90`.
  *
  * @param {any} v - Raw value.
- * @param {string} [fmt] - currency | number | percent | date | datetime. Empty
- *   or unknown → the raw string (still honoring `decimals` for numbers).
+ * @param {string} [fmt] - currency | number | compact | percent | date |
+ *   datetime. Empty or unknown → the raw string (still honoring `decimals` for
+ *   numbers).
  * @param {{currency?: string, decimals?: number, locale?: string, dateFormat?: string}} [opts]
  *   - currency: for `currency` format. A bare symbol ("$", "€") is prepended;
  *     an ISO 4217 code ("EUR", "USD", "GBP") uses full locale-aware currency
@@ -754,6 +755,20 @@ export function formatValue(v, fmt, opts = {}) {
     case "number":
       if (!isFinite(n)) return String(v);
       return localeNumber(n, locale, fracDigits(decimals, 0, 3));
+    case "compact": {
+      // Abbreviated magnitude (3,338,316,067 → "3.34B") for KPI headlines.
+      // Three significant digits by default; an explicit `decimals=` pins the
+      // fraction-digit count instead ("3.3B"). Locale-aware — de-DE → "3,34 Mrd.".
+      if (!isFinite(n)) return String(v);
+      const o = { notation: "compact" };
+      if (decimals != null && decimals !== "") {
+        o.minimumFractionDigits = Number(decimals);
+        o.maximumFractionDigits = Number(decimals);
+      } else {
+        o.maximumSignificantDigits = 3;
+      }
+      return localeNumber(n, locale, o);
+    }
     case "percent":
       if (!isFinite(n)) return String(v);
       return localeNumber(n, locale, fracDigits(decimals, 0, 1)) + "%";
