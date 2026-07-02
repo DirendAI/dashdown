@@ -44,6 +44,7 @@ import "./components/toggle.js";
 import "./components/button_group.js";
 import "./components/combobox.js";
 import "./components/site_search.js";
+import "./components/tabs.js";
 import "./components/ask.js";
 import "./components/export.js";
 import "./components/mermaid.js";

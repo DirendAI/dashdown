@@ -5,7 +5,7 @@
 
 Introspected straight from the registries — the **same data `dashdown components` prints**, in file-readable form. A new component attribute or connector config key appears here automatically (it is recovered from the source, not hand-written), so this can't drift. Prefer running `dashdown components` when you have a shell; read this shard when you don't.
 
-## Components (38)
+## Components (40)
 
 `*` marks a **filter** component (it writes a `${param}` and is stripped from static builds). Charts share a common attribute set via the shared chart helper.
 
@@ -41,7 +41,9 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `SiteSearch` | `label`, `max_results`, `placeholder` | Full-text search across every page of the project. |
 | `Slider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
 | `SunburstChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
+| `Tab` | `title` | One panel inside a `<Tabs>` container. |
 | `Table` | `by`, `col-span`, `currency`, `data`, `date_format`, `detail_slug`, `empty_message`, `export`, `export_filename`, `filename`, `format`, `grain`, `headers`, `heatmap`, `heatmap_scheme`, `limit`, `link_column`, `link_pattern`, `locale`, `metric`, `page-size`, `row_link`, `search`, `series`, `sort`, `span`, `title` | Data table — renders a query result as a sortable, searchable grid. |
+| `Tabs` | `col-span`, `default`, `label`, `name`, `span`, `url_sync` | Switchable tabbed sections — pure **layout**, not a filter. |
 | `ThemeRiver` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
 | `TimeGrain` \* | `bar`, `default`, `filter_bar`, `grains`, `label`, `name`, `native`, `url_sync` | Time-grain picker — writes a `day`/`week`/`month`/… token for `grain={name}`. |
 | `Toggle` \* | `bar`, `default`, `filter_bar`, `label`, `name`, `off_value`, `on_value`, `url_sync`, `variant` | Boolean / toggle filter — a one-click switch (or checkbox) for a two-valued facet ("show only active", "include archived", "paid only"). |

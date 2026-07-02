@@ -11,7 +11,7 @@ Auto-generated from the Dashdown docs by tooling/gen-agent-docs.py. This is the 
 
 Introspected straight from the registries — the **same data `dashdown components` prints**, in file-readable form. A new component attribute or connector config key appears here automatically (it is recovered from the source, not hand-written), so this can't drift. Prefer running `dashdown components` when you have a shell; read this shard when you don't.
 
-## Components (38)
+## Components (40)
 
 `*` marks a **filter** component (it writes a `${param}` and is stripped from static builds). Charts share a common attribute set via the shared chart helper.
 
@@ -47,7 +47,9 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `SiteSearch` | `label`, `max_results`, `placeholder` | Full-text search across every page of the project. |
 | `Slider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
 | `SunburstChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
+| `Tab` | `title` | One panel inside a `<Tabs>` container. |
 | `Table` | `by`, `col-span`, `currency`, `data`, `date_format`, `detail_slug`, `empty_message`, `export`, `export_filename`, `filename`, `format`, `grain`, `headers`, `heatmap`, `heatmap_scheme`, `limit`, `link_column`, `link_pattern`, `locale`, `metric`, `page-size`, `row_link`, `search`, `series`, `sort`, `span`, `title` | Data table — renders a query result as a sortable, searchable grid. |
+| `Tabs` | `col-span`, `default`, `label`, `name`, `span`, `url_sync` | Switchable tabbed sections — pure **layout**, not a filter. |
 | `ThemeRiver` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
 | `TimeGrain` \* | `bar`, `default`, `filter_bar`, `grains`, `label`, `name`, `native`, `url_sync` | Time-grain picker — writes a `day`/`week`/`month`/… token for `grain={name}`. |
 | `Toggle` \* | `bar`, `default`, `filter_bar`, `label`, `name`, `off_value`, `on_value`, `url_sync`, `variant` | Boolean / toggle filter — a one-click switch (or checkbox) for a two-valued facet ("show only active", "include archived", "paid only"). |
@@ -2442,6 +2444,7 @@ for the shared attributes, then the per-type page:
 ## Layout & content
 
 - [Grid](/components/grid) — multi-column layout for widgets.
+- [Tabs](/components/tabs) — switchable tabbed sections.
 - [Ask](/ai/ask) — LLM commentary on a query result (documented under [AI](/ai)).
 
 ## Filters & search
@@ -3895,6 +3898,69 @@ A child can span more than one column with `col-span=`:
 
 Charts inside a grid honor `col-span=` to span multiple columns. In a printed/PDF
 export the grid stacks to one widget per row automatically.
+
+
+<!-- source: docs/pages/components/tabs.md -->
+
+# Tabs
+
+Section a page into switchable panels — "Overview · By region · Raw data" views
+that share the same page, filters, and queries. Wrap each section in a
+`<Tab title="…">` inside a `<Tabs>` container; one panel shows at a time behind
+a tab bar.
+
+```markdown
+<Tabs name="view">
+  <Tab title="Trend">
+    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" />
+  </Tab>
+  <Tab title="By channel">
+    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" />
+  </Tab>
+</Tabs>
+```
+
+<Tabs name="view">
+  <Tab title="Trend">
+    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" />
+  </Tab>
+  <Tab title="By channel">
+    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" />
+  </Tab>
+</Tabs>
+
+Tabs are pure **layout** — switching one shows different authored content but
+never changes any query. To let the *reader's choice* filter the data instead,
+reach for a [ButtonGroup](/components/button-group): it looks similar but writes
+a filter value your SQL reads as `${name}`.
+
+## Attributes
+
+### `<Tabs>`
+
+| Attribute  | Purpose                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| `name`     | Sync the active tab to the URL as `?name=<title-slug>` — deep-linkable, back/forward-aware. Omit for no URL sync. |
+| `default`  | Title of the tab active on first load (a URL param wins). Defaults to the first tab.             |
+| `url_sync` | Set `false` to keep a named Tabs out of the URL. Default `true`.                                  |
+| `label`    | Accessible label for the tab bar (default `"Tabs"`).                                              |
+| `col-span` / `span` | Columns to span when the Tabs sits inside a [Grid](/components/grid).                    |
+
+### `<Tab>`
+
+| Attribute | Purpose                              |
+| --------- | ------------------------------------ |
+| `title`   | Required. The tab's label in the bar. |
+
+## Behavior notes
+
+- A panel can hold anything a page can — markdown, charts, tables, nested
+  `<Tabs>` — and every panel's queries load normally whether or not it's visible.
+- In a **PDF/print export** the tab bar is hidden and every panel is printed
+  stacked, each introduced by its title, so hidden content still makes it into
+  the document. Static builds work unchanged.
+- The tab bar is keyboard-accessible (arrow keys, Home/End) and follows the
+  WAI-ARIA tabs pattern.
 
 
 <!-- source: docs/pages/components/dropdown.md -->

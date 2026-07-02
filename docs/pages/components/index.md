@@ -34,6 +34,7 @@ for the shared attributes, then the per-type page:
 ## Layout & content
 
 - [Grid](/components/grid) — multi-column layout for widgets.
+- [Tabs](/components/tabs) — switchable tabbed sections.
 - [Ask](/ai/ask) — LLM commentary on a query result (documented under [AI](/ai)).
 
 ## Filters & search
