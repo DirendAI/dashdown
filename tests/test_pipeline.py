@@ -16,6 +16,7 @@ from dashdown.render.pipeline import (
     get_cached_result,
     cache_result,
     DEFAULT_CACHE_TTL,
+    MAX_CACHED_RESULTS,
     RenderedPage,
     render_page,
     serialize_value,
@@ -650,6 +651,34 @@ class TestResultCache:
     def test_default_cache_ttl_is_sixty(self):
         """DEFAULT_CACHE_TTL is 60 seconds."""
         assert DEFAULT_CACHE_TTL == 60
+
+    def test_size_is_bounded(self):
+        """Inserting past MAX_CACHED_RESULTS evicts rather than grows."""
+        result = self._make_result()
+        for i in range(MAX_CACHED_RESULTS + 50):
+            cache_result("q", "main", {"id": str(i)}, result, ttl=60)
+        assert len(_result_cache) == MAX_CACHED_RESULTS
+
+    def test_eviction_is_least_recently_used(self):
+        """When full, the least-recently-READ entry goes first, not the oldest-written."""
+        result = self._make_result()
+        for i in range(MAX_CACHED_RESULTS):
+            cache_result("q", "main", {"id": str(i)}, result, ttl=60)
+        # Touch the oldest-written entry, promoting it over id=1.
+        assert get_cached_result("q", "main", {"id": "0"}) is not None
+        cache_result("q", "main", {"id": "overflow"}, result, ttl=60)
+        assert get_cached_result("q", "main", {"id": "0"}) is not None
+        assert get_cached_result("q", "main", {"id": "1"}) is None
+
+    def test_overwrite_refreshes_lru_position(self):
+        """Re-caching an existing key moves it to the fresh end."""
+        result = self._make_result()
+        for i in range(MAX_CACHED_RESULTS):
+            cache_result("q", "main", {"id": str(i)}, result, ttl=60)
+        cache_result("q", "main", {"id": "0"}, result, ttl=60)
+        cache_result("q", "main", {"id": "overflow"}, result, ttl=60)
+        assert get_cached_result("q", "main", {"id": "0"}) is not None
+        assert get_cached_result("q", "main", {"id": "1"}) is None
 
 
 class TestPageHeader:

@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import time
+from collections import OrderedDict
 from decimal import Decimal
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,8 +80,15 @@ _python_def_cache: dict[tuple[str, str], Any] = {}
 # reload exactly like `_library_keys` (a renamed/deleted .py leaves no ghost).
 _python_library_keys: set[tuple[str, str]] = set()
 
+# Hard ceiling on server-side result cache entries. Params arrive from the
+# client verbatim, so distinct cache keys are unbounded (crafted URLs, crawlers)
+# and expired entries are only removed when their exact key is read again — an
+# unbounded dict grows until the process dies. LRU keeps memory flat: hot keys
+# survive on every read, junk keys evict other junk.
+MAX_CACHED_RESULTS = 1024
+
 # Server-side query result cache: (query_name, connector_name, params_key) -> (result, expiry_time)
-_result_cache: dict[tuple, tuple[QueryResult, float]] = {}
+_result_cache: OrderedDict[tuple, tuple[QueryResult, float]] = OrderedDict()
 
 
 def register_query_def(
@@ -220,24 +228,41 @@ def _freeze_params(params: dict[str, str]) -> tuple:
 
 
 def get_cached_result(name: str, connector: str, params: dict[str, str]) -> QueryResult | None:
-    """Return a cached result if it exists and has not expired."""
+    """Return a cached result if it exists and has not expired.
+
+    A hit refreshes the entry's LRU position so results readers keep asking for
+    outlive one-off keys when the cache is full.
+    """
     key = (name, connector, _freeze_params(params))
     entry = _result_cache.get(key)
     if entry is None:
         return None
     result, expiry = entry
     if time.monotonic() > expiry:
-        del _result_cache[key]
+        # pop, not del: query threads race here and the key may already be gone
+        _result_cache.pop(key, None)
         return None
+    try:
+        _result_cache.move_to_end(key)
+    except KeyError:
+        pass  # concurrently evicted; the result in hand is still valid
     return result
 
 
 def cache_result(
     name: str, connector: str, params: dict[str, str], result: QueryResult, ttl: int
 ) -> None:
-    """Store a query result in the server-side cache with a TTL."""
+    """Store a query result in the server-side cache with a TTL.
+
+    The cache is a bounded LRU (``MAX_CACHED_RESULTS``): overwriting a key
+    refreshes its position, and inserting past the cap evicts from the
+    least-recently-used end.
+    """
     key = (name, connector, _freeze_params(params))
     _result_cache[key] = (result, time.monotonic() + ttl)
+    _result_cache.move_to_end(key)
+    while len(_result_cache) > MAX_CACHED_RESULTS:
+        _result_cache.popitem(last=False)
 
 
 # Matches the first <h1>…</h1> in rendered body HTML so the page header
