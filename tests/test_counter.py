@@ -40,8 +40,21 @@ def test_counter_structure(ctx):
     assert "dashdown-counter-label" in html_out
     assert "dashdown-counter-delta" in html_out
     assert "dashdown-counter-value" in html_out
-    # No sparkline → no spark container.
+    # No sparkline → no spark container and no full-bleed card modifier.
     assert "dashdown-counter-spark" not in html_out
+    assert "dashdown-counter--spark" not in html_out
+    # Plain tiles top-align like sparkline tiles, so a mixed KPI row keeps its
+    # labels and values on one line (no vertically-centered odd one out).
+    assert "justify-center" not in html_out
+
+
+def test_counter_compact_format(ctx):
+    """`format="compact"` reaches the JS formatter (3,338,316,067 → "3.34B")."""
+    html_out = render_components(
+        '<Counter data={kpis} column="downloads" format="compact" />', ctx
+    )
+    cfg = _config(html_out)
+    assert cfg["format"] == "compact"
 
 
 def test_counter_compare_query(ctx):
@@ -84,6 +97,9 @@ def test_counter_sparkline(ctx):
     assert cfg["sparkline_query"] == "trend"
     assert cfg["sparkline_column"] == "revenue"
     assert "dashdown-counter-spark" in html_out
+    # The card carries the modifier that reserves room for the full-bleed
+    # background trend layer.
+    assert "dashdown-counter--spark" in html_out
 
 
 def test_counter_format_attrs(ctx):

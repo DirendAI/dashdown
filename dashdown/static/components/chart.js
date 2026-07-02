@@ -603,6 +603,42 @@ function valueFormatter(config) {
   return (v) => formatValue(v, fmt, opts);
 }
 
+/**
+ * Tick formatter for value axes. Ticks compact once they reach 1,000
+ * (1,500,000 → "1.5M") so a big-number scale stays readable instead of
+ * clipping or crowding the plot — tooltips and data labels keep the exact
+ * `fmtFn` format. Applies to `number`/`currency`/unformatted axes; any other
+ * explicit format (`percent`, `compact` itself, dates) is the author's choice
+ * and passes through verbatim. Currency ticks keep their symbol ("$1.2M");
+ * an ISO 4217 code takes the locale's own compact currency form.
+ * @param {Object} cfg - a format-config fragment (the chart config or `config.right`)
+ * @param {((v: any) => string) | null} fmtFn - the exact-value formatter (or null)
+ * @returns {(v: any) => string}
+ */
+function axisTickFormatter(cfg, fmtFn) {
+  const fmt = cfg.format || (cfg.currency ? "currency" : null);
+  if (fmt && fmt !== "number" && fmt !== "currency") return fmtFn;
+  const opts = resolveFormatOpts(cfg);
+  return (v) => {
+    const n = Number(v);
+    if (!isFinite(n) || Math.abs(n) < 1000) return fmtFn ? fmtFn(v) : String(v);
+    if (fmt === "currency" && /^[A-Z]{3}$/.test(opts.currency)) {
+      try {
+        return n.toLocaleString(opts.locale || undefined, {
+          style: "currency",
+          currency: opts.currency,
+          notation: "compact",
+          maximumSignificantDigits: 3,
+        });
+      } catch {
+        // Unknown code — fall through to the symbol-prefixed form.
+      }
+    }
+    const compact = formatValue(n, "compact", { locale: opts.locale });
+    return fmt === "currency" ? opts.currency + compact : compact;
+  };
+}
+
 function buildChartOptionBase(config, records) {
   // <Chart auto />: infer a concrete type + axes from the result shape first.
   if (config.type === "auto") {
@@ -612,6 +648,9 @@ function buildChartOptionBase(config, records) {
   // Value-axis / tooltip number formatter from the chart's format/currency/
   // decimals attrs, or null when none set (ECharts keeps its raw default).
   const fmtFn = valueFormatter(config);
+  // Axis ticks get their own formatter: big ticks compact ("1.5M") so the
+  // scale stays readable, while tooltips/labels keep the exact fmtFn format.
+  const axisFmtFn = axisTickFormatter(config, fmtFn);
   // `name: value` formatters honoring fmtFn, falling back to ECharts' raw
   // `{b}: {c}` templates. Labels paint as canvas text (no HTML escaping);
   // tooltips render as HTML (esc the name, matching the violin tooltip).
@@ -764,7 +803,7 @@ function buildChartOptionBase(config, records) {
     }
     // Format the value (y) axis labels + tooltip when the author set a format.
     const yAxis = { type: "value", name: y, scale: true };
-    if (fmtFn) yAxis.axisLabel = { formatter: fmtFn };
+    if (axisFmtFn) yAxis.axisLabel = { formatter: axisFmtFn };
     return {
       title: title
         ? { text: title, left: "left", textStyle: { fontSize: 14 } }
@@ -780,7 +819,12 @@ function buildChartOptionBase(config, records) {
         top: title ? 40 : 20,
         bottom: series_by ? 40 : 30,
       },
-      xAxis: { type: "value", name: x, scale: true },
+      xAxis: {
+        type: "value",
+        name: x,
+        scale: true,
+        axisLabel: axisFmtFn ? { formatter: axisFmtFn } : undefined,
+      },
       yAxis,
       series,
     };
@@ -861,7 +905,7 @@ function buildChartOptionBase(config, records) {
         yAxis: {
           type: "value",
           scale: true,
-          axisLabel: fmtFn ? { formatter: fmtFn } : undefined,
+          axisLabel: axisFmtFn ? { formatter: axisFmtFn } : undefined,
         },
         series: [
           { type: "boxplot", data: boxData, itemStyle: { borderWidth: 1.5 } },
@@ -908,7 +952,7 @@ function buildChartOptionBase(config, records) {
       yAxis: {
         type: "value",
         scale: true,
-        axisLabel: fmtFn ? { formatter: fmtFn } : undefined,
+        axisLabel: axisFmtFn ? { formatter: axisFmtFn } : undefined,
       },
       series: [
         {
@@ -1166,7 +1210,7 @@ function buildChartOptionBase(config, records) {
       Number(r[high]),
     ]);
     const yAxis = { type: "value", scale: true };
-    if (fmtFn) yAxis.axisLabel = { formatter: fmtFn };
+    if (axisFmtFn) yAxis.axisLabel = { formatter: axisFmtFn };
     return {
       title: chartTitle(title),
       tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
@@ -1446,8 +1490,9 @@ function buildChartOptionBase(config, records) {
   const categoryAxis = { type: "category", data: xCategories };
   const valueAxis = { type: "value" };
   // Honor the chart's format/currency/decimals attrs on the value axis labels
-  // (so `63712.895` reads as `$63,712.90`) and the shared axis tooltip.
-  if (fmtFn) valueAxis.axisLabel = { formatter: fmtFn };
+  // (so `63712.895` reads as `$63,712.90`) and the shared axis tooltip; big
+  // ticks compact ("1.5M") via axisFmtFn while the tooltip stays exact.
+  if (axisFmtFn) valueAxis.axisLabel = { formatter: axisFmtFn };
 
   // A line chart with a single x-category is just a lone floating dot — useless
   // as a "trend". Enlarge + label the point so its value reads, and add an
@@ -1559,12 +1604,15 @@ function comboChartOption(config, records) {
   });
 
   const leftAxis = { type: "value" };
-  if (fmtFn) leftAxis.axisLabel = { formatter: fmtFn };
+  const leftAxisFmt = axisTickFormatter(config, fmtFn);
+  if (leftAxisFmt) leftAxis.axisLabel = { formatter: leftAxisFmt };
   const yAxis = [leftAxis];
   if (useRight) {
     // Right axis: no split lines so the two grids don't visually fight.
     const right = { type: "value", splitLine: { show: false } };
-    const rf = rightFmtFn || fmtFn;
+    const rf = config.right
+      ? axisTickFormatter(config.right, rightFmtFn)
+      : leftAxisFmt;
     if (rf) right.axisLabel = { formatter: rf };
     yAxis.push(right);
   }

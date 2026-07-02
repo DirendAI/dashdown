@@ -28,6 +28,7 @@ never changes the underlying data, so a CSV export still carries the raw values.
 | `format`     | Renders                          | Example (`en-US`)        |
 | ------------ | -------------------------------- | ------------------------ |
 | `number`     | Grouped integer/decimal          | `1234567` → `1,234,567`  |
+| `compact`    | Abbreviated magnitude — 3 significant digits (or pin with `decimals=`); on a `<Counter>` the exact value shows on hover | `3338316067` → `3.34B`   |
 | `currency`   | Money, with a symbol             | `63712.9` → `$63,712.90` |
 | `percent`    | Number with a `%` suffix         | `42.5` → `42.5%` *(not ×100 — the value is shown as-is)* |
 | `date`       | Locale-aware date                | `2026-01-31` → `Jan 31, 2026` |
@@ -35,6 +36,11 @@ never changes the underlying data, so a CSV export still carries the raw values.
 
 Omit `format` and values pass through unchanged — except that `decimals=` on its
 own still rounds a bare number, so `decimals=2` rounds without picking a style.
+
+On charts, value-axis **ticks** compact automatically once they reach 1,000
+(`1,500,000,000` → `1.5B`) so a big-number scale stays readable instead of
+clipping — tooltips and data labels keep the exact format (`number`/`currency`
+symbols included). Set `format="compact"` explicitly to compact the tooltips too.
 
 :::note
 `percent` does **not** multiply by 100 — it appends `%` to the value as stored.

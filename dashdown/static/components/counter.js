@@ -187,6 +187,11 @@ function setCounterValue(el, value, cfg, prefix, suffix) {
   const setText = (v) => {
     valueEl.textContent = `${prefix}${displayNumber(v, cfg)}${suffix}`;
   };
+  // A compact headline ("3.34B") keeps the exact value one hover away.
+  if (cfg.format === "compact" && isFinite(num)) {
+    const full = formatValue(num, "number", resolveFormatOpts(cfg));
+    valueEl.title = `${prefix}${full}${suffix}`;
+  }
 
   // Instant path: anything not a fresh finite number, or motion is unwanted.
   if (
@@ -258,8 +263,16 @@ function updateDelta(el, pct, invert) {
 }
 
 /**
- * Render an inline SVG sparkline into the counter's spark container.
- * Uses currentColor (set by the container's text-* class) for line + fill.
+ * Render an inline SVG sparkline into the counter's spark container — the
+ * full-bleed background layer pinned to the card's bottom edge (layout in
+ * dashdown.css). Uses currentColor (set by the container's text-* class) for
+ * line + fill.
+ *
+ * The geometry is deliberately size-independent, so the drawing stays correct
+ * through any later resize (grid reflow, window resize, print) with no
+ * redraw/observer: line + area live in a normalized viewBox stretched to the
+ * layer (`preserveAspectRatio="none"`); `non-scaling-stroke` keeps the line
+ * 2px. (No endpoint marker — see dashdown.css.)
  * @param {HTMLElement} el - Counter element
  * @param {number[]} values - Numeric series
  */
@@ -271,26 +284,27 @@ function updateSparkline(el, values) {
     return;
   }
 
-  const W = 120;
-  const H = 32;
-  const PAD = 2;
+  const W = 100; // normalized x — rendered edge-to-edge at any card width
+  const H = 40; // matches the layer's design height (vertical scale ~1:1)
+  const TOP = 3; // headroom so a peak doesn't kiss the text above
+  const BOT = 2; // keep the 2px line's lower half inside the layer
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
   const n = values.length;
 
+  const yAt = (v) => TOP + (1 - (v - min) / range) * (H - TOP - BOT);
   const pts = values.map((v, i) => {
     const x = (i / (n - 1)) * W;
-    const y = H - PAD - ((v - min) / range) * (H - PAD * 2);
-    return `${x.toFixed(1)} ${y.toFixed(1)}`;
+    return `${x.toFixed(2)} ${yAt(v).toFixed(1)}`;
   });
   const line = "M" + pts.join(" L");
   const area = `${line} L${W} ${H} L0 ${H} Z`;
 
   host.innerHTML =
-    `<svg class="w-full h-8" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
-    `<path d="${area}" fill="currentColor" fill-opacity="0.08" stroke="none"/>` +
-    `<path d="${line}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+    `<path d="${area}" fill="currentColor" fill-opacity="0.1" stroke="none"/>` +
+    `<path d="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
     `</svg>`;
 }
 

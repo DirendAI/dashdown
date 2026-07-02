@@ -33,16 +33,20 @@ instead of a literal percentage:
 | `row`            | Row index (default `0`).                            |
 | `label`          | Caption under the number.                           |
 | `prefix`/`suffix`| Text around the value.                              |
+| `format`         | [Number format](/formatting) — `compact` fits a billions-scale KPI (`3.34B`, exact value on hover). |
 | `color`          | DaisyUI color name (`primary`, `success`, …).       |
 | `delta` / `compare` | Show a change badge (static value or vs another query). |
 | `sparkline` / `sparkline-column` | Draw an inline trend line from a series query (or a `metric` + `sparkline-by` time dimension on a semantic dashboard). |
 
 ## Sparklines
 
-Pass a second, multi-row query to `sparkline={…}` to draw a small trend line under
-the number — handy for showing *where* a KPI has been, not just where it landed.
+Pass a second, multi-row query to `sparkline={…}` to draw a trend line along the
+card's bottom edge, behind the number — handy for showing *where* a KPI has been,
+not just where it landed.
 `sparkline-column` picks which column of that series to plot (the headline value
-still comes from `data`/`column`).
+still comes from `data`/`column`). The card doesn't grow to fit the trend: a
+spark tile stays exactly as tall as a plain one, and where the line passes under
+the text a soft halo of the card's surface color keeps the number legible.
 
 ```markdown
 <Counter data={downloads_total} column="downloads" label="Total downloads"
