@@ -924,6 +924,77 @@ body {
   }
 }
 
+/* === Tabs (switchable layout sections) ======================
+   <Tabs><Tab title=…>…</Tab></Tabs> — an underline-style tab bar over
+   server-rendered panels. The bar itself is built client-side (tabs.js) from
+   the panels' data-tab-title markers; before JS runs (or with JS off) the
+   :not(.dashdown-tabs-ready) rule shows the first panel so the page never
+   flashes every panel stacked. Print mode force-shows all panels instead —
+   see the .dashdown-print rules further down. */
+.dashdown-tabs {
+  margin: var(--dashdown-space-section) 0;
+}
+
+.dashdown-tabs-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  margin-bottom: 1rem;
+}
+
+.dashdown-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.625rem 0.875rem;
+  /* Sits on the nav's hairline; the active underline replaces it. */
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.dashdown-tab:hover:not(.dashdown-tab-selected) {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+
+.dashdown-tab-selected {
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  font-weight: 600;
+  border-bottom-color: var(--fallback-p, oklch(var(--p) / 1));
+}
+
+.dashdown-tab:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: -2px;
+  border-radius: calc(var(--dashdown-radius-control) - 0.25rem);
+}
+
+/* One panel at a time once tabs.js has taken over; first panel as the pre-JS /
+   no-JS fallback. */
+.dashdown-tabs-panels > .dashdown-tab-panel {
+  display: none;
+}
+.dashdown-tabs-panels > .dashdown-tab-panel.dashdown-tab-active {
+  display: block;
+}
+.dashdown-tabs:not(.dashdown-tabs-ready) > .dashdown-tabs-panels > .dashdown-tab-panel:first-child {
+  display: block;
+}
+
+/* The per-panel title is for print/PDF (where panels stack and the tab bar is
+   hidden); on screen the tab bar already names the visible panel. */
+.dashdown-tab-panel-heading {
+  display: none;
+}
+
 /* Loading overlay - absolute positioned to cover parent */
 .dashdown-loading-overlay {
   position: absolute;
@@ -2624,6 +2695,25 @@ body {
 }
 .dashdown-print .dashdown-grid > * {
   grid-column: span 1 !important;
+}
+
+/* Tabs: a printed page can't click, so hide the tab bar and force-show every
+   panel stacked, each introduced by its (screen-hidden) title. This also lets
+   the print resize pass re-measure charts that initialized inside a hidden
+   panel at 0×0. */
+.dashdown-print .dashdown-tabs-nav {
+  display: none !important;
+}
+.dashdown-print .dashdown-tabs-panels > .dashdown-tab-panel {
+  display: block !important;
+}
+.dashdown-print .dashdown-tab-panel-heading {
+  display: block;
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: var(--dashdown-space-section) 0 0.75rem;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 /* Keep a chart/table/card/diagram whole on a page where it fits. */

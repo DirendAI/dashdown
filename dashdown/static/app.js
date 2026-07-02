@@ -13,6 +13,7 @@ import { initAllToggles } from "./components/toggle.js";
 import { initAllButtonGroups } from "./components/button_group.js";
 import { initAllComboboxes } from "./components/combobox.js";
 import { initAllTimeGrains } from "./components/timegrain.js";
+import { initAllTabs } from "./components/tabs.js";
 import { initAllValues } from "./components/value.js";
 import { initAllCounters } from "./components/counter.js";
 import { initAllPivots } from "./components/pivot.js";
@@ -70,6 +71,10 @@ function initComponents() {
 
   // Process time-grain pickers (URL sync + chip suppression + default seed)
   initAllTimeGrains();
+
+  // Process tabs before charts, so a chart in the initially-active panel is
+  // visible (and measurable) when ECharts initializes.
+  initAllTabs();
 
   // Process charts
   initAllCharts();

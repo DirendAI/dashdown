@@ -8,6 +8,7 @@ from dashdown.components.base import (
 
 # Import built-ins so they register.
 from dashdown.components.builtin import grid  # noqa: F401
+from dashdown.components.builtin import tabs  # noqa: F401
 from dashdown.components.builtin import line_chart  # noqa: F401
 from dashdown.components.builtin import bar_chart  # noqa: F401
 from dashdown.components.builtin import combo_chart  # noqa: F401
