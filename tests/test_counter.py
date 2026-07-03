@@ -102,6 +102,58 @@ def test_counter_sparkline(ctx):
     assert "dashdown-counter--spark" in html_out
 
 
+def test_counter_breakdown(ctx):
+    html_out = render_components(
+        '<Counter data={kpis} column="total" breakdown={by_region} '
+        'breakdown-column="revenue" breakdown-label="region" />',
+        ctx,
+    )
+    cfg = _config(html_out)
+    assert cfg["breakdown_query"] == "by_region"
+    assert cfg["breakdown_column"] == "revenue"
+    assert cfg["breakdown_label"] == "region"
+    # Legend on, percent display by default → keys absent so JS defaults win.
+    assert "breakdown_legend" not in cfg
+    assert "breakdown_values" not in cfg
+    # The footer shells the JS renders into.
+    assert "dashdown-counter-breakdown-bar" in html_out
+    assert "dashdown-counter-breakdown-legend" in html_out
+
+
+def test_counter_breakdown_legend_opt_out(ctx):
+    html_out = render_components(
+        "<Counter data={kpis} breakdown={by_region} breakdown-legend=false />",
+        ctx,
+    )
+    cfg = _config(html_out)
+    assert cfg["breakdown_legend"] is False
+
+
+def test_counter_breakdown_values_mode(ctx):
+    html_out = render_components(
+        '<Counter data={kpis} breakdown={by_region} breakdown-values="both" />',
+        ctx,
+    )
+    cfg = _config(html_out)
+    assert cfg["breakdown_values"] == "both"
+
+
+def test_counter_no_breakdown_absent(ctx):
+    html_out = render_components('<Counter data={kpis} column="total" />', ctx)
+    cfg = _config(html_out)
+    assert "breakdown_query" not in cfg
+    assert "dashdown-counter-breakdown" not in html_out
+
+
+def test_counter_breakdown_excludes_sparkline(ctx):
+    """Both claim the card's bottom band → inline error, not a broken card."""
+    html_out = render_components(
+        "<Counter data={kpis} sparkline={trend} breakdown={by_region} />", ctx
+    )
+    assert "mutually exclusive" in html_out
+    assert "data-async-component" not in html_out
+
+
 def test_counter_format_attrs(ctx):
     html_out = render_components(
         '<Counter data={kpis} column="price" format="currency" '
@@ -213,6 +265,26 @@ def test_counter_semantic_sparkline_grain_ref(sem_ctx):
     ref = sem_ctx.semantic_refs["_sem.sales.revenue.by.order_date"]
     assert ref.grain is None
     assert ref.grain_param == "trendGrain"
+
+
+def test_counter_semantic_breakdown(sem_ctx):
+    """`breakdown={metric} breakdown-by={dim}` → a second synthetic query whose
+    canonical metric/dimension names are the value/label result columns."""
+    html_out = render_components(
+        "<Counter metric={sales.revenue} "
+        "breakdown={sales.revenue} breakdown-by={sales.region} />",
+        sem_ctx,
+    )
+    cfg = _config(html_out)
+    assert cfg["query_name"] == "_sem.sales.revenue"
+    assert cfg["breakdown_query"] == "_sem.sales.revenue.by.region"
+    assert cfg["breakdown_column"] == "revenue"
+    assert cfg["breakdown_label"] == "region"
+    assert "dashdown-counter-breakdown-bar" in html_out
+    assert set(sem_ctx.semantic_refs) == {
+        "_sem.sales.revenue",
+        "_sem.sales.revenue.by.region",
+    }
 
 
 def test_counter_named_sparkline_unchanged_under_semantic(sem_ctx):

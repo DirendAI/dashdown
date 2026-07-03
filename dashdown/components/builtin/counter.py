@@ -39,6 +39,21 @@ class Counter(Component):
         delta="12.4"           or pass an explicit delta percentage instead
         invert-delta           treat a decrease as good (e.g. cost / wait time)
         sparkline={series}     render an inline trend sparkline from a series query
+        breakdown={by_cat}     render a proportional composition strip (a
+                               "one-row treemap") along the card's bottom edge,
+                               one colored segment per category
+
+    Breakdown extras (the strip; mutually exclusive with sparkline):
+        breakdown-label="col"  category-name column (default: first non-numeric)
+        breakdown-column="col" value column (default: first numeric)
+        breakdown-legend=false hide the compact legend line under the strip
+        breakdown-values="…"   what the legend prints per category: "percent"
+                               (default), "value" (formatted like the headline),
+                               or "both" ("pip 7.6K · 72%")
+        Semantic form: `breakdown={sales.revenue} breakdown-by={sales.region}`
+        resolves a second semantic ref (metric grouped by the dimension), just
+        like the sparkline's `sparkline-by=`. Segment colors follow the shared
+        chart palette (branding.palette, else the theme default).
 
     Semantic sparkline (drive the trend from a metric, like the headline):
         <Counter metric={sales.revenue}
@@ -155,6 +170,54 @@ class Counter(Component):
                 if spark_column:
                     config["sparkline_column"] = spark_column
 
+        # Breakdown: a proportional composition strip (a "one-row treemap")
+        # along the card's bottom edge — one colored segment per category,
+        # widths = share of the total. Feeds mirror the sparkline's two paths:
+        #   - semantic: `breakdown={model.metric} breakdown-by={model.dim}`
+        #     resolves a *second* semantic ref (metric grouped by the dimension).
+        #   - named query: `breakdown={by_region}`, with `breakdown-label=` /
+        #     `breakdown-column=` picking the category / value columns.
+        # The strip and the sparkline both claim the card's bottom band, so
+        # they're mutually exclusive (an inline error, same as other misuses).
+        breakdown_sem = (
+            resolve_semantic(
+                attrs,
+                ctx,
+                metric_key="breakdown",
+                by_key="breakdown-by",
+                series_key=None,
+            )
+            if "breakdown-by" in attrs
+            else None
+        )
+        if breakdown_sem is not None:
+            breakdown_name = breakdown_sem["query_name"]
+            config["breakdown_query"] = breakdown_name
+            # Canonical names double as result columns: the metric is the value
+            # series, the `by` dimension the category labels.
+            config["breakdown_column"] = breakdown_sem["metric"]
+            config["breakdown_label"] = breakdown_sem["by"]
+        else:
+            breakdown_name = _ref_name(attrs, "breakdown")
+            if breakdown_name:
+                config["breakdown_query"] = breakdown_name
+                breakdown_column = attr_str(attrs, "breakdown-column")
+                if breakdown_column:
+                    config["breakdown_column"] = breakdown_column
+                breakdown_label = attr_str(attrs, "breakdown-label")
+                if breakdown_label:
+                    config["breakdown_label"] = breakdown_label
+        if breakdown_name and spark_name:
+            return (
+                '<div class="text-error">Counter: sparkline and breakdown are '
+                "mutually exclusive (both draw along the card's bottom edge)</div>"
+            )
+        if breakdown_name and not attr_bool(attrs, "breakdown-legend", default=True):
+            config["breakdown_legend"] = False
+        breakdown_values = attr_str(attrs, "breakdown-values")
+        if breakdown_name and breakdown_values:
+            config["breakdown_values"] = breakdown_values
+
         config_json = esc(safe_json(config))
 
         color_classes = {
@@ -191,6 +254,19 @@ class Counter(Component):
             value_class = color_class if "color" in attrs else "text-base-content"
             spark_html = ""
 
+        # The strip sits in-flow as a footer (margin-top:auto pins it to the
+        # card's bottom in the flex column), unlike the sparkline's full-bleed
+        # background layer — segments are data, they shouldn't run under text.
+        # counter.js builds the bar + legend into these two shells.
+        breakdown_html = (
+            '<div class="dashdown-counter-breakdown">'
+            '<div class="dashdown-counter-breakdown-bar"></div>'
+            '<div class="dashdown-counter-breakdown-legend"></div>'
+            "</div>"
+            if breakdown_name
+            else ""
+        )
+
         return (
             f'<div id="{cid}"{style_attr} '
             f'data-async-component="counter" '
@@ -205,5 +281,6 @@ class Counter(Component):
             f'<span class="dashdown-counter-skeleton skeleton inline-block w-24 h-8"></span>'
             f'</div>'
             f'{spark_html}'
+            f'{breakdown_html}'
             f'</div>'
         )

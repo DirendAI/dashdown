@@ -4,9 +4,10 @@
 
 "use strict";
 
-import { fetchQueryData, recordsOf, queryUsesFilters, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts } from "../core.js";
+import { fetchQueryData, recordsOf, queryUsesFilters, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts, readBrandingConfig } from "../core.js";
 import { showLoading, hideLoading } from "../loading.js";
 import { mountFilterBadge } from "./filter_badge.js";
+import { currentDefaultPalette, onThemeChange } from "./echarts_theme.js";
 
 function getQueryDefs() {
   return (window.Alpine && Alpine.store("queryDefs")) || {};
@@ -124,6 +125,18 @@ export function initCounter(el) {
         .catch(() => {});
     }
 
+    // Breakdown strip fetches independently too. The records are kept on the
+    // element so a theme toggle can repaint with the other theme's palette
+    // without refetching.
+    if (config.breakdown_query) {
+      fetchQueryData(config.breakdown_query, {}, filters)
+        .then((bd) => {
+          el._dashdownBreakdownRecords = recordsOf(bd);
+          updateBreakdown(el, el._dashdownBreakdownRecords, config);
+        })
+        .catch(() => {});
+    }
+
     // Live mode: push fresh headline values without a refetch. (Delta/sparkline
     // stay on the filter-driven path — they're typically separate queries.)
     // No-op for non-live queries / static builds.
@@ -147,6 +160,17 @@ export function initCounter(el) {
     subscribe();
   } else {
     document.addEventListener("alpine:init", subscribe);
+  }
+
+  // The palettes differ per theme (dark hues are lighter), so a theme toggle
+  // repaints the strip from the cached records — same reason chart.js
+  // re-inits its charts on toggle.
+  if (config.breakdown_query) {
+    onThemeChange(() => {
+      if (el.isConnected && el._dashdownBreakdownRecords) {
+        updateBreakdown(el, el._dashdownBreakdownRecords, config);
+      }
+    });
   }
 
   // "Filtered by" corner marker (reactive to filter state; self-gates).
@@ -306,6 +330,133 @@ function updateSparkline(el, values) {
     `<path d="${area}" fill="currentColor" fill-opacity="0.1" stroke="none"/>` +
     `<path d="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
     `</svg>`;
+}
+
+/** The breakdown strip's palette — same priority as chart.js resolves series
+ * colors (project `branding.palette`, else the theme default), so a counter's
+ * segments match the chart next to it showing the same dimension. */
+function breakdownPalette() {
+  const branding = readBrandingConfig();
+  if (branding && Array.isArray(branding.palette) && branding.palette.length) {
+    return branding.palette;
+  }
+  return currentDefaultPalette();
+}
+
+/** `{label, value}` segments from the breakdown records: label from a chosen
+ * (or first non-numeric) column, value from a chosen (or first numeric) column.
+ * Non-finite and non-positive values are dropped — negatives don't compose
+ * into a part-to-whole strip. Data order is kept (color follows the entity). */
+function breakdownSegments(records, cfg) {
+  if (!records.length) return [];
+  const keys = Object.keys(records[0]);
+  let valueCol = cfg.breakdown_column;
+  if (!valueCol) {
+    valueCol =
+      keys.find((k) => typeof records[0][k] === "number") ||
+      keys.find((k) => isFinite(Number(records[0][k])));
+  }
+  if (!valueCol) return [];
+  let labelCol = cfg.breakdown_label;
+  if (!labelCol) {
+    labelCol =
+      keys.find((k) => k !== valueCol && typeof records[0][k] !== "number") ||
+      keys.find((k) => k !== valueCol);
+  }
+  const segments = [];
+  records.forEach((r, i) => {
+    const value = Number(r[valueCol]);
+    if (!isFinite(value) || value <= 0) return;
+    const label = labelCol ? String(r[labelCol]) : `#${i + 1}`;
+    segments.push({ label, value });
+  });
+  return segments;
+}
+
+/** Share of total as compact display text ("45%", "<1%"). */
+function pctText(value, total) {
+  const pct = (value / total) * 100;
+  return pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+}
+
+/**
+ * Render the composition strip ("one-row treemap") + its compact legend into
+ * the counter's breakdown shells. Segment widths are proportional flex-grow
+ * shares; the 2px flex gap lets the card surface do the separating (no
+ * strokes), and the track's own rounding + overflow clip round only the outer
+ * ends. Categorical hues are assigned in data order, never cycled: segments
+ * beyond the palette fold into a single neutral "Other". Values live in
+ * per-segment tooltips (formatted like the headline) and identity in the
+ * legend — never text inside the slim segments.
+ * @param {HTMLElement} el - Counter element
+ * @param {Object[]} records - Breakdown query records
+ * @param {Object} cfg - Counter config
+ */
+function updateBreakdown(el, records, cfg) {
+  const bar = el.querySelector(".dashdown-counter-breakdown-bar");
+  const legend = el.querySelector(".dashdown-counter-breakdown-legend");
+  if (!bar || !legend) return;
+
+  const palette = breakdownPalette();
+  let segments = breakdownSegments(records || [], cfg);
+  if (segments.length > palette.length) {
+    const head = segments.slice(0, palette.length - 1);
+    const rest = segments.slice(palette.length - 1);
+    head.push({
+      label: "Other",
+      value: rest.reduce((sum, s) => sum + s.value, 0),
+      other: true,
+    });
+    segments = head;
+  }
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+
+  bar.textContent = "";
+  legend.textContent = "";
+  if (!segments.length || total <= 0) {
+    bar.classList.add("is-empty");
+    bar.title = "No data";
+    return;
+  }
+  bar.classList.remove("is-empty");
+  bar.removeAttribute("title");
+
+  const fmtOpts = resolveFormatOpts(cfg);
+  // What the legend prints beside each category name — the share (default),
+  // the value (formatted like the headline), or both. The tooltip always
+  // carries both, so this only chooses what's visible without hovering.
+  const legendText = (seg) => {
+    const value = formatValue(seg.value, cfg.format, fmtOpts);
+    const pct = pctText(seg.value, total);
+    if (cfg.breakdown_values === "value") return value;
+    if (cfg.breakdown_values === "both") return `${value} · ${pct}`;
+    return pct;
+  };
+  segments.forEach((seg, i) => {
+    const tip = `${seg.label} — ${formatValue(seg.value, cfg.format, fmtOpts)} (${pctText(seg.value, total)})`;
+    const piece = document.createElement("span");
+    piece.className =
+      "dashdown-counter-breakdown-seg" + (seg.other ? " dashdown-counter-breakdown-seg--other" : "");
+    piece.style.flexGrow = String(seg.value / total);
+    if (!seg.other) piece.style.background = palette[i];
+    piece.title = tip;
+    bar.appendChild(piece);
+
+    if (cfg.breakdown_legend === false) return;
+    const key = document.createElement("span");
+    key.className = "dashdown-counter-breakdown-key";
+    key.title = tip;
+    const dot = document.createElement("i");
+    if (seg.other) dot.className = "is-other";
+    else dot.style.background = palette[i];
+    key.appendChild(dot);
+    key.appendChild(document.createTextNode(seg.label + " "));
+    const pct = document.createElement("span");
+    pct.className = "dashdown-counter-breakdown-pct";
+    pct.textContent = legendText(seg);
+    key.appendChild(pct);
+    legend.appendChild(key);
+  });
 }
 
 /**

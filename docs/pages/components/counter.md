@@ -37,6 +37,7 @@ instead of a literal percentage:
 | `color`          | DaisyUI color name (`primary`, `success`, …).       |
 | `delta` / `compare` | Show a change badge (static value or vs another query). |
 | `sparkline` / `sparkline-column` | Draw an inline trend line from a series query (or a `metric` + `sparkline-by` time dimension on a semantic dashboard). |
+| `breakdown` / `breakdown-label` / `breakdown-column` | Draw a proportional composition strip from a per-category query (or a `metric` + `breakdown-by` dimension on a semantic dashboard). `breakdown-legend=false` hides its legend line; `breakdown-values` picks what it prints (`percent`/`value`/`both`). |
 
 ## Sparklines
 
@@ -77,5 +78,44 @@ the headline.
 or pointed at a `{control}` like any other grain. The metric's value column is plotted
 automatically, so there's no `sparkline-column` to set. (Omit `sparkline-by=` and the
 classic series-query form above still applies, even for a semantic headline.)
+
+## Breakdowns
+
+Pass a per-category query to `breakdown={…}` to draw a proportional composition
+strip along the card's bottom — a "one-row treemap" showing *how the KPI splits*,
+one colored segment per row, widths proportional to each category's share.
+`breakdown-label` / `breakdown-column` pick the category and value columns
+(defaults: first non-numeric / first numeric). Hover a segment for its exact
+value and share; a compact legend line spells out the categories
+(`breakdown-legend=false` hides it). By default the legend prints each
+category's **share** — `breakdown-values="value"` prints the value instead
+(formatted like the headline, so `format="compact"` gives `pip 7.6K`), and
+`breakdown-values="both"` prints `pip 7.6K · 72%`.
+
+```markdown
+<Counter data={downloads_total} column="downloads" label="Total downloads"
+         breakdown={channel_totals} breakdown-label="channel" breakdown-column="downloads" />
+```
+
+<Counter data={downloads_total} column="downloads" label="Total downloads"
+         breakdown={channel_totals} breakdown-label="channel" breakdown-column="downloads" />
+
+<Counter data={downloads_total} column="downloads" label="Total downloads" format="compact"
+         breakdown={channel_totals} breakdown-label="channel" breakdown-column="downloads" breakdown-values="both" />
+
+Segment colors follow the same palette as the charts (your
+`branding.palette` if set), so the strip matches a pie or bar chart of the same
+dimension elsewhere on the page. Categories beyond the palette fold into a single
+neutral **Other** segment; negative values don't compose and are skipped. A
+breakdown and a `sparkline` are mutually exclusive — both draw along the card's
+bottom edge.
+
+On a [semantic](/semantic-layer) dashboard, point `breakdown=` at a **metric** and
+`breakdown-by=` at a **dimension** instead of writing the per-category query:
+
+```markdown
+<Counter metric={sales.revenue} label="Revenue"
+         breakdown={sales.revenue} breakdown-by={sales.region} />
+```
 
 For an inline single value inside prose, use [Value](/components/value) instead.
