@@ -24,6 +24,33 @@ warehouse:
   password: ${PG_PASSWORD}
 ```
 
+## The default source
+
+A query with no `connector=` runs on the project's **default source**, resolved
+in this order:
+
+1. the source marked `default: true` in `sources.yaml`;
+2. otherwise, if exactly **one** source is configured, that one — a
+   single-source project never needs `connector=` anywhere;
+3. otherwise, the source named `main` (the naming convention).
+
+```yaml
+# sources.yaml
+warehouse:
+  type: postgres
+  default: true           # queries without connector= run here
+  host: ${PG_HOST}
+  database: analytics
+
+archive:
+  type: duckdb
+  path: data/archive.duckdb
+```
+
+Only one source may set `default: true` (two fail at startup). `main` is just a
+name — a source called `main` can coexist with a different flagged default; the
+flag wins.
+
 ## The built-in connectors
 
 | Type | Family | Extra | Page |
@@ -680,13 +707,13 @@ Then reference it by name on a page and feed it to a chart:
 Or inline on a single page, choosing the connector explicitly:
 
 ````markdown
-:::query name=revenue_by_region connector=fabric
+```dax revenue_by_region connector=fabric
 EVALUATE
 SUMMARIZECOLUMNS(
     'Store'[Region],
     "Revenue", [Total Revenue]
 )
-:::
+```
 
 <BarChart data={revenue_by_region} x="Region" y="Revenue" />
 ````
@@ -721,7 +748,7 @@ Connects to a [Cube](https://cube.dev) deployment — a standalone semantic-laye
 JSON API. Unlike every other connector, **Cube isn't queried with SQL**: the
 connector is a thin HTTP+JWT client that powers the [`backend: cube` semantic
 layer](/semantic-layer/cube), so you reference its model with
-the `metric={…} by={…}` grammar rather than `:::query` SQL.
+the `metric={…} by={…}` grammar rather than inline SQL query blocks.
 
 :::warning Experimental — preview
 The Cube integration is **preview** — fully unit-tested with fakes but not yet

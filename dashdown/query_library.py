@@ -55,7 +55,8 @@ def derive_query_name(rel_path: Path) -> str:
 def parse_query_file(path: Path, name: str) -> QuerySpec:
     """Parse one ``queries/**/*.{sql,dax}`` file into a :class:`QuerySpec`.
 
-    The frontmatter supplies ``connector`` (default ``main``) plus the optional
+    The frontmatter supplies ``connector`` (empty = unresolved; the project's
+    default source is filled in by ``load_project``) plus the optional
     ``cache_ttl``/``live``/``interval``; the body (everything after the
     frontmatter) is the query text, opaque to its connector. ``description`` is
     accepted for the catalogue/introspection but doesn't affect execution.
@@ -63,7 +64,7 @@ def parse_query_file(path: Path, name: str) -> QuerySpec:
     source = path.read_text(encoding="utf-8")
     fm, body = split_frontmatter(source)
 
-    connector = fm.get("connector") or "main"
+    connector = fm.get("connector") or ""
     description = fm.get("description")
     return QuerySpec(
         name=name,

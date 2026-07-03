@@ -26,6 +26,33 @@ warehouse:
   password: ${PG_PASSWORD}
 ```
 
+## The default source
+
+A query with no `connector=` runs on the project's **default source**, resolved
+in this order:
+
+1. the source marked `default: true` in `sources.yaml`;
+2. otherwise, if exactly **one** source is configured, that one — a
+   single-source project never needs `connector=` anywhere;
+3. otherwise, the source named `main` (the naming convention).
+
+```yaml
+# sources.yaml
+warehouse:
+  type: postgres
+  default: true           # queries without connector= run here
+  host: ${PG_HOST}
+  database: analytics
+
+archive:
+  type: duckdb
+  path: data/archive.duckdb
+```
+
+Only one source may set `default: true` (two fail at startup). `main` is just a
+name — a source called `main` can coexist with a different flagged default; the
+flag wins.
+
 ## The built-in connectors
 
 | Type | Family | Extra | Page |

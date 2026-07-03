@@ -17,13 +17,13 @@ empty-means-all convention as every other filter), so **guard each bound** — t
 empty case (a wide-open slider, or the first fetch before the control seeds)
 then shows everything instead of erroring on `CAST('' AS DOUBLE)`:
 
-:::query name=devices_in_range connector=main
+```sql devices_in_range connector=main
 SELECT device, tier, price
 FROM device_specs
 WHERE ('${price_min}' = '' OR price >= CAST(${price_min} AS DOUBLE))
   AND ('${price_max}' = '' OR price <= CAST(${price_max} AS DOUBLE))
 ORDER BY price DESC
-:::
+```
 
 ```sql
 SELECT device, tier, price

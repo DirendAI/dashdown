@@ -166,6 +166,123 @@ def test_query_still_parsed_alongside_new_containers():
     assert "dashdown-callout-warning" in html
 
 
+# --- Fenced query definitions -------------------------------------------------
+#
+# The editor-friendly query syntax: ```sql <name> [attrs…] defines a query
+# (first info-string token after the language = name, rest = the same attr
+# grammar as :::query); a plain ```sql fence stays a highlighted code sample.
+
+
+def test_fence_query_is_captured_and_stripped():
+    html, queries, _fm = parse_markdown(
+        "```sql deals_count ttl=220 connector=secondary live interval=3\n"
+        "SELECT count(*) FROM deals\n"
+        "```"
+    )
+    assert len(queries) == 1
+    q = queries[0]
+    assert q.name == "deals_count"
+    assert q.connector == "secondary"
+    assert q.sql == "SELECT count(*) FROM deals"
+    assert q.cache_ttl == 220
+    assert q.live is True
+    assert q.interval == 3
+    # Like :::query, a definition emits nothing.
+    assert "deals" not in html
+    assert "dashdown-code" not in html
+
+
+def test_fence_query_defaults():
+    _html_out, queries, _fm = parse_markdown("```sql q1\nSELECT 1\n```")
+    q = queries[0]
+    # No connector= parses as unresolved (""); render_page / load_project fill
+    # in the project's default source (see default_connector_name).
+    assert q.connector == ""
+    assert q.cache_ttl is None and q.live is False and q.interval is None
+
+
+def test_fence_query_cache_ttl_wins_over_ttl_alias():
+    _html_out, queries, _fm = parse_markdown(
+        "```sql q1 ttl=5 cache_ttl=10\nSELECT 1\n```"
+    )
+    assert queries[0].cache_ttl == 10
+
+
+def test_fence_query_dax_language():
+    _html_out, queries, _fm = parse_markdown(
+        "```dax top_products connector=fabric\nEVALUATE TOPN(5, Products)\n```"
+    )
+    assert queries[0].name == "top_products"
+    assert queries[0].connector == "fabric"
+    assert queries[0].sql.startswith("EVALUATE")
+
+
+def test_fence_query_show_registers_and_renders():
+    html, queries, _fm = parse_markdown(
+        "```sql taught_query connector=main show\nSELECT 42\n```"
+    )
+    assert len(queries) == 1
+    assert queries[0].name == "taught_query"
+    # `show` keeps the block visible as an ordinary highlighted sql sample…
+    assert 'data-lang="sql"' in html
+    assert "42" in html
+    # …with the info-string attrs stripped from the rendered output.
+    assert "taught_query" not in html
+    assert "show" not in html
+
+
+def test_plain_sql_fence_stays_a_display_block():
+    html, queries, _fm = parse_markdown("```sql\nSELECT 'display only'\n```")
+    assert queries == []
+    assert 'data-lang="sql"' in html
+    assert "display only" in html
+
+
+def test_fence_query_invalid_name_raises():
+    # A token that can't be a query name is a typo, not a display block —
+    # silent fallback would hide it.
+    with pytest.raises(ValueError, match="query name"):
+        parse_markdown("```sql {.line-numbers}\nSELECT 1\n```")
+
+
+def test_fence_query_example_inside_outer_fence_is_not_registered():
+    # The standard four-backtick trick documents the syntax itself: the inner
+    # block is content of the outer fence, so nothing registers.
+    html, queries, _fm = parse_markdown(
+        "````markdown\n```sql deals_count connector=main\nSELECT 1\n```\n````"
+    )
+    assert queries == []
+    assert "deals_count" in html
+
+
+def test_plain_sql_fence_inside_query_container_still_feeds_the_container():
+    # The pre-existing editor-highlighting workaround: a plain ```sql fence
+    # *inside* :::query contributes its content as the container's SQL and
+    # registers no query of its own.
+    _html_out, queries, _fm = parse_markdown(
+        ":::query name=wrapped connector=main\n```sql\nSELECT 7\n```\n:::"
+    )
+    assert len(queries) == 1
+    assert queries[0].name == "wrapped"
+    assert queries[0].sql == "SELECT 7"
+
+
+def test_query_container_accepts_ttl_alias():
+    _html_out, queries, _fm = parse_markdown(
+        ":::query name=q ttl=90\nSELECT 1\n:::"
+    )
+    assert queries[0].cache_ttl == 90
+
+
+def test_fence_and_container_queries_collect_in_document_order():
+    _html_out, queries, _fm = parse_markdown(
+        "```sql first\nSELECT 1\n```\n\n"
+        ":::query name=second\nSELECT 2\n:::\n\n"
+        "```sql third\nSELECT 3\n```"
+    )
+    assert [q.name for q in queries] == ["first", "second", "third"]
+
+
 # --- Untrusted text path stays locked down ----------------------------------
 
 def test_render_markdown_text_escapes_raw_html():

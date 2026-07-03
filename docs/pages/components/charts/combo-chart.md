@@ -18,11 +18,11 @@ lists) plus `right_axis=` (the subset plotted against the right axis).
             title="Visits (bars) vs signups (line)" />
 ```
 
-:::query name=traffic_combo connector=main
+```sql traffic_combo connector=main
 SELECT date, visits, signups
 FROM daily
 ORDER BY date
-:::
+```
 
 <ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" title="Visits (bars) vs signups (line)" />
 

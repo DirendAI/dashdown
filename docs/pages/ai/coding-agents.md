@@ -21,7 +21,7 @@ slow and expensive; a map plus per-topic shards is not.
 `dashdown new` (and `dashdown skill`, below) drop these into a project:
 
 - **`AGENTS.md`** — the *map*. A preamble, a one-screen cheat-sheet (the most-used
-  `:::query` / `${param}` / component syntax), a table of contents linking each
+  ```` ```sql name ```` query / `${param}` / component syntax), a table of contents linking each
   reference shard, and the "CLI loop" framing. ~120 lines, read first. Any agent that
   reads `AGENTS.md` natively (Claude Code, Cursor, Codex) picks this up.
 - **`.references/<topic>.md`** — the *shards*. One per documentation topic (components,

@@ -12,10 +12,10 @@ Dashdown renders Markdown (with embedded SQL and `<Component />` tags) as intera
 - [Writing pages](/pages): Every file under `pages/` is a route
 - [Configuration](/configuration): Every project has a `dashdown.yaml` at its root — the single config file for the whole dashboard
 - [Connectors](/connectors): Connectors are declared in `sources.yaml` and loaded **lazily** the first time a query asks for that type
-- [Queries](/queries): SQL lives either in the shared **query library** under `queries/` (the recommended default) or, for a quick one-off, inline in a `:::query` block on a page
+- [Queries](/queries): SQL lives either in the shared **query library** under `queries/` (the recommended default) or, for a quick one-off, inline in a named ` ```sql ` block on a…
 - [Python queries](/python-queries): Some questions are awkward — or impossible — in a single SQL statement: a **forecast**, an ML score, a **cross-connector join**, an external-API pull, a…
 - [Semantic layer](/semantic-layer): Define your metrics and dimensions **once**, then reference them straight from a component — no per-chart SQL, no copy-pasted queries:
-- [Real-time data](/realtime): A `:::query` block opts into **live streaming** with the `live` attribute: `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`)
+- [Real-time data](/realtime): A query opts into **live streaming** with the `live` attribute: `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`)
 - [Components](/components): A component is a PascalCase tag you drop into a page
 - [Filters & parameters](/filters): Filters write into a central reactive store; any query that references the filter's name with `${...}` re-runs when it changes
 - [Formatting](/formatting): Tables, counters, values and chart axes all render numbers and dates through **one** formatter, so `63712.895` becomes `$63,712.90` the same way everywhere

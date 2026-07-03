@@ -178,7 +178,7 @@ real-world project to learn from.
 You have a project running. Where to go from here:
 
 - **[Writing pages](/pages)** — frontmatter, callouts, Mermaid, and includes.
-- **[Queries](/queries)** — `:::query` blocks, `${param}` substitution, and the shared query library.
+- **[Queries](/queries)** — inline ```` ```sql name ```` blocks, `${param}` substitution, and the shared query library.
 - **[Components](/components)** — charts, tables, counters, and pivots.
 - **[Connectors](/connectors)** — connect CSVs, Postgres, BigQuery, Fabric, and more.
 - **[Configuration](/configuration)** — every `dashdown.yaml` block in one place.
@@ -446,16 +446,16 @@ parameter, so a single page serves a whole collection. A file named `[id].md`
 matches `/customers/5`, `/customers/42`, … and the captured value is available
 to SQL as `${id}`:
 
-```markdown
+````markdown
 <!-- pages/customers/[id].md  →  /customers/<id> -->
-:::query name=customer connector=main
+```sql customer connector=main
 SELECT customer_id, name, plan, monthly_spend
 FROM customers
 WHERE customer_id = ${id}
-:::
+```
 
 <Table data={customer} />
-```
+````
 
 A directory works the same way (`pages/customers/[id]/index.md`), and you can
 nest them. Matching prefers the most specific route — an exact file or directory
@@ -853,6 +853,33 @@ warehouse:
   user: ${PG_USER}
   password: ${PG_PASSWORD}
 ```
+
+## The default source
+
+A query with no `connector=` runs on the project's **default source**, resolved
+in this order:
+
+1. the source marked `default: true` in `sources.yaml`;
+2. otherwise, if exactly **one** source is configured, that one — a
+   single-source project never needs `connector=` anywhere;
+3. otherwise, the source named `main` (the naming convention).
+
+```yaml
+# sources.yaml
+warehouse:
+  type: postgres
+  default: true           # queries without connector= run here
+  host: ${PG_HOST}
+  database: analytics
+
+archive:
+  type: duckdb
+  path: data/archive.duckdb
+```
+
+Only one source may set `default: true` (two fail at startup). `main` is just a
+name — a source called `main` can coexist with a different flagged default; the
+flag wins.
 
 ## The built-in connectors
 
@@ -1510,13 +1537,13 @@ Then reference it by name on a page and feed it to a chart:
 Or inline on a single page, choosing the connector explicitly:
 
 ````markdown
-:::query name=revenue_by_region connector=fabric
+```dax revenue_by_region connector=fabric
 EVALUATE
 SUMMARIZECOLUMNS(
     'Store'[Region],
     "Revenue", [Total Revenue]
 )
-:::
+```
 
 <BarChart data={revenue_by_region} x="Region" y="Revenue" />
 ````
@@ -1551,7 +1578,7 @@ Connects to a [Cube](https://cube.dev) deployment — a standalone semantic-laye
 JSON API. Unlike every other connector, **Cube isn't queried with SQL**: the
 connector is a thin HTTP+JWT client that powers the [`backend: cube` semantic
 layer](/semantic-layer/cube), so you reference its model with
-the `metric={…} by={…}` grammar rather than `:::query` SQL.
+the `metric={…} by={…}` grammar rather than inline SQL query blocks.
 
 :::warning Experimental — preview
 The Cube integration is **preview** — fully unit-tested with fakes but not yet
@@ -1624,14 +1651,14 @@ Cube's SQL port and write `queries/*.sql`. This connector is for the first-class
 # Queries
 
 SQL lives either in the shared **query library** under `queries/` (the
-recommended default) or, for a quick one-off, inline in a `:::query` block on a
-page.
+recommended default) or, for a quick one-off, inline in a named ` ```sql `
+block on a page.
 
 :::tip
 **Prefer the `queries/` library.** Defining each query once in its own file —
 rather than inline on a page — keeps SQL out of your prose, lets you reuse and
 [compose](#composition) queries across pages, and makes them easy to find and
-edit. Reach for an inline `:::query` only for a throwaway query used on exactly
+edit. Reach for an inline query only for a throwaway query used on exactly
 one page.
 :::
 
@@ -1656,7 +1683,8 @@ is referenced from any page by that name — this page's chart uses it:
 <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads (shared query)" />
 
 Per-query options (`connector`, `cache_ttl`, `live`, …) go in the file's YAML
-frontmatter; the default connector is `main`.
+frontmatter; omit `connector` to use the project's [default
+source](/connectors#the-default-source).
 
 :::note Need more than SQL?
 A query in `queries/` can also be a **`.py` file** — a function returning a table
@@ -1673,15 +1701,35 @@ blocks instead of repeating subqueries.
 
 ## Inline queries
 
-For a one-off used on a single page, you can still define the SQL inline:
+For a one-off used on a single page, define the SQL inline as a fenced code
+block whose info string names the query — the first word after the language is
+the **name**, the rest are options:
+
+````markdown
+```sql downloads_by_month connector=main ttl=300
+SELECT month, SUM(downloads) AS downloads
+FROM downloads GROUP BY month ORDER BY month
+```
+
+<LineChart data={downloads_by_month} x="month" y="downloads" />
+````
+
+Because it's a standard fenced block, every Markdown editor (and GitHub)
+syntax-highlights the SQL. Options are the same as everywhere else:
+`connector=` (omit it to use the [default source](/connectors)), `ttl=` /
+`cache_ttl=` for [result caching](#caching-results), and `live` +
+`interval=` for [real-time data](/realtime). A plain ` ```sql ` fence with
+*nothing* after the language stays an ordinary display-only code sample — like
+the ones on this page. Add the bare `show` option to a query definition to
+*also* render its SQL on the page.
+
+The older `:::query` container form still works:
 
 ```markdown
 :::query name=downloads_by_month connector=main
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 :::
-
-<LineChart data={downloads_by_month} x="month" y="downloads" />
 ```
 
 Either way, the SQL is collected and **never executed server-side during page
@@ -1722,8 +1770,9 @@ cache_ttl: 300
 SELECT day, SUM(downloads) AS downloads FROM downloads GROUP BY day
 ```
 
-On an inline query it's an attribute instead (`:::query name=… cache_ttl=300`).
-With no `cache_ttl`, results aren't cached — each request runs the query fresh.
+On an inline query it's an option instead (` ```sql name ttl=300 `; `ttl` and
+`cache_ttl` are synonyms). With no TTL, results aren't cached — each request
+runs the query fresh.
 (For data that should repaint as it changes, see [Real-time data](/realtime)
 instead.)
 
@@ -2350,7 +2399,7 @@ first-class `metric={…} by={…}` grammar, which the structured JSON API serve
 
 # Real-time data
 
-A `:::query` block opts into **live streaming** with the `live` attribute:
+A query opts into **live streaming** with the `live` attribute:
 `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`). The
 component opens a WebSocket to `/_dashdown/ws/data/{query}` and repaints whenever
 the result changes — no page reload, no extra wiring.
@@ -2391,14 +2440,14 @@ Because a `live` query re-runs on every poll, a query that reads an external
 endpoint re-fetches it each tick. DuckDB (which backs the `csv`/`duckdb`
 connectors) can read a remote JSON API directly, so no new connector is needed:
 
-```markdown
-:::query name=btc_price connector=main live interval=5
+````markdown
+```sql btc_price connector=main live interval=5
 SELECT CAST(data.amount AS DOUBLE) AS usd
 FROM read_json_auto('https://api.coinbase.com/v2/prices/BTC-USD/spot')
-:::
+```
 
 <Counter data={btc_price} column="usd" format="currency" decimals=2 label="BTC / USD (live)" />
-```
+````
 
 If a poll fails (rate limit, network blip) the server retries on the next tick and
 the component keeps showing its last good value — live queries are **self-healing**,
@@ -4751,15 +4800,15 @@ These tune the chosen `format`. Set only the ones you need:
 
 ### Example
 
-```markdown
-:::query name=fmt_demo connector=main
+````markdown
+```sql fmt_demo connector=main
 SELECT SUM(downloads) AS downloads, SUM(downloads) * 0.12 AS revenue
 FROM downloads
-:::
+```
 
 <Counter data={fmt_demo} column="downloads" format="number" label="Total downloads" />
 <Counter data={fmt_demo} column="revenue" format="currency" currency="EUR" decimals=2 label="Revenue (€0.12 / download)" />
-```
+````
 
 Rendered live from this site's CSV:
 
@@ -5049,18 +5098,18 @@ captured value flows into queries as `${param}`, through the same context-aware,
 
 ````markdown
 <!-- pages/channels/[channel].md  →  /channels/<channel> -->
-:::query name=channel_months connector=main
+```sql channel_months connector=main
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'
 ORDER BY month
-:::
+```
 
 <LineChart data={channel_months} x="month" y="downloads" title="Monthly downloads" />
 ````
 
 :::note
-Page **prose** is not templated — only the SQL inside `:::query` blocks sees
+Page **prose** is not templated — only the SQL inside query blocks sees
 `${param}`. To show the current record's name in the body, read it from a query
 with a `<Value />` (as the demo's detail page does), rather than typing the
 placeholder into Markdown.
@@ -5326,7 +5375,7 @@ slow and expensive; a map plus per-topic shards is not.
 `dashdown new` (and `dashdown skill`, below) drop these into a project:
 
 - **`AGENTS.md`** — the *map*. A preamble, a one-screen cheat-sheet (the most-used
-  `:::query` / `${param}` / component syntax), a table of contents linking each
+  ```` ```sql name ```` query / `${param}` / component syntax), a table of contents linking each
   reference shard, and the "CLI loop" framing. ~120 lines, read first. Any agent that
   reads `AGENTS.md` natively (Claude Code, Cursor, Codex) picks this up.
 - **`.references/<topic>.md`** — the *shards*. One per documentation topic (components,
@@ -5489,7 +5538,7 @@ your own box on a page.
 
 1. At render time the framework builds a **search index** — one entry per page
    holding its title, section headings (with anchor ids), and plain body text.
-   The `:::query` SQL is already stripped, so query bodies never enter the index.
+   Inline-query SQL is already stripped, so query bodies never enter the index.
 2. The index is served live at `GET /_dashdown/api/search-index`, and baked into
    static exports as `_dashdown/search-index.json`.
 3. The browser fetches the index once and does **all ranking client-side** —

@@ -10,21 +10,21 @@ static_paths:
 
 # Channel detail
 
-:::query name=channel_summary connector=main
+```sql channel_summary connector=main
 SELECT channel,
        SUM(downloads) AS downloads,
        COUNT(DISTINCT month) AS months
 FROM downloads
 WHERE channel = '${channel}'
 GROUP BY channel
-:::
+```
 
-:::query name=channel_months connector=main
+```sql channel_months connector=main
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'
 ORDER BY month
-:::
+```
 
 You are viewing the **<Value data={channel_summary} column="channel" />** channel.
 This page is the single template `pages/detail-pages/[channel].md`; the `${channel}`

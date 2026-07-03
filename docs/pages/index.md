@@ -26,10 +26,10 @@ write `.md`, point the CLI at the folder, and get a live dashboard.
 ## A page is just Markdown + SQL + components
 
 ````markdown
-:::query name=downloads_by_month connector=main
+```sql downloads_by_month connector=main
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
-:::
+```
 
 <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads" />
 ````
@@ -37,9 +37,9 @@ FROM downloads GROUP BY month ORDER BY month
 That snippet renders this — real widgets, drawn in your browser from the query
 result (here via the shared `queries/downloads_by_month.sql`):
 
-:::query name=downloads_total connector=main
+```sql downloads_total connector=main
 SELECT SUM(downloads) AS downloads FROM downloads
-:::
+```
 
 <Counter data={downloads_total} column="downloads" label="Total downloads (all months)" />
 

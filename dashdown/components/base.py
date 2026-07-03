@@ -21,6 +21,7 @@ class RenderContext:
         query_connectors: dict[str, str] | None = None,
         semantic_models: dict[str, Any] | None = None,
         filter_debounce: int = 300,
+        default_connector: str = "main",
     ) -> None:
         self.queries = queries
         self.params = params or {}
@@ -38,6 +39,9 @@ class RenderContext:
         # address the data API server-side (e.g. <Ask />) can bind the right
         # connector at render time.
         self.query_connectors = query_connectors or {}
+        # The project's default source name (see `default_connector_name`) —
+        # the fallback when a referenced query name isn't in query_connectors.
+        self.default_connector = default_connector
         # Set by render_components when ANY filter component renders (inline or
         # bar-routed). Informational — placement is decided per-control.
         self.has_filters = False

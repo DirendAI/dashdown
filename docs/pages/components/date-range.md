@@ -19,13 +19,13 @@ WHERE ('${from}' = '' OR date >= '${from}')
 ORDER BY date
 ```
 
-:::query name=daily_in_range connector=main
+```sql daily_in_range connector=main
 SELECT date, visits
 FROM daily
 WHERE ('${from}' = '' OR date >= '${from}')
   AND ('${to}' = '' OR date <= '${to}')
 ORDER BY date
-:::
+```
 
 <DateRange name="period" label="Period" start_param="from" end_param="to" presets="last_7_days,last_30_days,custom" />
 

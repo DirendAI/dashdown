@@ -59,15 +59,15 @@ These tune the chosen `format`. Set only the ones you need:
 
 ### Example
 
-```markdown
-:::query name=fmt_demo connector=main
+````markdown
+```sql fmt_demo connector=main
 SELECT SUM(downloads) AS downloads, SUM(downloads) * 0.12 AS revenue
 FROM downloads
-:::
+```
 
 <Counter data={fmt_demo} column="downloads" format="number" label="Total downloads" />
 <Counter data={fmt_demo} column="revenue" format="currency" currency="EUR" decimals=2 label="Revenue (€0.12 / download)" />
-```
+````
 
 Rendered live from this site's CSV:
 

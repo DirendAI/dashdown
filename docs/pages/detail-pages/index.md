@@ -26,18 +26,18 @@ captured value flows into queries as `${param}`, through the same context-aware,
 
 ````markdown
 <!-- pages/channels/[channel].md  →  /channels/<channel> -->
-:::query name=channel_months connector=main
+```sql channel_months connector=main
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'
 ORDER BY month
-:::
+```
 
 <LineChart data={channel_months} x="month" y="downloads" title="Monthly downloads" />
 ````
 
 :::note
-Page **prose** is not templated — only the SQL inside `:::query` blocks sees
+Page **prose** is not templated — only the SQL inside query blocks sees
 `${param}`. To show the current record's name in the body, read it from a query
 with a `<Value />` (as the demo's detail page does), rather than typing the
 placeholder into Markdown.
@@ -89,12 +89,12 @@ The table below is a real list page. Each row links to `/detail-pages/<channel>`
 served by the single template `pages/detail-pages/[channel].md` — **click any row**
 to drill into that channel's detail page.
 
-:::query name=channels_overview connector=main
+```sql channels_overview connector=main
 SELECT channel, SUM(downloads) AS downloads
 FROM downloads
 GROUP BY channel
 ORDER BY downloads DESC
-:::
+```
 
 <Table data={channels_overview} title="Downloads by channel" row_link="/detail-pages/{channel}" format="downloads=number" search=false />
 

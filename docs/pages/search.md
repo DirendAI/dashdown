@@ -52,7 +52,7 @@ your own box on a page.
 
 1. At render time the framework builds a **search index** — one entry per page
    holding its title, section headings (with anchor ids), and plain body text.
-   The `:::query` SQL is already stripped, so query bodies never enter the index.
+   Inline-query SQL is already stripped, so query bodies never enter the index.
 2. The index is served live at `GET /_dashdown/api/search-index`, and baked into
    static exports as `_dashdown/search-index.json`.
 3. The browser fetches the index once and does **all ranking client-side** —

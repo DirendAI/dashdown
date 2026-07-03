@@ -19,12 +19,12 @@ WHERE '${busy}' = '' OR visits >= 500
 ORDER BY date
 ```
 
-:::query name=daily_traffic connector=main
+```sql daily_traffic connector=main
 SELECT date, visits
 FROM daily
 WHERE '${busy}' = '' OR visits >= 500
 ORDER BY date
-:::
+```
 
 <Toggle name="busy" label="Busy days only" />
 
@@ -60,13 +60,13 @@ WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')
 ORDER BY date
 ```
 
-:::query name=daily_weekend connector=main
+```sql daily_weekend connector=main
 SELECT date, visits
 FROM daily
 WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')
            ELSE weekday NOT IN ('Sat','Sun') END
 ORDER BY date
-:::
+```
 
 <Toggle name="weekend" label="Weekends only" on_value="Yes" off_value="No" />
 

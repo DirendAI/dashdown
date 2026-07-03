@@ -75,7 +75,7 @@ class PythonQuerySpec:
 
 def query(
     *,
-    connector: str = "main",
+    connector: str | None = None,
     cache_ttl: int | None = None,
     live: bool = False,
     interval: int | None = None,
@@ -109,7 +109,7 @@ def query(
             fn,
             _QUERY_MARKER,
             {
-                "connector": str(connector),
+                "connector": str(connector) if connector is not None else "",
                 "cache_ttl": cache_ttl,
                 "live": bool(live),
                 "interval": interval,
@@ -170,7 +170,7 @@ def parse_python_query_file(path: Path, name: str) -> PythonQuerySpec:
     meta = getattr(fn, _QUERY_MARKER)
     return PythonQuerySpec(
         name=name,
-        connector=str(meta.get("connector") or "main"),
+        connector=str(meta.get("connector") or ""),
         fn=fn,
         cache_ttl=meta.get("cache_ttl"),
         live=bool(meta.get("live")),

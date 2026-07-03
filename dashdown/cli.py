@@ -183,7 +183,10 @@ def query(
         Path("."), "--project", "-p", help="Project directory"
     ),
     connector: str = typer.Option(
-        "main", "--connector", "-c", help="Connector name from sources.yaml"
+        None,
+        "--connector",
+        "-c",
+        help="Connector name from sources.yaml (default: the project's default source)",
     ),
     fmt: str = typer.Option(
         "table", "--format", "-f", help="Output format: table, json, or csv"
@@ -229,6 +232,7 @@ def query(
 
     proj = load_project(project.resolve())
     try:
+        connector = connector or proj.default_connector
         conn = proj.connectors.get(connector)
         if conn is None:
             avail = ", ".join(sorted(proj.connectors)) or "(none configured)"
@@ -974,12 +978,12 @@ def _scaffold(root: Path, targets: list[str] | None = None) -> None:
     (root / "pages" / "index.md").write_text(
         "# Welcome\n\n"
         "This is your first Dashdown page.\n\n"
-        ":::query name=monthly_sales connector=main\n"
+        "```sql monthly_sales\n"
         "SELECT month, region, SUM(amount) AS sales\n"
         "FROM sales\n"
         "GROUP BY month, region\n"
         "ORDER BY month\n"
-        ":::\n\n"
+        "```\n\n"
         '<Dropdown name="region" data={monthly_sales} column="region" label="Region" />\n\n'
         '<LineChart data={monthly_sales} x="month" y="sales" series="region" title="Monthly Sales" />\n\n'
         '<Table data={monthly_sales} title="Detail" />\n',

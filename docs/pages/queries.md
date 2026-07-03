@@ -8,14 +8,14 @@ icon: "\U0001F50D"
 # Queries
 
 SQL lives either in the shared **query library** under `queries/` (the
-recommended default) or, for a quick one-off, inline in a `:::query` block on a
-page.
+recommended default) or, for a quick one-off, inline in a named ` ```sql `
+block on a page.
 
 :::tip
 **Prefer the `queries/` library.** Defining each query once in its own file —
 rather than inline on a page — keeps SQL out of your prose, lets you reuse and
 [compose](#composition) queries across pages, and makes them easy to find and
-edit. Reach for an inline `:::query` only for a throwaway query used on exactly
+edit. Reach for an inline query only for a throwaway query used on exactly
 one page.
 :::
 
@@ -40,7 +40,8 @@ is referenced from any page by that name — this page's chart uses it:
 <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads (shared query)" />
 
 Per-query options (`connector`, `cache_ttl`, `live`, …) go in the file's YAML
-frontmatter; the default connector is `main`.
+frontmatter; omit `connector` to use the project's [default
+source](/connectors#the-default-source).
 
 :::note Need more than SQL?
 A query in `queries/` can also be a **`.py` file** — a function returning a table
@@ -57,15 +58,35 @@ blocks instead of repeating subqueries.
 
 ## Inline queries
 
-For a one-off used on a single page, you can still define the SQL inline:
+For a one-off used on a single page, define the SQL inline as a fenced code
+block whose info string names the query — the first word after the language is
+the **name**, the rest are options:
+
+````markdown
+```sql downloads_by_month connector=main ttl=300
+SELECT month, SUM(downloads) AS downloads
+FROM downloads GROUP BY month ORDER BY month
+```
+
+<LineChart data={downloads_by_month} x="month" y="downloads" />
+````
+
+Because it's a standard fenced block, every Markdown editor (and GitHub)
+syntax-highlights the SQL. Options are the same as everywhere else:
+`connector=` (omit it to use the [default source](/connectors)), `ttl=` /
+`cache_ttl=` for [result caching](#caching-results), and `live` +
+`interval=` for [real-time data](/realtime). A plain ` ```sql ` fence with
+*nothing* after the language stays an ordinary display-only code sample — like
+the ones on this page. Add the bare `show` option to a query definition to
+*also* render its SQL on the page.
+
+The older `:::query` container form still works:
 
 ```markdown
 :::query name=downloads_by_month connector=main
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 :::
-
-<LineChart data={downloads_by_month} x="month" y="downloads" />
 ```
 
 Either way, the SQL is collected and **never executed server-side during page
@@ -106,8 +127,9 @@ cache_ttl: 300
 SELECT day, SUM(downloads) AS downloads FROM downloads GROUP BY day
 ```
 
-On an inline query it's an attribute instead (`:::query name=… cache_ttl=300`).
-With no `cache_ttl`, results aren't cached — each request runs the query fresh.
+On an inline query it's an option instead (` ```sql name ttl=300 `; `ttl` and
+`cache_ttl` are synonyms). With no TTL, results aren't cached — each request
+runs the query fresh.
 (For data that should repaint as it changes, see [Real-time data](/realtime)
 instead.)
 
