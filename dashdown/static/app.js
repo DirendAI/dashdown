@@ -17,7 +17,7 @@ import { initAllTabs } from "./components/tabs.js";
 import { initAllValues } from "./components/value.js";
 import { initAllCounters } from "./components/counter.js";
 import { initAllPivots } from "./components/pivot.js";
-import { initAllAsks } from "./components/ask.js";
+import { initAllAsks, initAllExplains } from "./components/ask.js";
 import { initPageHeader, initBuildStamp } from "./components/page_header.js";
 import { initEmbedFrame } from "./components/embed_frame.js";
 import { initEmbedUI } from "./components/embed_ui.js";
@@ -93,6 +93,9 @@ function initComponents() {
 
   // Process ask (LLM commentary) components
   initAllAsks();
+
+  // Wire chart `explain` buttons (their ask footers initialize on first open)
+  initAllExplains();
 }
 
 /**

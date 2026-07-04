@@ -64,6 +64,7 @@ example; the common attributes are here.
 | `col-span`     | Columns to span inside a `<Grid>`.                              |
 | `format`, `currency`, `decimals`, `locale`, `date_format` | Value-axis & tooltip number/date formatting — see [Formatting](/formatting). |
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
+| `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),

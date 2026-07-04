@@ -126,6 +126,38 @@ It binds to the *same* synthetic query a chart with those attrs would build, so 
 answer rides the same result cache and filter path. A plain `queries/*.py`
 [Python query](/python-queries) works as a source too.
 
+## Explain any chart
+
+Every [chart](/components/charts) accepts an `explain` attribute: it adds a
+small ✨ button to the chart card (revealed on hover, next to the "filtered by"
+marker) that generates commentary **on demand** into a footer under the plot:
+
+```markdown
+<BarChart data={downloads_by_country} x="country" y="downloads"
+          title="Downloads by country" explain />
+```
+
+<BarChart data={downloads_by_country} x="country" y="downloads" title="Downloads by country" explain />
+
+Hover the chart and click the sparkle. It's sugar over `<Ask>`: at render time
+the chart registers an ordinary ask with a canned prompt (*"explain what is
+notable in this data"*, naming the chart's type and title), so viewers still
+can't send prompts, answers cache and stream exactly the same way, and the ↻
+button regenerates. Nothing is generated until the first click — an idle chart
+costs nothing — and while the footer is closed, a filter change defers the
+regeneration to the next open instead of billing for commentary nobody is
+reading.
+
+`explain="…"` pins your own question instead of the canned one:
+
+```markdown
+<LineChart data={monthly_downloads} x="month" y="downloads"
+           explain="Is growth accelerating or slowing?" />
+```
+
+Works in embeds; omitted from static builds (on-demand generation needs a live
+server — the same posture as the ↻ refresh button).
+
 ## Configuration
 
 Set `llm.provider` to one of `mistral`, `anthropic` (Claude), `openai`, or

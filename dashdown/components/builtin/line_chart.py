@@ -16,6 +16,8 @@ from dashdown.components.builtin._util import (
     resolve_semantic,
     safe_json,
 )
+from dashdown.components.builtin.ask import ask_surface_inner
+from dashdown.llm import register_ask_def
 from dashdown.render.attrs import DataRef
 
 
@@ -79,19 +81,153 @@ def _chart_placeholder(
     height = attr_int(attrs, "height", 300) or 300
     span = grid_span_style(attrs)
 
-    # Bordered card, no shadow + p-4 body, matching the mockups' card style.
+    return _chart_card(
+        attrs, ctx, chart_type=chart_type, cid=cid, name=name,
+        config_json=config_json, height=height, span=span,
+    )
+
+
+def _chart_card(
+    attrs: dict[str, Any],
+    ctx: RenderContext,
+    *,
+    chart_type: str,
+    cid: str,
+    name: str,
+    config_json: str,
+    height: int,
+    span: str,
+) -> str:
+    """The bordered async-chart card shell — no shadow, p-4 skeleton body,
+    matching the mockups' card style. Shared by :func:`_chart_placeholder` and
+    ComboChart's bespoke config path (combo_chart.py), so the `explain`
+    affordance works on every chart type. (catalog.py follows this helper
+    cross-module the way it follows ``_chart_html``.)
+    """
+    skeleton_body = (
+        f'<div class="card-body p-4 h-full">'
+        f'<div class="dashdown-chart-skeleton skeleton w-full h-full"></div>'
+        f"</div>"
+    )
+
+    # `explain` — a hover-revealed ✨ button that opens on-demand AI commentary
+    # in a footer below the plot. Sugar over the <Ask /> machinery: an ordinary
+    # AskDef with a canned prompt (or the author's, via `explain="…"`) registers
+    # at render time, so the opaque-id model is untouched — viewers still can't
+    # send prompts. The footer is a regular ask surface that ask.js initializes
+    # only on first open, so an idle chart costs nothing. Skipped in static
+    # builds (nothing joins ctx.ask_defs, so nothing is baked) — same posture as
+    # the ↻ refresh button: on-demand generation needs a live server.
+    explain_html = _explain_affordance(chart_type, attrs, ctx, cid=cid, name=name)
+    if explain_html:
+        # The fixed height moves onto an inner region so the card itself can
+        # grow when the commentary footer opens; the plot keeps its exact size.
+        inner = (
+            f'<div class="dashdown-chart-region" style="height:{height}px">'
+            f"{skeleton_body}"
+            f"</div>"
+            f"{explain_html}"
+        )
+        style = f"width:100%;{span}"
+    else:
+        inner = skeleton_body
+        style = f"width:100%;height:{height}px;{span}"
+
     return (
         f'<div class="dashdown-chart card bg-base-100 border border-base-300" '
         f'id="{cid}" '
-        f'style="width:100%;height:{height}px;{span}" '
+        f'style="{style}" '
         f'data-async-component="chart" '
         f'data-config="{config_json}" '
         f'data-component-id="{cid}" '
         f'data-query-name="{esc(name)}">'
-        f'<div class="card-body p-4 h-full">'
-        f'<div class="dashdown-chart-skeleton skeleton w-full h-full"></div>'
+        f"{inner}"
         f'</div>'
-        f'</div>'
+    )
+
+
+def _explain_affordance(
+    chart_type: str,
+    attrs: dict[str, Any],
+    ctx: RenderContext,
+    *,
+    cid: str,
+    name: str,
+) -> str:
+    """The ✨ button + hidden commentary footer for a chart with `explain`,
+    or "" when the attr is unset / this is a static build.
+
+    Registers the AskDef (deterministic id — same chart, same id across
+    renders) and records it on ``ctx.ask_defs`` so an embed token signed for
+    the page covers the ask endpoint too. `explain` bare uses the canned
+    prompt; `explain="…"` pins the author's own question — author-supplied at
+    render time either way, exactly the <Ask /> trust model.
+    """
+    explain_val = attrs.get("explain")
+    if not explain_val or ctx.static_build:
+        return ""
+
+    if isinstance(explain_val, str):
+        prompt = explain_val
+    else:
+        title = attr_str(attrs, "title", "")
+        shown = (
+            f'a {chart_type} chart titled "{title}"'
+            if title
+            else f"a {chart_type} chart"
+        )
+        prompt = (
+            f"Explain what is notable in this data, shown as {shown}: "
+            "the overall pattern, any standouts or anomalies, and what a "
+            "viewer should take away."
+        )
+
+    # Same connector resolution as <Ask />: a semantic chart's synthetic query
+    # carries its connector on the recorded ref; a `data={query}` chart binds
+    # by name with the project default as fallback.
+    if name in ctx.semantic_refs:
+        connector = ctx.semantic_refs[name].connector
+    else:
+        connector = ctx.query_connectors.get(name, ctx.default_connector)
+
+    ask = register_ask_def(
+        ((name, connector),),
+        prompt,
+        page_title=ctx.page_title,
+        page_description=ctx.page_description,
+    )
+    ctx.ask_defs.append(ask)
+
+    # highlight_queries stays empty: the commentary lives inside the chart it
+    # explains, so glowing the parent card on hover would be noise. lazy=false
+    # because the click is the gate — once open, generate immediately.
+    ask_config = esc(
+        safe_json(
+            {
+                "ask_id": ask.id,
+                "query_names": [name],
+                "replay": "once",
+                "highlight_queries": [],
+                "lazy": False,
+            }
+        )
+    )
+    panel_id = f"{cid}-explain"
+    # The button reuses the AI-badge sparkle (ask.py) so the affordance and the
+    # provenance mark speak one icon language.
+    return (
+        f'<button type="button" class="dashdown-explain-btn" '
+        f'aria-expanded="false" aria-controls="{panel_id}" '
+        f'aria-label="Explain this data" title="Explain this data">'
+        '<svg fill="none" stroke="currentColor" stroke-width="1.5" '
+        'viewBox="0 0 24 24" aria-hidden="true">'
+        '<path stroke-linejoin="round" '
+        'd="M12 4.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1-5.1-1.9 5.1-1.9 1.9-5.1z"/>'
+        '<path stroke-linejoin="round" '
+        'd="M18.8 3.2l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"/>'
+        "</svg></button>"
+        f'<div id="{panel_id}" class="dashdown-ask dashdown-explain-panel" hidden '
+        f'data-config="{ask_config}">' + ask_surface_inner() + "</div>"
     )
 
 

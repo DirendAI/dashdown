@@ -1118,6 +1118,72 @@ body {
   font-style: italic;
   color: var(--fallback-bc3, oklch(var(--bc3) / 1));
 }
+
+/* --- Chart `explain` affordance ----------------------------------------- */
+/* A chart with `explain` hosts a hover-revealed sparkle button in its top-right
+   corner (same reveal pattern as the "filtered by" funnel marker, which shifts
+   left to make room) that toggles an on-demand AI commentary footer under the
+   plot. The footer is a regular ask surface — all the .dashdown-ask-* rules
+   above apply — minus the standalone card chrome: it's part of the chart card,
+   so it drops the section margin and is excluded from the elevation rules. */
+.dashdown-chart { position: relative; } /* corner-anchor for the button */
+.dashdown-explain-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--dashdown-radius-control, 0.5rem);
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  background: transparent;
+  cursor: pointer;
+  /* Hidden until the chart is hovered, the button is keyboard-focused, or the
+     footer is open (the toggle must stay visible while its panel shows). */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.dashdown-explain-btn svg { width: 0.875rem; height: 0.875rem; }
+[data-async-component]:hover .dashdown-explain-btn,
+.dashdown-explain-btn:focus-visible,
+.dashdown-explain-btn[aria-expanded="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Hover/active: the same warning-amber the AI badge speaks. */
+.dashdown-explain-btn:hover,
+.dashdown-explain-btn:focus-visible,
+.dashdown-explain-btn[aria-expanded="true"] {
+  color: oklch(var(--wa, 75% 0.16 75) / 1);
+  outline: none;
+}
+.dashdown-explain-btn:hover,
+.dashdown-explain-btn:focus-visible {
+  background: color-mix(in oklch, oklch(var(--wa, 75% 0.16 75) / 1) 12%, transparent);
+}
+/* Touch devices can't hover-reveal — keep the affordance reachable. */
+@media (hover: none) {
+  .dashdown-explain-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+/* Both corner affordances on one chart: the informational funnel yields the
+   corner to the actionable sparkle. */
+.dashdown-chart:has(.dashdown-explain-btn) .dashdown-filter-badge { right: 2.25rem; }
+
+/* The commentary footer: separated from the plot by a hairline, compact
+   padding (the ask surface's own header/body spacing does the rest). */
+.dashdown-ask.dashdown-explain-panel {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
 .dashdown-error {
   background: var(--error-bg);
   border: 1px solid var(--error-border);
@@ -1266,20 +1332,21 @@ body {
    lift on hover. Charts/tables/pivots only deepen the shadow + tint the border
    (no transform — they host ECharts tooltips / overlays that a transformed
    ancestor would shift); the small KPI cards add a 1px rise for a tactile feel. */
-/* Inline asks opt out of the card elevation below: prose has no shadow to
-   raise, and hovering one should reveal only the AI details, not chrome. */
+/* Inline asks and chart explain footers opt out of the card elevation below:
+   prose has no shadow to raise (and the footer sits *inside* an elevated chart
+   card) — hovering one should reveal only the AI details, not chrome. */
 .dashdown-chart,
 .dashdown-table,
 .dashdown-pivot,
 .dashdown-counter,
-.dashdown-ask:not(.dashdown-ask-inline) {
+.dashdown-ask:not(.dashdown-ask-inline):not(.dashdown-explain-panel) {
   box-shadow: var(--dashdown-shadow-card);
   transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
 }
 .dashdown-chart:hover,
 .dashdown-table:hover,
 .dashdown-pivot:hover,
-.dashdown-ask:not(.dashdown-ask-inline):hover {
+.dashdown-ask:not(.dashdown-ask-inline):not(.dashdown-explain-panel):hover {
   box-shadow: var(--dashdown-shadow-raised);
   border-color: oklch(var(--bc) / 0.16);
 }
@@ -2889,6 +2956,7 @@ body {
 .dashdown-print .dashdown-page-topbar,
 .dashdown-print .dashdown-filter-bar,
 .dashdown-print .dashdown-filter-badge,
+.dashdown-print .dashdown-explain-btn,
 .dashdown-print .dashdown-build-stamp,
 .dashdown-print .dashdown-made-with,
 .dashdown-print .dashdown-code-copy {
