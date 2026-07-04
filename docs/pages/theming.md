@@ -23,13 +23,13 @@ before it:
 4. **`assets/custom.css`** — *your* project, linked **last → highest priority**.
 
 Because `custom.css` loads last, its rules win by plain stylesheet order — you
-rarely need `!important`. It applies identically on the dev server, in a
-`dashdown build` static export, and in an embedded page.
+rarely need `!important`. It applies identically on the dev server and in a
+`dashdown build` static export.
 
 :::note
 **Theme (light/dark) is viewer-controlled, not configured.** The page follows
-the visitor's OS preference, the header toggle overrides it (saved per browser),
-and an embed host can pin one with `?_theme=light|dark`. `custom.css` restyles
+the visitor's OS preference, the header toggle overrides it (saved per browser).
+`custom.css` restyles
 *both* themes — scope rules to `[data-theme="light"]` / `[data-theme="dark"]`
 when you want them to differ.
 :::

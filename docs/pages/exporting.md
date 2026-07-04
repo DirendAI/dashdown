@@ -24,8 +24,7 @@ search keeps working with no server.
 Every built page shows a small **"Generated &lt;time&gt;"** stamp at the foot of the
 content, so readers know exactly when the snapshot was produced. It's automatic
 (nothing to configure), localized to the reader's time zone, and appears only in
-`dashdown build` output — never on the live server. It's hidden in embeds and in
-PDF/print.
+`dashdown build` output — never on the live server. It's hidden in PDF/print.
 :::
 
 ### Dynamic detail pages (`static_paths`)

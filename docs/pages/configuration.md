@@ -40,17 +40,6 @@ format:                        # → Formatting
   currency: USD
   date_format: MMM D, YYYY
 
-auth:                          # → Authentication
-  type: basic
-  users:
-    admin: ${ADMIN_PASSWORD}
-
-embed:                         # → Embedding
-  enabled: true
-  frame_ancestors: ["https://example.com"]
-  secret: ${EMBED_SECRET}
-  token_ttl: 3600
-
 llm:                           # → Ask
   provider: anthropic
   api_key: ${ANTHROPIC_API_KEY}
@@ -89,7 +78,7 @@ python_queries:                # → Python queries
 :::note
 **Theme** is not configured here — it's viewer-controlled. The page follows the
 visitor's OS light/dark preference by default; the header toggle overrides it
-(saved per browser). An embedding host can pin a theme with `?_theme=light|dark`.
+(saved per browser).
 To restyle the look — colours, radii, spacing, chrome — drop a `assets/custom.css`
 in your project; see **[Theming & styling](/theming)**.
 :::
@@ -120,20 +109,6 @@ Project-wide defaults for number, currency and date display (`locale`, `currency
 `date_format`). A component's own `format=` attributes override these.
 
 → **[Formatting](/formatting)** for the full reference.
-
-## `auth`
-
-Password-protect the whole dashboard. `type: basic` (HTTP Basic) or `type: api_key`
-(a shared secret in a header); default `none`. Secrets support `${VAR}`.
-
-→ **[Authentication](/authentication)** for setup and the cross-origin caveats.
-
-## `embed`
-
-Serve pages chrome-less inside an iframe on another site, with framing allowlists
-and (when `auth` is on) signed access tokens.
-
-→ **[Embedding](/embedding)** for the framing rules and token flow.
 
 ## `llm`
 

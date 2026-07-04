@@ -65,7 +65,7 @@ A Dashdown *project* is a directory the CLI points at:
 
 ```text
 my-dashboard/
-├── dashdown.yaml     # project config (title, auth, embed, branding, …)
+├── dashdown.yaml     # project config (title, branding, format, …)
 ├── sources.yaml      # data connectors
 ├── pages/            # one .md per route  →  pages/sales.md = /sales
 │   └── index.md      # the home page  →  /
@@ -76,8 +76,8 @@ my-dashboard/
 └── assets/           # custom.css, logos, images
 ```
 
-`dashdown.yaml` configures the whole dashboard (title, auth, branding,
-embedding, …) — see **[Configuration](/configuration)** for every block.
+`dashdown.yaml` configures the whole dashboard (title, branding, formatting,
+…) — see **[Configuration](/configuration)** for every block.
 
 :::tip
 There are two distinct domains: **the framework** (the `dashdown` package you

@@ -16,3 +16,15 @@ def _isolate_telemetry(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("DASHDOWN_TELEMETRY_STATE", str(tmp_path / "telemetry-state.json"))
     monkeypatch.setenv("DASHDOWN_TELEMETRY", "0")
+
+
+@pytest.fixture(autouse=True)
+def _enterprise_unlock(monkeypatch):
+    """Unlock the enterprise gate (auth/embed) for the whole suite.
+
+    Auth + embedding are gated as enterprise features (``dashdown/enterprise.py``)
+    but their implementation stays in-tree, and the suite must keep exercising it
+    so it can't rot — so every test runs unlocked. ``tests/test_enterprise.py``
+    removes the variable in its own fixture to assert the locked default.
+    """
+    monkeypatch.setenv("DASHDOWN_ENTERPRISE", "1")

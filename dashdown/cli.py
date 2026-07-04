@@ -839,7 +839,7 @@ def screenshot(
         raise typer.Exit(code=1)
 
 
-@app.command(name="embed-token")
+@app.command(name="embed-token", hidden=True)
 def embed_token(
     project: Path = typer.Argument(Path("."), help="Project directory"),
     page: str = typer.Argument(..., help="Page path to embed, e.g. /sales"),

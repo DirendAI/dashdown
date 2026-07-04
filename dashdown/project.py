@@ -14,6 +14,7 @@ import yaml
 
 from dashdown.auth import AuthConfig, parse_auth_config
 from dashdown.embed import EmbedConfig, parse_embed_config
+from dashdown.enterprise import require_enterprise
 from dashdown.data.base import Connector
 from dashdown.data.registry import (
     default_connector_name,
@@ -654,6 +655,14 @@ def load_project(root: Path) -> Project:
             sidebar=parse_sidebar_config(raw.get("sidebar")),
             python_queries=parse_python_queries_config(raw.get("python_queries")),
         )
+        # Auth + embedding are enterprise features: parsed above so a broken
+        # block still fails with its specific error, but *activating* either
+        # needs the unlock (dashdown/enterprise.py). Gated on the parsed
+        # result, so inert blocks (`type: none`, `enabled: false`) stay legal.
+        if cfg.auth.enabled:
+            require_enterprise("auth")
+        if cfg.embed.enabled:
+            require_enterprise("embed")
 
     # Auto-import any user component / connector modules so their @register_*
     # runs *before* sources.yaml is resolved — a custom connector defined in a

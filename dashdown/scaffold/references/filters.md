@@ -143,9 +143,7 @@ selection still applies once you navigate to a date-aware page.
 **Placement & persistence.** On a normal page the control lives in the sticky
 app header (reachable even when scrolled). The selection **persists across
 navigation** (localStorage), so it behaves as one global filter rather than a
-per-page one — URL params still win over the remembered value. When a page is
-[embedded](/embedding) (`?_embed`) the header chrome is omitted, so the control
-renders as an ordinary filter in the filter bar instead. [Static builds](/exporting)
+per-page one — URL params still win over the remembered value. [Static builds](/exporting)
 omit it (a fixed snapshot can't be re-filtered), like the other filter controls.
 
 It reuses the same control as the [`<DateRange>`](/components/date-range)

@@ -160,10 +160,6 @@ or ship it as a pip-installable plugin.
   no Python.
 - **PDF** — `dashdown pdf` renders a presentation-quality deck (cover page, one
   widget per row, clean page breaks) via headless Chromium.
-- **Embed** — drop any page into Notion, a wiki, or a CMS as an auto-resizing,
-  chrome-less iframe, with signed page-scoped tokens when auth is on.
-- **Auth** — lock a dashboard behind HTTP Basic or an API key with one config
-  block.
 
 ---
 
@@ -192,8 +188,7 @@ dashdown serve docs
 
 Or read the source under [`docs/pages/`](docs/pages) — getting started,
 configuration, writing pages, components, connectors, queries, the semantic
-layer, real-time data, filters, formatting, exporting, embedding, auth, and
-extending. The `docs/` directory is itself a runnable Dashdown project, so it
+layer, real-time data, filters, formatting, exporting, and extending. The `docs/` directory is itself a runnable Dashdown project, so it
 doubles as a worked example: `dashdown serve docs`.
 
 ---

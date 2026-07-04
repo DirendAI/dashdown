@@ -60,8 +60,7 @@ your own box on a page.
    body occurrences; every search term must appear for a page to match.
 
 Because the index is plain JSON and the ranking is in the browser, search works
-identically on the live server, in a `dashdown build` static export, and inside
-an embedded page.
+identically on the live server and in a `dashdown build` static export.
 
 :::note
 Unlike the `<Search>` *filter* (which drives SQL substitution and is stripped

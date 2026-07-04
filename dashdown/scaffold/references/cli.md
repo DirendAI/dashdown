@@ -27,7 +27,6 @@ dashdown <command> --help  # options for one command
 | [`build`](#build) | Export a static site (HTML + pre-rendered data) |
 | [`pdf`](#pdf) | Export a presentation PDF |
 | [`screenshot`](#screenshot) | Capture a page to a PNG and verify its charts drew |
-| [`embed-token`](#embed-token) | Mint a signed token for an authenticated embed |
 
 ## serve
 
@@ -296,25 +295,3 @@ playwright install chromium
 ```
 
 See [Exporting](exporting).
-
-## embed-token
-
-Mint a signed embed token and a ready-to-paste `<script>` snippet for one page.
-Needed only when the dashboard has [auth](authentication) enabled — a cross-origin
-iframe can't send credentials, so it carries a scoped token instead. Requires an
-`embed:` block with a `secret` in `dashdown.yaml`.
-
-```bash
-dashdown embed-token . /sales
-dashdown embed-token . /sales --ttl 3600 --host https://dash.example
-```
-
-| Argument / Option | Default | Notes |
-| --- | --- | --- |
-| `page` | — | Page path to embed (positional), e.g. `/sales`. |
-| `-p, --project` | `.` | Project directory (positional). |
-| `--ttl` | `embed.token_ttl` | Token lifetime in seconds. |
-| `--host` | — | Public dashboard origin baked into the snippet. |
-
-The token is scoped to that exact page and the queries it reads, so it can't be
-replayed against other resources. See [Embedding](embedding).

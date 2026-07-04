@@ -48,7 +48,7 @@ rows into drill-down links:
 Formatting helpers (`currency`, `decimals`, `locale`, `date_format`) work like
 they do on charts — see [Formatting](/formatting) for the full reference and the
 project-wide `format:` defaults. CSV export is built client-side (RFC 4180) and
-works in static exports and authed embeds for free.
+works in static exports for free.
 
 ## Heatmap cells
 
