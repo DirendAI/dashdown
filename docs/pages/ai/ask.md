@@ -30,6 +30,7 @@ it, so the first words appear sub-second instead of after the full generation.
 | `replay`    | Typewriter replay of a cached/baked answer: `"once"` (default), `"always"`, or `"off"`. |
 | `refresh`   | `refresh=false` removes the viewer ↻ regenerate button — and the server stops honoring `_refresh` for this ask, so viewers can't force billable LLM calls. |
 | `inline`    | Chrome-less: no card border/background — the answer reads as part of the page prose (blog style). The small ✦ AI badge stays visible; the ↻ button and model attribution appear on hover. |
+| `font_size` | Answer text size: `"xs"`, `"sm"` (default), `"base"`, `"lg"`, or an explicit CSS length like `"0.8rem"`. The whole answer scales with it — headings, tables, and code included. |
 | `highlight` | Hover provenance: while the ask is hovered, the charts/tables bound to these queries glow amber. Defaults to the ask's own `data` query; `highlight="a,b"` names others, `highlight=false` disables. |
 | `lazy`      | On by default: the answer is generated only once the card scrolls into view — an unseen ask costs nothing, and the viewer watches it type in. `lazy=false` generates on page load. PDF/screenshot exports always load eagerly. |
 
@@ -60,6 +61,7 @@ same query the answer was generated from (see the `highlight` attribute).
 <Ask data={monthly_downloads} refresh=false ask="What stands out?" />      <!-- viewers can't force fresh LLM calls -->
 <Ask data={monthly_downloads} replay="off" ask="What stands out?" />       <!-- cached answers render instantly, no typewriter -->
 <Ask data={monthly_downloads} max_rows=20 cache_ttl=86400 ask="…" />       <!-- smaller data payload, day-long answer cache -->
+<Ask data={monthly_downloads} font_size="xs" ask="What stands out?" />      <!-- compact answer text (or "lg", or "0.8rem") -->
 ```
 
 ### Blog-style inline commentary
@@ -74,6 +76,19 @@ generated); hover the paragraph for the model attribution and ↻ button:
 ```
 
 <Ask data={monthly_downloads} inline>Narrate the download trend in one short paragraph.</Ask>
+
+### Bigger answer text
+
+`font_size` scales the **whole** answer surface — spacing, tables, and code
+included, not just the paragraphs. `"lg"` suits commentary that is the
+centerpiece of a page rather than a footnote to a chart (an explicit CSS
+length like `font_size="1.25rem"` works too):
+
+```markdown
+<Ask data={monthly_downloads} font_size="lg" ask="What is the headline takeaway from this data?" />
+```
+
+<Ask data={monthly_downloads} font_size="lg" ask="What is the headline takeaway from this data?" />
 
 ## Works on semantic-layer data too
 
@@ -130,6 +145,15 @@ the query actually substitutes — so after a viewer picks `region = East` the
 commentary can say "in the East region…" — and today's date (so "recent" means
 recent). Filters are sent as plain data in the prompt; they never widen what the
 endpoint accepts.
+
+## Rich answers
+
+Answers are Markdown, and the card styles the full surface: alongside
+paragraphs and bullets the model may reply with a **small comparison table**
+(it's steered to use one only when comparing a handful of values), inline
+`code`, headings, or a blockquote — all rendered compactly inside the card.
+Everything scales together: `font_size` resizes the whole answer, tables and
+code included.
 
 ## Streaming & replay
 

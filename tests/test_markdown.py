@@ -300,6 +300,13 @@ def test_render_markdown_text_has_no_page_extensions():
     assert "dashdown-code" not in out2
 
 
+def test_render_markdown_text_renders_tables():
+    # Tables are the one extension the answer renderer enables — the <Ask />
+    # system prompt invites small comparison tables, so this stays load-bearing.
+    out = render_markdown_text("| a | b |\n| - | - |\n| 1 | 2 |")
+    assert "<table>" in out and "<th>a</th>" in out and "<td>2</td>" in out
+
+
 # --- PascalCase component blocks survive internal blank lines ---------------
 #
 # CommonMark's HTML block (type 7) ends at the first blank line, which used to

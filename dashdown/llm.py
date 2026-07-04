@@ -579,7 +579,8 @@ SYSTEM_PROMPT = (
     "You may also be given the page's title and description, the active filters "
     "that produced the rows, and today's date — use them to ground your answer "
     "(e.g. name the filtered region, interpret 'recent' relative to today). "
-    "Answer concisely in Markdown: a short paragraph or a few bullet points. "
+    "Answer concisely in Markdown: a short paragraph or a few bullet points, "
+    "or a small Markdown table when comparing a handful of values side by side. "
     "Base every statement strictly on the data provided; if the question cannot "
     "be answered from the data, say so. Never invent numbers."
 )

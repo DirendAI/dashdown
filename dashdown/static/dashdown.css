@@ -892,18 +892,119 @@ body {
    need rules here. */
 .dashdown-ask { margin: var(--dashdown-space-section) 0; }
 .dashdown-ask-body {
-  margin-top: 0.5rem;
+  margin-top: 0.57em;
   font-size: 0.875rem;
   line-height: 1.6;
   color: var(--fallback-bc2, oklch(var(--bc2) / 1));
 }
 /* The answer arrives as rendered markdown — rein in the .dashdown-main
-   defaults so prose sits tight inside the card. */
-.dashdown-ask-body p { margin: 0 0 0.5rem !important; }
+   defaults so prose sits tight inside the card. Everything below is em-based
+   (not rem): the <Ask font_size=…> attr sets font-size on the body, and em
+   makes spacing, tables, and code scale with it — rem would pin them to the
+   root and the knob would resize text only. Values are the old rem numbers
+   converted at the 0.875rem default, so the default look is unchanged. */
+.dashdown-ask-body p { margin: 0 0 0.57em !important; }
 .dashdown-ask-body p:last-child { margin-bottom: 0 !important; }
 .dashdown-ask-body ul,
-.dashdown-ask-body ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
-.dashdown-ask-body li { margin: 0.15rem 0; }
+.dashdown-ask-body ol { margin: 0 0 0.57em; padding-left: 1.43em; }
+.dashdown-ask-body li { margin: 0.17em 0; }
+/* Full markdown answer surface — compact variants of the page-prose look, so
+   a table, code block, heading, or blockquote in an answer reads as designed
+   rather than unstyled. render_markdown_text() stays minimal (CommonMark +
+   tables, html off) — this styles what it already emits, nothing more.
+   Headings: models favor ##/### even when told to be brief, and .dashdown-main
+   h1–h4 (page-heading sizes, !important) would otherwise reach in here — the
+   !important + later-in-file rules below take the tie. All levels collapse to
+   near-body sizes: inside a commentary card a heading is a label, not a title. */
+.dashdown-ask-body h1,
+.dashdown-ask-body h2 { font-size: 1.15em !important; }
+.dashdown-ask-body h3 { font-size: 1.1em !important; }
+.dashdown-ask-body h4,
+.dashdown-ask-body h5,
+.dashdown-ask-body h6 { font-size: 1em !important; }
+.dashdown-ask-body h1,
+.dashdown-ask-body h2,
+.dashdown-ask-body h3,
+.dashdown-ask-body h4,
+.dashdown-ask-body h5,
+.dashdown-ask-body h6 {
+  font-weight: 600 !important;
+  line-height: 1.35;
+  margin: 1em 0 0.4em !important;
+  color: var(--fallback-bc, oklch(var(--bc) / 1)) !important;
+}
+.dashdown-ask-body h1:first-child,
+.dashdown-ask-body h2:first-child,
+.dashdown-ask-body h3:first-child,
+.dashdown-ask-body h4:first-child,
+.dashdown-ask-body h5:first-child,
+.dashdown-ask-body h6:first-child { margin-top: 0 !important; }
+/* The extra .dashdown-ask + :not(.table) out-rank .dashdown-prose
+   table:not(.table) (the page-prose table rules, later in this file) — same
+   tokens, tighter metrics. display:block + max-content lets a wide table
+   scroll inside the card instead of blowing out its width (answers get no
+   scroll-wrapper from the page pipeline). */
+.dashdown-ask .dashdown-ask-body table:not(.table) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.95em;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
+.dashdown-ask .dashdown-ask-body table:not(.table) th,
+.dashdown-ask .dashdown-ask-body table:not(.table) td {
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  text-align: left;
+  vertical-align: top;
+}
+.dashdown-ask .dashdown-ask-body table:not(.table) thead th {
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  font-weight: 600;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+.dashdown-ask-body code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.9em;
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+/* Answer code fences are plain <pre><code> — render_markdown_text has no
+   Pygments pass, so none of the .dashdown-code machinery applies here. */
+.dashdown-ask-body pre {
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  padding: 0.7em 0.9em;
+  margin: 0.6em 0;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.dashdown-ask-body pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  white-space: pre;
+}
+.dashdown-ask-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+/* Bold pops to full-contrast ink — the body's secondary tone would otherwise
+   leave **key numbers** looking like ordinary text. */
+.dashdown-ask-body strong { color: var(--fallback-bc, oklch(var(--bc) / 1)); }
+.dashdown-ask-body hr {
+  border: 0;
+  border-top: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  margin: 0.8em 0;
+}
 /* In-flight SSE text: the raw model stream shown as escaped plain text until
    the final server-rendered HTML swaps in. Preserve the markdown line breaks. */
 .dashdown-ask-stream { white-space: pre-wrap; }
@@ -1003,15 +1104,17 @@ body {
   line-height: inherit;
   color: inherit;
 }
-.dashdown-ask-inline .dashdown-ask-body p { margin: 1rem 0 !important; }
+.dashdown-ask-inline .dashdown-ask-body p { margin: 1em 0 !important; }
 .dashdown-ask-inline .dashdown-ask-body p:first-child { margin-top: 0 !important; }
+/* em (≈ the old 0.85rem at the default body size): error/notice text scales
+   with a font_size= override like the rest of the answer surface. */
 .dashdown-ask-error {
-  font-size: 0.85rem;
+  font-size: 0.97em;
   color: var(--fallback-bc3, oklch(var(--bc3) / 1));
 }
 /* Expected "commentary is off" state (no/broken `llm:` block) — not an error. */
 .dashdown-ask-notice {
-  font-size: 0.85rem;
+  font-size: 0.97em;
   font-style: italic;
   color: var(--fallback-bc3, oklch(var(--bc3) / 1));
 }
