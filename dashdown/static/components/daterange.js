@@ -180,7 +180,15 @@ window.dateRangeComponent = function(name) {
       // watchers push them to the filters store + URL (the single reactive path).
       if (!seededFromUrl) {
         const stored = this.persist ? this.readStored() : null;
-        if (stored && (stored.start || stored.end)) {
+        if (stored && stored.preset && stored.preset !== "custom" && this.presets[stored.preset]) {
+          // A remembered *relative* preset must be re-resolved against today, not
+          // restored from its stored absolute dates: those go stale overnight
+          // (last_30_days/this_month shift daily), so a plain date restore would
+          // no longer match any preset and updateActivePreset() would drop to
+          // "custom", revealing the date popover for a selection the user never
+          // made "custom". Re-applying the preset keeps it selected and closed.
+          this.setPreset(stored.preset);
+        } else if (stored && (stored.start || stored.end)) {
           this.startDate = stored.start || "";
           this.endDate = stored.end || "";
           this.updateActivePreset();
@@ -211,9 +219,16 @@ window.dateRangeComponent = function(name) {
       if (!this.persist) return;
       try {
         if (this.startDate || this.endDate) {
+          // Remember the active preset too, so a relative preset (last_30_days,
+          // this_month, …) is re-resolved against "today" on the next visit
+          // instead of restoring its now-stale absolute dates (see init()).
           window.localStorage.setItem(
             this.storageKey,
-            JSON.stringify({ start: this.startDate, end: this.endDate })
+            JSON.stringify({
+              start: this.startDate,
+              end: this.endDate,
+              preset: this.activePreset || "",
+            })
           );
         } else {
           window.localStorage.removeItem(this.storageKey);
