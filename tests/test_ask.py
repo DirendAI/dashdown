@@ -573,6 +573,38 @@ class TestAskComponent:
         # Same id — presentation attrs never bust the answer cache.
         assert rendered.ask_defs[0].id == THE_ASK_ID
 
+    def test_font_size_preset_and_explicit_length(self):
+        # Presets follow the Tailwind text scale; the value lands as an inline
+        # style on the body div (a generated text-* class would silently miss
+        # the prebuilt vendor CSS). Default: no style attr — stylesheet rules.
+        rendered = render_page(ASK_PAGE, connectors={})
+        assert "font-size" not in rendered.body_html
+
+        source = ASK_PAGE.replace("max_rows=2", 'max_rows=2 font_size="xs"')
+        rendered = render_page(source, connectors={})
+        assert (
+            '<div class="dashdown-ask-body" style="font-size:0.75rem">'
+            in rendered.body_html
+        )
+        # Presentation only — same id, so restyling never busts the answer cache.
+        assert rendered.ask_defs[0].id == THE_ASK_ID
+
+        source = ASK_PAGE.replace("max_rows=2", 'max_rows=2 font_size="0.8rem"')
+        rendered = render_page(source, connectors={})
+        assert 'style="font-size:0.8rem"' in rendered.body_html
+
+    def test_font_size_junk_is_dropped(self):
+        # The value lands inside a style attribute: only a preset or a bare
+        # number+unit passes. Junk falls back to the stylesheet default (same
+        # forgiveness as replay's junk handling) — never an errored card.
+        for junk in ("1em;position:fixed", "url(x)", "huge", "12", "calc(1rem)"):
+            source = ASK_PAGE.replace(
+                "max_rows=2", f'max_rows=2 font_size="{junk}"'
+            )
+            rendered = render_page(source, connectors={})
+            assert "font-size" not in rendered.body_html, junk
+            assert len(rendered.ask_defs) == 1  # the card still renders
+
     def test_refresh_optout_threads_and_removes_button(self):
         rendered = render_page(ASK_PAGE, connectors={})
         assert rendered.ask_defs[0].allow_refresh is True

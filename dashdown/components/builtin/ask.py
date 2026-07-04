@@ -28,6 +28,39 @@ def _inner_text(inner: str | None) -> str:
     return re.sub(r"\s+", " ", _TAG_RE.sub(" ", inner)).strip()
 
 
+# font_size= presets follow the Tailwind text scale the rest of the UI speaks
+# ("sm" is the stylesheet default, so setting it is a deliberate no-op). Not
+# emitted as Tailwind classes — the prebuilt vendor/tailwind.css only contains
+# classes the framework already uses, so a generated `text-*` would silently
+# miss; an inline style always applies. The answer's inner typography is
+# em-based (dashdown.css), so everything scales with this one value.
+_FONT_SIZE_PRESETS = {
+    "xs": "0.75rem",
+    "sm": "0.875rem",
+    "base": "1rem",
+    "lg": "1.125rem",
+}
+# An explicit value lands inside a style attribute, so only a bare
+# number + unit may pass through — nothing else can terminate the
+# declaration or the attribute.
+_FONT_SIZE_RE = re.compile(r"(?:\d+(?:\.\d+)?|\.\d+)(?:rem|em|px|%)", re.IGNORECASE)
+
+
+def _font_size_value(raw: str | None) -> str | None:
+    """Map a font_size attr to a safe CSS value, or None to fall back to the
+    stylesheet default (a junk value never errors the card — same forgiveness
+    as the replay attr)."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    preset = _FONT_SIZE_PRESETS.get(raw.lower())
+    if preset:
+        return preset
+    if _FONT_SIZE_RE.fullmatch(raw):
+        return raw
+    return None
+
+
 @register_component("Ask")
 class Ask(Component):
     """Pin a question to a query's result and render the LLM's answer as a
@@ -57,6 +90,11 @@ class Ask(Component):
         max_rows=50      rows of query data sent to the model
         cache_ttl=3600   seconds the answer stays cached server-side
                          (same spelling as cache_ttl on :::query blocks)
+        font_size="sm"   answer text size: xs | sm (default) | base | lg, or
+                         an explicit CSS length like "0.8rem" (strictly
+                         number + rem/em/px/% — it lands in a style attribute).
+                         The whole answer surface (headings, tables, code)
+                         scales with it; junk values fall back to the default.
         replay="once"    typewriter replay of a cached/baked answer: "once"
                          (default — once per session per answer), "always",
                          or "off". A true cache miss always streams live;
@@ -158,6 +196,13 @@ class Ask(Component):
         if replay not in ("once", "always", "off"):
             replay = "once"
 
+        # Answer text size — presentation only, so (like inline/replay) it
+        # stays out of the ask-id hash: restyling must never bust the answer
+        # cache. Lands on the body div, which ask.js mutates but never
+        # replaces, so the style survives loading/stream/replay/final states.
+        font_size = _font_size_value(attr_str(attrs, "font_size"))
+        body_style = f' style="font-size:{font_size}"' if font_size else ""
+
         label = attr_str(attrs, "label")
         cid = new_id("dashdown-ask")
         config_json = esc(
@@ -240,7 +285,7 @@ class Ask(Component):
             f"{badge}"
             f"{refresh_btn}"
             f"</div>"
-            f'<div class="dashdown-ask-body">'
+            f'<div class="dashdown-ask-body"{body_style}>'
             f'<span class="dashdown-ask-cursor"></span></div>'
             f"</div>"
         )
