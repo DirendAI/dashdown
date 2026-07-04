@@ -237,7 +237,7 @@ def query(
         if connector is None:
             raise typer.BadParameter(
                 "No --connector given and the project has no default source — "
-                "mark one source `default: true` in sources.yaml or pass -c. "
+                "add a top-level `default: <source name>` line to sources.yaml or pass -c. "
                 f"Available: {avail}"
             )
         conn = proj.connectors.get(connector)

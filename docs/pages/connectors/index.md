@@ -30,15 +30,16 @@ warehouse:
 
 A query with no `connector=` runs on the project's **default source**:
 
-1. the source marked `default: true` in `sources.yaml`;
+1. the source named by the top-level `default:` key in `sources.yaml`;
 2. otherwise, if exactly **one** source is configured, that one — a
    single-source project never needs `connector=` anywhere.
 
 ```yaml
 # sources.yaml
+default: warehouse        # queries without connector= run here
+
 warehouse:
   type: postgres
-  default: true           # queries without connector= run here
   host: ${PG_HOST}
   database: analytics
 
@@ -47,10 +48,10 @@ archive:
   path: data/archive.duckdb
 ```
 
-Source **names carry no meaning** — call them whatever reads well. Only one
-source may set `default: true` (two fail at startup), and with several sources
-and no flag there is *no* default: a query that omits `connector=` fails with a
-message asking you to mark one.
+Source **names carry no meaning** — call them whatever reads well (`default` is
+the one reserved word). A `default:` naming an unknown source fails at startup,
+and with several sources and no `default:` there is *no* default: a query that
+omits `connector=` fails with a message asking you to set one.
 
 ## The built-in connectors
 

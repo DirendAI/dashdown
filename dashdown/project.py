@@ -657,9 +657,9 @@ def load_project(root: Path) -> Project:
     component_js, component_css = _discover_component_assets(root / "components")
 
     connectors = load_connectors(root / "sources.yaml", root)
-    # The source a query with no explicit `connector=` runs on (`default: true`
-    # flag → sole source; None when several unflagged sources make it
-    # ambiguous). Library/python specs that parsed without a connector are
+    # The source a query with no explicit `connector=` runs on (sources.yaml's
+    # top-level `default:` key → sole source; None when several sources and no
+    # `default:` make it ambiguous). Library/python specs that parsed without a connector are
     # resolved against it right below, so everything registered into the global
     # caches carries a concrete name; an ambiguous unqualified query fails at
     # startup (mirroring render_page's per-page check).

@@ -66,8 +66,8 @@ class Connector(ABC):
     """Base class for data connectors."""
 
     name: str = ""
-    #: Set by `load_connectors` when the source carries `default: true` in
-    #: sources.yaml — see `data/registry.py::default_connector_name`.
+    #: Set by `load_connectors` on the source named by sources.yaml's
+    #: top-level `default:` key — see `data/registry.py::default_connector_name`.
     is_default: bool = False
 
     def __init__(self, name: str, config: dict[str, Any]) -> None:

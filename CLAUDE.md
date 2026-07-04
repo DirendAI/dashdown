@@ -55,9 +55,10 @@ A page request flows through `server.py` → `render/pipeline.py` → `render/ma
    also renders the SQL) — or the legacy `:::query name=…` container. Either way the SQL is
    **collected, not executed**, and stripped from the HTML output (fence content is verbatim; the
    container form scrapes markdown-parsed tokens). A spec without `connector=` parses with an empty
-   connector, resolved later via `data/registry.py::default_connector_name` (the source flagged
-   `default: true` in sources.yaml, else the sole source; several unflagged sources have **no**
-   default and an unqualified query fails loudly — source *names* carry no meaning). `build_md()` is
+   connector, resolved later via `data/registry.py::default_connector_name` (the source named by
+   sources.yaml's top-level `default: <source name>` key, else the sole source; several sources
+   without a `default:` have **no** default and an unqualified query fails loudly — source *names*
+   carry no meaning). `build_md()` is
    CommonMark + tables + GitHub-flavored extensions (strikethrough, task lists, footnotes, deflists,
    `h2/h3` heading anchors) + `:::note`/`:::tip`/`:::info`/`:::warning`/`:::danger` callout containers
    (same `:::` machinery as `:::query`, distinct first words so they don't collide). Fenced code is

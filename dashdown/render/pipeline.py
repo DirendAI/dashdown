@@ -610,8 +610,8 @@ def render_page(
     source = expand_includes(source, include_base)
     body_html, local_specs, frontmatter = parse_markdown(source)
     # A spec without an explicit `connector=` parses with an empty connector —
-    # resolve it here, where the project's sources are in hand (`default: true`
-    # flag → sole source). Several unflagged sources make an unqualified query
+    # resolve it here, where the project's sources are in hand (the top-level
+    # `default:` key in sources.yaml → sole source). Several unflagged sources make an unqualified query
     # ambiguous — fail loudly rather than guess. With *zero* sources there is
     # nothing to disambiguate; the empty connector surfaces downstream as the
     # ordinary unknown-connector error on data fetch.
