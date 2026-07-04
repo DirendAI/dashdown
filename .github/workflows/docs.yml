@@ -39,7 +39,7 @@ jobs:
         with:
           enable-cache: true
       - name: Build static docs site
-        run: uv run dashdown build docs --out _site
+        run: uv run --extra mistral dashdown build docs --out _site
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       - name: Disable Jekyll
