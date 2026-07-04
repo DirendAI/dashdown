@@ -40,6 +40,8 @@ jobs:
           enable-cache: true
       - name: Build static docs site
         run: uv run dashdown build docs --out _site
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       - name: Disable Jekyll
         # GitHub Pages runs Jekyll, which ignores the `_dashdown/` asset+data dir
         # (leading underscore). .nojekyll makes Pages serve the export verbatim.
