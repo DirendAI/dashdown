@@ -69,10 +69,13 @@ class Ask(Component):
     Usage:
         <Ask data={top_products} ask="Which are the top 3 products and why?" />
         <Ask data={top_products}>Which are the top 3 products and why?</Ask>
+        <Ask data={revenue,churn} ask="Is churn driving the revenue dip?" />
         <Ask metric={sales.revenue} by={sales.region} ask="Which region leads?" />
 
-    The data source is either a named query (`data={query}` — inline `:::query`,
-    a shared SQL/Python library query) or a **semantic metric reference**
+    The data source is either one or more named queries (`data={query}` or a
+    comma list `data={a,b}` — inline `:::query`, shared SQL/Python library
+    queries; a multi-query ask sends one labeled data block per query, for
+    cross-dataset commentary) or a **semantic metric reference**
     (`metric={model.metric} by={model.dim}`) — the latter resolves to
     the *same* synthetic query a chart with those attrs builds, so <Ask> comments
     on semantic-layer data and shares the registered spec + result cache with any
@@ -126,23 +129,31 @@ class Ask(Component):
         # A `metric={model.metric}` reference resolves to the same synthetic
         # semantic query a chart would build (and records it on ctx.semantic_refs,
         # so the pipeline compiles + registers it in `_python_def_cache` exactly
-        # like a chart's). Falls back to the `data={query}` path when absent.
+        # like a chart's). Falls back to the `data={query}` path when absent —
+        # where a comma list (`data={revenue,churn}`) pins the ask to several
+        # queries at once (cross-dataset commentary), each resolving its own
+        # connector by name.
         sem = resolve_semantic(attrs, ctx)
         if sem is not None:
-            name = sem["query_name"]
-            connector = ctx.semantic_refs[name].connector
+            sem_name = sem["query_name"]
+            queries = ((sem_name, ctx.semantic_refs[sem_name].connector),)
         else:
             data_val = attrs.get("data")
             if isinstance(data_val, DataRef):
-                name = data_val.name
+                names = list(data_val.names)
             else:
-                name = attr_str(attrs, "data")
-            if not name:
+                raw = attr_str(attrs, "data")
+                names = [n.strip() for n in raw.split(",") if n.strip()] if raw else []
+            if not names:
                 return (
                     '<div class="text-error">Ask requires data={query_name} '
                     "or metric={model.metric}</div>"
                 )
-            connector = ctx.query_connectors.get(name, ctx.default_connector)
+            queries = tuple(
+                (n, ctx.query_connectors.get(n, ctx.default_connector))
+                for n in names
+            )
+        query_names = [n for n, _ in queries]
 
         prompt = attr_str(attrs, "ask") or _inner_text(inner)
         if not prompt:
@@ -159,22 +170,21 @@ class Ask(Component):
 
         # Provenance highlight: which query names glow while the ask is
         # hovered (ask.js matches their data-query-name nodes). Defaults to
-        # the ask's own data query; highlight="a,b" points elsewhere;
-        # highlight=false turns it off.
+        # the ask's own data queries (all of them, for a comma list);
+        # highlight="a,b" points elsewhere; highlight=false turns it off.
         highlight_val = attrs.get("highlight")
         if highlight_val is False:
             highlight_queries: list[str] = []
         elif highlight_val is None:
-            highlight_queries = [name]
+            highlight_queries = list(query_names)
         elif isinstance(highlight_val, DataRef):
-            highlight_queries = [highlight_val.name]
+            highlight_queries = list(highlight_val.names)
         else:
             highlight_queries = [
                 h.strip() for h in str(highlight_val).split(",") if h.strip()
             ]
         ask = register_ask_def(
-            name,
-            connector,
+            queries,
             prompt,
             max_rows=max_rows,
             cache_ttl=cache_ttl,
@@ -209,7 +219,7 @@ class Ask(Component):
             safe_json(
                 {
                     "ask_id": ask.id,
-                    "query_name": name,
+                    "query_names": query_names,
                     "replay": replay,
                     "highlight_queries": highlight_queries,
                     "lazy": lazy,
@@ -279,7 +289,7 @@ class Ask(Component):
             f'<div id="{cid}"{style_attr} '
             f'data-async-component="ask" '
             f'data-config="{config_json}" '
-            f'data-query-name="{esc(name)}" '
+            f'data-query-name="{esc(",".join(query_names))}" '
             f'class="{container_class}">'
             f'<div class="flex items-center justify-between gap-2">'
             f"{badge}"

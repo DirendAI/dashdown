@@ -889,7 +889,9 @@ def embed_token(
         for name, d in rendered.query_defs.items()
     ]
     for ask in rendered.ask_defs:
-        queries.append(query_key(ask.connector, ask.query_name))
+        # Every query a (possibly multi-query) ask reads joins the scope.
+        for name, connector in ask.queries:
+            queries.append(query_key(connector, name))
 
     lifetime = ttl if ttl is not None else embed_cfg.token_ttl
     exp = int(time.time()) + lifetime if lifetime and lifetime > 0 else None

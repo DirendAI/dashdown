@@ -396,45 +396,58 @@ class TestAdapters:
 # --------------------------------------------------------------------------- #
 class TestAskRegistry:
     def test_id_is_deterministic(self):
-        a = ask_id("sales", "main", "What changed?")
-        b = ask_id("sales", "main", "What changed?")
+        a = ask_id([("sales", "main")], "What changed?")
+        b = ask_id([("sales", "main")], "What changed?")
         assert a == b
 
     def test_id_varies_with_inputs(self):
-        base = ask_id("sales", "main", "What changed?")
-        assert ask_id("sales", "main", "Other prompt") != base
-        assert ask_id("other", "main", "What changed?") != base
-        assert ask_id("sales", "warehouse", "What changed?") != base
+        base = ask_id([("sales", "main")], "What changed?")
+        assert ask_id([("sales", "main")], "Other prompt") != base
+        assert ask_id([("other", "main")], "What changed?") != base
+        assert ask_id([("sales", "warehouse")], "What changed?") != base
         # max_rows changes the payload the model sees → must bust the cache id.
-        assert ask_id("sales", "main", "What changed?", max_rows=5) != base
+        assert ask_id([("sales", "main")], "What changed?", max_rows=5) != base
+
+    def test_id_covers_every_query_pair(self):
+        # A multi-query ask hashes all pairs: adding, changing, or reordering
+        # a referenced query must produce a fresh id (⇒ a fresh answer).
+        single = ask_id([("sales", "main")], "Why?")
+        multi = ask_id([("sales", "main"), ("churn", "main")], "Why?")
+        assert multi != single
+        assert ask_id([("sales", "main"), ("churn", "other")], "Why?") != multi
+        assert ask_id([("churn", "main"), ("sales", "main")], "Why?") != multi
 
     def test_register_and_lookup(self):
-        d = register_ask_def("sales", "main", "Why?")
+        d = register_ask_def([("sales", "main")], "Why?")
         assert get_ask_def(d.id) == d
         assert get_ask_def("nope") is None
 
     def test_register_defaults(self):
-        d = register_ask_def("sales", "main", "Why?")
+        d = register_ask_def([("sales", "main")], "Why?")
         assert d.max_rows == DEFAULT_MAX_ROWS
         assert d.cache_ttl == DEFAULT_ANSWER_TTL
         assert d.page_title == ""
         assert d.page_description == ""
+        # The primary-pair convenience accessors read the first pair.
+        assert d.queries == (("sales", "main"),)
+        assert d.query_name == "sales"
+        assert d.connector == "main"
 
     def test_page_context_joins_the_hash(self):
         # Page title/description feed the prompt, so changed context must
         # produce a different id (⇒ a fresh answer).
-        base = ask_id("sales", "main", "Why?")
-        assert ask_id("sales", "main", "Why?", page_title="Sales") != base
-        assert ask_id("sales", "main", "Why?", page_description="Q3") != base
+        base = ask_id([("sales", "main")], "Why?")
+        assert ask_id([("sales", "main")], "Why?", page_title="Sales") != base
+        assert ask_id([("sales", "main")], "Why?", page_description="Q3") != base
 
     def test_register_threads_page_context(self):
         d = register_ask_def(
-            "sales", "main", "Why?", page_title="Sales", page_description="Q3 numbers"
+            [("sales", "main")], "Why?", page_title="Sales", page_description="Q3 numbers"
         )
         assert d.page_title == "Sales"
         assert d.page_description == "Q3 numbers"
         assert d.id == ask_id(
-            "sales", "main", "Why?", DEFAULT_MAX_ROWS, "Sales", "Q3 numbers"
+            [("sales", "main")], "Why?", DEFAULT_MAX_ROWS, "Sales", "Q3 numbers"
         )
 
 
@@ -452,6 +465,30 @@ GROUP BY region ORDER BY total DESC
 <Ask data={by_region} ask="Which region leads and why?" max_rows=2 />
 """
 
+# A multi-query ask (`data={a,b}`): one prompt pinned to two query results,
+# each with its own `${param}` filter so the answer-cache union is observable.
+MULTI_ASK_PAGE = """# Overview
+
+:::query name=by_region connector=main
+SELECT region, SUM(amount) AS total FROM sales
+WHERE (region = '${region}' OR '${region}' = '')
+GROUP BY region ORDER BY total DESC
+:::
+
+:::query name=churn_by_region connector=main
+SELECT region, SUM(churned) AS churned FROM churn
+WHERE (segment = '${segment}' OR '${segment}' = '')
+GROUP BY region
+:::
+
+<Ask data={by_region,churn_by_region} ask="Is churn driving the dip?" />
+"""
+
+MULTI_ASK_ID = ask_id(
+    [("by_region", "main"), ("churn_by_region", "main")],
+    "Is churn driving the dip?",
+)
+
 
 class TestAskComponent:
     def test_registers_prompt_and_emits_placeholder(self):
@@ -459,6 +496,7 @@ class TestAskComponent:
         assert 'data-async-component="ask"' in rendered.body_html
         assert len(rendered.ask_defs) == 1
         ask = rendered.ask_defs[0]
+        assert ask.queries == (("by_region", "main"),)
         assert ask.query_name == "by_region"
         assert ask.connector == "main"
         assert ask.prompt == "Which region leads and why?"
@@ -558,6 +596,35 @@ class TestAskComponent:
         source = ASK_PAGE.replace("max_rows=2", "max_rows=2 highlight=false")
         rendered = render_page(source, connectors={})
         assert "&quot;highlight_queries&quot;: []" in rendered.body_html
+
+    def test_multi_query_ref_registers_all_pairs(self):
+        rendered = render_page(MULTI_ASK_PAGE, connectors={})
+        assert len(rendered.ask_defs) == 1
+        ask = rendered.ask_defs[0]
+        assert ask.queries == (("by_region", "main"), ("churn_by_region", "main"))
+        assert ask.id == MULTI_ASK_ID
+        # Highlight + the client config default to every referenced query.
+        assert (
+            "&quot;highlight_queries&quot;: [&quot;by_region&quot;, &quot;churn_by_region&quot;]"
+            in rendered.body_html
+        )
+        assert (
+            "&quot;query_names&quot;: [&quot;by_region&quot;, &quot;churn_by_region&quot;]"
+            in rendered.body_html
+        )
+        assert 'data-query-name="by_region,churn_by_region"' in rendered.body_html
+
+    def test_multi_query_resolves_connector_per_name(self):
+        # Each name in the comma list binds its own connector — a cross-source
+        # ask ((a, main), (b, warehouse)) is a first-class pair list.
+        source = (
+            "# T\n\n"
+            ":::query name=a connector=main\nSELECT 1\n:::\n\n"
+            ":::query name=b connector=warehouse\nSELECT 2\n:::\n\n"
+            '<Ask data={a,b} ask="Compare." />\n'
+        )
+        rendered = render_page(source, connectors={})
+        assert rendered.ask_defs[0].queries == (("a", "main"), ("b", "warehouse"))
 
     def test_inline_variant_drops_card_chrome(self):
         rendered = render_page(ASK_PAGE, connectors={})
@@ -725,9 +792,9 @@ class TestPayload:
 
     def test_generate_answer_renders_markdown(self):
         fake = FakeAdapter(reply="Top is **North**.")
-        ask = AskDef(id="x", query_name="q", connector="main", prompt="Why?", max_rows=5)
+        ask = AskDef(id="x", queries=(("q", "main"),), prompt="Why?", max_rows=5)
         result = QueryResult(columns=["a"], rows=[[1]])
-        html, text = generate_answer(ask, result, fake)
+        html, text = generate_answer(ask, [result], fake)
         assert "<strong>North</strong>" in html
         # The raw answer rides along for the client-side typewriter replay.
         assert text == "Top is **North**."
@@ -746,14 +813,13 @@ class TestPayload:
         fake = FakeAdapter()
         ask = AskDef(
             id="x",
-            query_name="q",
-            connector="main",
+            queries=(("q", "main"),),
             prompt="Why?",
             page_title="Sales Overview",
             page_description="Regional numbers",
         )
         result = QueryResult(columns=["a"], rows=[[1]])
-        generate_answer(ask, result, fake, {"region": "East", "blank": ""})
+        generate_answer(ask, [result], fake, {"region": "East", "blank": ""})
         _, prompt = fake.calls[0]
         assert "Dashboard page: Sales Overview — Regional numbers" in prompt
         assert f"Today's date: {date.today().isoformat()}" in prompt
@@ -762,17 +828,34 @@ class TestPayload:
         assert "blank" not in prompt  # empty values aren't active filters
 
     def test_prompt_omits_absent_context(self):
-        ask = AskDef(id="x", query_name="q", connector="main", prompt="Why?")
-        prompt = build_ask_prompt(ask, QueryResult(columns=["a"], rows=[[1]]))
+        ask = AskDef(id="x", queries=(("q", "main"),), prompt="Why?")
+        prompt = build_ask_prompt(ask, [QueryResult(columns=["a"], rows=[[1]])])
         assert "Dashboard page:" not in prompt
         assert "Active filters" not in prompt
         assert "Today's date:" in prompt  # always present
 
+    def test_prompt_labels_each_query_block(self):
+        # A multi-query ask concatenates one labeled data block per query, in
+        # `queries` order, so the model can reason across datasets by name.
+        ask = AskDef(id="x", queries=(("revenue", "main"), ("churn", "main")), prompt="Why?")
+        prompt = build_ask_prompt(
+            ask,
+            [
+                QueryResult(columns=["month", "total"], rows=[["Jan", 100]]),
+                QueryResult(columns=["month", "churned"], rows=[["Jan", 7]]),
+            ],
+        )
+        assert "Result of query 'revenue':" in prompt
+        assert "Result of query 'churn':" in prompt
+        assert prompt.index("'revenue'") < prompt.index("'churn'")
+        assert "total" in prompt
+        assert "churned" in prompt
+
     def test_stream_answer_uses_same_prompt(self):
         fake = StreamingFakeAdapter()
-        ask = AskDef(id="x", query_name="q", connector="main", prompt="Why?")
+        ask = AskDef(id="x", queries=(("q", "main"),), prompt="Why?")
         result = QueryResult(columns=["a"], rows=[[1]])
-        chunks = list(stream_answer(ask, result, fake, {"region": "East"}))
+        chunks = list(stream_answer(ask, [result], fake, {"region": "East"}))
         assert "".join(chunks) == "**North** leads the pack."
         _, prompt = fake.calls[0]
         assert "- region = East" in prompt
@@ -829,11 +912,35 @@ def _client_with_fake(tmp_path, llm_block=True, fake=None):
 
 
 THE_ASK_ID = ask_id(
-    "by_region",
-    "main",
+    [("by_region", "main")],
     "Which region leads and why?",
     max_rows=2,  # set on the tag in ASK_PAGE; part of the id hash
 )
+
+
+def _add_multi_page(root):
+    """Add the second dataset + the multi-query ask page to a project."""
+    (root / "data" / "churn.csv").write_text(
+        "region,segment,churned\nNorth,SMB,3\nSouth,ENT,5\n", encoding="utf-8"
+    )
+    (root / "pages" / "multi.md").write_text(MULTI_ASK_PAGE, encoding="utf-8")
+
+
+def _multi_client(tmp_path, fake=None, extra_yaml="", auth=None):
+    """Like _client_with_fake, but renders the multi-query ask page."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _make_project(proj)
+    _add_multi_page(proj)
+    if extra_yaml:
+        cfg = (proj / "dashdown.yaml").read_text(encoding="utf-8")
+        (proj / "dashdown.yaml").write_text(cfg + extra_yaml, encoding="utf-8")
+    app = create_app(proj)
+    app.state.project.llm_adapter = fake
+    client = TestClient(app)
+    # Render the page so the query + ask defs register in the global caches.
+    assert client.get("/multi", auth=auth).status_code == 200
+    return client, fake
 
 
 class TestAskEndpoint:
@@ -888,8 +995,7 @@ class TestAskEndpoint:
         # Re-register the page's ask with the opt-out (same id: allow_refresh
         # stays out of the hash, so this overwrites the def in place).
         register_ask_def(
-            "by_region",
-            "main",
+            [("by_region", "main")],
             "Which region leads and why?",
             max_rows=2,
             allow_refresh=False,
@@ -1076,6 +1182,84 @@ class TestAskStreamingEndpoint:
 
 
 # --------------------------------------------------------------------------- #
+# Multi-query asks (`data={a,b}`) — one answer grounded in several results
+# --------------------------------------------------------------------------- #
+class TestMultiQueryAskEndpoint:
+    def test_generates_from_all_queries(self, tmp_path):
+        client, fake = _multi_client(tmp_path, fake=FakeAdapter())
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}")
+        assert r.status_code == 200, r.text
+        assert r.json()["cached"] is False
+        # One labeled data block per referenced query reached the model.
+        _, prompt = fake.calls[0]
+        assert "Result of query 'by_region':" in prompt
+        assert "Result of query 'churn_by_region':" in prompt
+        assert "total" in prompt  # sales columns
+        assert "churned" in prompt  # churn columns
+
+    def test_cache_key_unions_each_querys_relevant_params(self, tmp_path):
+        client, fake = _multi_client(tmp_path, fake=FakeAdapter())
+        client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}")
+        # A filter only the SECOND query substitutes busts the answer cache…
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?segment=SMB")
+        assert r.json()["cached"] is False
+        # …as does one only the FIRST uses…
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?region=North")
+        assert r.json()["cached"] is False
+        assert len(fake.calls) == 3
+        # …while a filter neither query substitutes stays a cache hit.
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?unrelated=1")
+        assert r.json()["cached"] is True
+        assert len(fake.calls) == 3
+
+    def test_streaming_covers_all_queries(self, tmp_path):
+        client, fake = _multi_client(tmp_path, fake=StreamingFakeAdapter())
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?_stream=1")
+        assert r.headers["content-type"].startswith("text/event-stream")
+        events = _parse_sse(r.text)
+        assert events[-1][0] == "done"
+        _, prompt = fake.calls[0]
+        assert "'by_region'" in prompt
+        assert "'churn_by_region'" in prompt
+
+    def test_unknown_second_query_404s(self, tmp_path):
+        client, _ = _multi_client(tmp_path, fake=FakeAdapter())
+        bad = register_ask_def([("by_region", "main"), ("ghost", "main")], "Why?")
+        r = client.get(f"/_dashdown/api/ask/{bad.id}")
+        assert r.status_code == 404
+        assert "ghost" in r.json()["detail"]
+
+
+class TestMultiQueryAskEmbedScope:
+    _YAML = (
+        "auth:\n  type: basic\n  username: admin\n  password: s3cret\n"
+        "embed:\n  enabled: true\n  secret: topsecret\n"
+    )
+
+    def test_token_must_cover_every_query(self, tmp_path):
+        # A multi-query ask reads several results, so an embed token scoped to
+        # only one of them must NOT unlock the ask endpoint — otherwise a token
+        # for a cheap query would exfiltrate commentary on a sensitive one.
+        from dashdown.embed import sign_embed_token
+
+        client, _ = _multi_client(
+            tmp_path,
+            fake=FakeAdapter(),
+            extra_yaml=self._YAML,
+            auth=("admin", "s3cret"),
+        )
+        partial = sign_embed_token("topsecret", "/multi", ["main:by_region"])
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?_embed={partial}")
+        assert r.status_code == 401
+
+        full = sign_embed_token(
+            "topsecret", "/multi", ["main:by_region", "main:churn_by_region"]
+        )
+        r = client.get(f"/_dashdown/api/ask/{MULTI_ASK_ID}?_embed={full}")
+        assert r.status_code == 200, r.text
+
+
+# --------------------------------------------------------------------------- #
 # <Ask> on semantic-layer data (Stage 18b) — end to end through the endpoint
 # and the static build. Gated on the optional `semantic` extra (BSL/Ibis), like
 # the semantic tests; the synthetic query is compiled + executed for real.
@@ -1212,6 +1396,31 @@ class TestStaticBuild:
         # The baked snapshot records the model, so a static export attributes it too.
         assert payload["model"] == "mistral-small-latest"
         assert len(fake.calls) == 1
+
+    def test_bakes_multi_query_commentary(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_project(proj)
+        _add_multi_page(proj)
+        project = load_project(proj)
+        fake = FakeAdapter()
+        project.llm_adapter = fake
+        try:
+            result = _build(project, tmp_path / "dist")
+        finally:
+            project.close()
+
+        assert MULTI_ASK_ID in result.asks
+        assert result.failed_asks == []
+        snapshot = (
+            tmp_path / "dist" / "_dashdown" / "data" / "_ask" / f"{MULTI_ASK_ID}.json"
+        )
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        assert "<strong>North</strong>" in payload["html"]
+        # Both labeled result blocks reached the model in the bake.
+        (prompt,) = [p for _, p in fake.calls if "Is churn driving the dip?" in p]
+        assert "Result of query 'by_region':" in prompt
+        assert "Result of query 'churn_by_region':" in prompt
 
     def test_build_without_llm_writes_notice(self, tmp_path):
         proj = tmp_path / "proj"

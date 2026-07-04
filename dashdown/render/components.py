@@ -11,10 +11,11 @@ from dashdown.render.attrs import DataRef, parse_attrs
 def _record_refs(attrs: dict, ctx: RenderContext) -> None:
     """Record every ``data={name}`` (DataRef) attribute into
     ``ctx.referenced_queries`` so the pipeline can resolve referenced shared-
-    library queries after the component scan."""
+    library queries after the component scan. A comma-list ref
+    (``data={a,b}`` — multi-query <Ask />) records each name."""
     for value in attrs.values():
         if isinstance(value, DataRef):
-            ctx.referenced_queries.add(value.name)
+            ctx.referenced_queries.update(value.names)
 
 # Pattern to match component tag names (uppercase start)
 _COMPONENT_NAME_RE = re.compile(r"[A-Z][A-Za-z0-9_]*")

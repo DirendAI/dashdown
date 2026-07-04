@@ -9,14 +9,24 @@ from typing import Any
 
 @dataclass(frozen=True)
 class DataRef:
-    """Reference to a named query, written as `data={query_name}`.
+    """Reference to one or more named queries, written as `data={query_name}`.
 
     The name may be **dotted** (`data={finance.mrr}`) to reference a namespaced
     shared-library query — `queries/finance/mrr.sql` (see the query library). The
     dot is just part of the name; it stays a single safe URL/cache-key segment.
+
+    A **comma list** (`data={revenue,churn}`) references several queries with
+    one attribute — the multi-query ``<Ask />`` grammar. ``name`` keeps the
+    normalized comma-joined text (so a single-ref consumer reading ``.name``
+    is unchanged); consumers that support several iterate ``names``.
     """
 
     name: str
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """The referenced query names — one for the common single ref."""
+        return tuple(n for n in self.name.split(",") if n)
 
 
 _ATTR_RE = re.compile(
@@ -28,7 +38,7 @@ _ATTR_RE = re.compile(
         (?:
             "(?P<dq>[^"]*)"          | # double-quoted
             '(?P<sq>[^']*)'          | # single-quoted
-            \{\s*(?P<ref>[A-Za-z_][\w.]*)\s*\} | # data ref: {name} or {ns.name}
+            \{\s*(?P<ref>[A-Za-z_][\w.]*(?:\s*,\s*[A-Za-z_][\w.]*)*)\s*\} | # data ref: {name}, {ns.name}, or a comma list {a,b}
             \{\s*(?P<num>-?\d+(?:\.\d+)?)\s*\} | # numeric literal: {0} or {-2.5}
             \{\s*(?P<list>\[[^\]]*\])\s*\} | # array literal: {[0, 10000]} or {["a", "b"]}
             (?P<bare>[^\s/>]+)        # bareword
@@ -48,7 +58,9 @@ def parse_attrs(raw: str) -> dict[str, Any]:
     for m in _ATTR_RE.finditer(raw):
         key = m.group("key")
         if m.group("ref") is not None:
-            out[key] = DataRef(m.group("ref"))
+            # Normalize whitespace around list commas ({a, b} ≡ {a,b}) so the
+            # stored name is canonical for cache keys and splitting.
+            out[key] = DataRef(re.sub(r"\s*,\s*", ",", m.group("ref")))
         elif m.group("num") is not None:
             out[key] = _coerce(m.group("num"))
         elif m.group("list") is not None:

@@ -146,12 +146,17 @@ def _embed_authorizes(proj: "Project", request: Request) -> bool:
         name = path[len(_OPTIONS_API_PREFIX):]
         connector = str(request.query_params.get("_connector") or proj.default_connector or "")
         return token_allows_query(payload, connector, name)
-    # Ask API: resolve the opaque id to its underlying query, then scope-check.
+    # Ask API: resolve the opaque id to its underlying queries, then
+    # scope-check. A multi-query ask reads several results, so the token must
+    # cover every one of them — not just the first.
     if path.startswith(_ASK_API_PREFIX):
         ask = get_ask_def(path[len(_ASK_API_PREFIX):])
         if ask is None:
             return False
-        return token_allows_query(payload, ask.connector, ask.query_name)
+        return all(
+            token_allows_query(payload, connector, name)
+            for name, connector in ask.queries
+        )
     # Otherwise it's a page request: the token must be scoped to this exact page.
     return payload.get("path") == _canonical_page_path(path)
 
@@ -651,48 +656,60 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             if not key.startswith("_")
         }
 
-        # Resolve the data source the same way the data API does: a Python /
-        # semantic query (synthetic PythonQuerySpec in `_python_def_cache`) is
-        # checked FIRST — it runs its callable instead of SQL — then the SQL path.
-        # This is what lets <Ask metric={model.metric} /> comment on semantic-layer
-        # data and a plain queries/*.py source work too.
-        py_spec = get_python_query_def(ask.query_name, ask.connector)
-        if py_spec is not None:
-            all_params = dict(filter_params)
-            # A Python/semantic body has no SQL text to scan for `${param}`, so the
-            # answer cache keys on every filter param (can't narrow to "params the
-            # body uses"). It can over-invalidate on an unrelated filter change, but
-            # never serves a stale answer — matching the result cache, which also
-            # keys on all params for Python queries.
-            cache_params = all_params
-            result_ttl = (
-                py_spec.cache_ttl if py_spec.cache_ttl is not None else DEFAULT_CACHE_TTL
-            )
-
-            def _run_query():
-                return run_python_query(py_spec, all_params, proj.connectors)
-        else:
-            query_def = get_query_def(ask.query_name, ask.connector)
-            if query_def is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Query '{ask.query_name}' not found for connector '{ask.connector}'",
-                )
-            connector = proj.connectors.get(ask.connector)
-            if connector is None:
-                raise HTTPException(
-                    status_code=400, detail=f"Connector '{ask.connector}' not found"
+        # Resolve each referenced data source the same way the data API does: a
+        # Python / semantic query (synthetic PythonQuerySpec in
+        # `_python_def_cache`) is checked FIRST — it runs its callable instead
+        # of SQL — then the SQL path. This is what lets <Ask metric={model.metric} />
+        # comment on semantic-layer data and a plain queries/*.py source work
+        # too. A multi-query ask (`data={a,b}`) resolves every pair; the answer
+        # cache keys on the UNION of each query's relevant params, so a filter
+        # any referenced query uses busts the answer — and only those.
+        cache_params: dict[str, str] = {}
+        # Per referenced query: (name, connector name, runner, params, result ttl).
+        sources = []
+        for query_name, connector_name in ask.queries:
+            py_spec = get_python_query_def(query_name, connector_name)
+            if py_spec is not None:
+                all_params = dict(filter_params)
+                # A Python/semantic body has no SQL text to scan for `${param}`,
+                # so it contributes every filter param to the answer-cache key
+                # (can't narrow to "params the body uses"). It can over-invalidate
+                # on an unrelated filter change, but never serves a stale answer —
+                # matching the result cache, which also keys on all params for
+                # Python queries.
+                cache_params.update(all_params)
+                result_ttl = (
+                    py_spec.cache_ttl
+                    if py_spec.cache_ttl is not None
+                    else DEFAULT_CACHE_TTL
                 )
 
-            sql, default_params, cache_ttl = query_def
-            all_params = {**default_params, **filter_params}
-            # Cache key ignores params the SQL never substitutes, so an unrelated
-            # filter change doesn't trigger a fresh (billable) LLM call.
-            cache_params = relevant_params(sql, all_params)
-            result_ttl = cache_ttl if cache_ttl is not None else DEFAULT_CACHE_TTL
+                def _run_query(spec=py_spec, run_params=all_params):
+                    return run_python_query(spec, run_params, proj.connectors)
+            else:
+                query_def = get_query_def(query_name, connector_name)
+                if query_def is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Query '{query_name}' not found for connector '{connector_name}'",
+                    )
+                connector = proj.connectors.get(connector_name)
+                if connector is None:
+                    raise HTTPException(
+                        status_code=400, detail=f"Connector '{connector_name}' not found"
+                    )
 
-            def _run_query():
-                return connector.query(_substitute_params(sql, all_params))
+                sql, default_params, cache_ttl = query_def
+                all_params = {**default_params, **filter_params}
+                # Ignore params this SQL never substitutes, so an unrelated
+                # filter change doesn't trigger a fresh (billable) LLM call.
+                cache_params.update(relevant_params(sql, all_params))
+                result_ttl = cache_ttl if cache_ttl is not None else DEFAULT_CACHE_TTL
+
+                def _run_query(c=connector, s=sql, run_params=all_params):
+                    return c.query(_substitute_params(s, run_params))
+
+            sources.append((query_name, connector_name, _run_query, all_params, result_ttl))
 
         # `_refresh=1` (the card's ↻ button) bypasses the cache read — but only
         # when the author allows it (<Ask refresh=false> must hold server-side
@@ -718,18 +735,21 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                     }
                 )
 
-        # Run the referenced query, sharing the data API's result cache.
-        result = get_cached_result(ask.query_name, ask.connector, all_params)
-        if result is None:
-            try:
-                result = _run_query()
-            except Exception as e:
-                log.exception("Ask query execution failed for %s", ask.query_name)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Query execution failed: {type(e).__name__}: {e}",
-                )
-            cache_result(ask.query_name, ask.connector, all_params, result, result_ttl)
+        # Run each referenced query, sharing the data API's result cache.
+        results = []
+        for query_name, connector_name, run_query, run_params, result_ttl in sources:
+            result = get_cached_result(query_name, connector_name, run_params)
+            if result is None:
+                try:
+                    result = run_query()
+                except Exception as e:
+                    log.exception("Ask query execution failed for %s", query_name)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Query execution failed: {type(e).__name__}: {e}",
+                    )
+                cache_result(query_name, connector_name, run_params, result, result_ttl)
+            results.append(result)
 
         try:
             adapter = proj.get_llm_adapter()
@@ -744,7 +764,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             def event_stream():
                 chunks: list[str] = []
                 try:
-                    for chunk in stream_answer(ask, result, adapter, cache_params):
+                    for chunk in stream_answer(ask, results, adapter, cache_params):
                         chunks.append(chunk)
                         yield _sse("chunk", {"text": chunk})
                 except Exception as e:  # noqa: BLE001 — reported in-band (headers sent)
@@ -775,7 +795,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             )
 
         try:
-            answer_html, answer_text = generate_answer(ask, result, adapter, cache_params)
+            answer_html, answer_text = generate_answer(ask, results, adapter, cache_params)
         except Exception as e:
             log.exception("LLM request failed for ask %s", ask_id)
             raise HTTPException(
@@ -930,7 +950,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             for name, d in rendered.query_defs.items()
         ]
         for ask in rendered.ask_defs:
-            queries.append(query_key(ask.connector, ask.query_name))
+            # Every query a (possibly multi-query) ask reads joins the scope.
+            for name, connector in ask.queries:
+                queries.append(query_key(connector, name))
 
         ttl_param = request.query_params.get("ttl")
         try:
