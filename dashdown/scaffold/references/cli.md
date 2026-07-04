@@ -139,7 +139,7 @@ quickest way to **test that a connector connects** and **inspect real data** whi
 authoring; an agent uses it the same way.
 
 ```bash
-dashdown query "SELECT * FROM sales LIMIT 5"                       # connector: main
+dashdown query "SELECT * FROM sales LIMIT 5"                       # runs on the default source
 dashdown query "SELECT count(*) FROM orders" -c warehouse -f json
 dashdown query "SELECT region, sum(amount) FROM sales GROUP BY region" -p .
 ```
@@ -147,7 +147,7 @@ dashdown query "SELECT region, sum(amount) FROM sales GROUP BY region" -p .
 | Option | Default | Notes |
 | --- | --- | --- |
 | `-p, --project` | `.` | Project directory. |
-| `-c, --connector` | `main` | Connector from `sources.yaml`. An unknown name lists the configured ones. |
+| `-c, --connector` | the default source | Connector from `sources.yaml`. An unknown name lists the configured ones. |
 | `-f, --format` | `table` | `table`, `json` (`{columns, rows}`), or `csv`. |
 | `--max-rows` | `50` | Cap rows printed (`0` = all). Total count goes to stderr. |
 | `--tables` | off | List the connector's tables/views (`table`/`schema`/`type`) and exit — instead of a SQL argument. |
@@ -163,8 +163,8 @@ Instead of hand-writing a `SELECT * … LIMIT 0` (and remembering each warehouse
 `information_schema` dialect), ask the connector directly:
 
 ```bash
-dashdown query --tables -c main                  # what tables/views exist?
-dashdown query --schema sales -c main -f json    # what columns does `sales` have?
+dashdown query --tables                          # what tables/views exist?
+dashdown query --schema sales -f json            # what columns does `sales` have?
 ```
 
 Each connector knows how to answer in its own dialect, so the same two commands

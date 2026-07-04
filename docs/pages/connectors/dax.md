@@ -57,13 +57,13 @@ Then reference it by name on a page and feed it to a chart:
 Or inline on a single page, choosing the connector explicitly:
 
 ````markdown
-:::query name=revenue_by_region connector=fabric
+```dax revenue_by_region connector=fabric
 EVALUATE
 SUMMARIZECOLUMNS(
     'Store'[Region],
     "Revenue", [Total Revenue]
 )
-:::
+```
 
 <BarChart data={revenue_by_region} x="Region" y="Revenue" />
 ````

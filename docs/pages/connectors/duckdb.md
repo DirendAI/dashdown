@@ -12,7 +12,7 @@ Parquet, JSON, and remote files via its extensions.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: duckdb
   path: data/warehouse.duckdb    # omit for an in-memory database
 ```
@@ -33,7 +33,7 @@ DuckDB reads JSON (and Parquet) straight from a path or URL — no load step. Us
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: duckdb          # no `path:` → in-memory; files are read in the query
 ```
 

@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Daily visits and signups in long format (a ThemeRiver stream shape)
 ---
 SELECT date, 'visits' AS metric, visits AS value FROM daily

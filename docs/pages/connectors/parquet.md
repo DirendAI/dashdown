@@ -14,7 +14,7 @@ or type inference.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: parquet
   directory: data        # folder of .parquet/.pq files, relative to the project
 ```

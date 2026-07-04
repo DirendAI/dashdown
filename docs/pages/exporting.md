@@ -38,7 +38,7 @@ can't know which slug values exist. Opt in with a `static_paths` frontmatter blo
 ---
 title: Channel detail
 static_paths:
-  connector: main        # optional, default "main"
+  connector: demo        # optional — defaults to the project's default source
   query: SELECT DISTINCT channel FROM downloads ORDER BY channel
 ---
 ```

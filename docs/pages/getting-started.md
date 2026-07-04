@@ -97,7 +97,7 @@ real-world project to learn from.
 You have a project running. Where to go from here:
 
 - **[Writing pages](/pages)** — frontmatter, callouts, Mermaid, and includes.
-- **[Queries](/queries)** — `:::query` blocks, `${param}` substitution, and the shared query library.
+- **[Queries](/queries)** — inline ```` ```sql name ```` blocks, `${param}` substitution, and the shared query library.
 - **[Components](/components)** — charts, tables, counters, and pivots.
 - **[Connectors](/connectors)** — connect CSVs, Postgres, BigQuery, Fabric, and more.
 - **[Configuration](/configuration)** — every `dashdown.yaml` block in one place.

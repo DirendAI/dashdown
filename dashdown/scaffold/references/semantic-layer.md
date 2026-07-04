@@ -248,7 +248,7 @@ against:
 ```yaml
 # semantic/sales.yml
 sales:
-  connector: main          # one of your sources.yaml connectors
+  connector: warehouse     # one of your sources.yaml connectors (omit → default source)
   table: orders
   description: Sales orders
 
@@ -285,7 +285,7 @@ that lives in a **different table** — BSL/Ibis plans the join and pushes it do
 ```yaml
 # semantic/sales.yml
 sales:
-  connector: main
+  connector: warehouse
   table: orders
   measures: { revenue: { expr: _.amount.sum() } }
   dimensions: { region: _.region }
@@ -297,7 +297,7 @@ sales:
       right_on: region
 
 geo:
-  connector: main
+  connector: warehouse
   table: regions
   dimensions: { region: _.region, manager: _.manager }
   measures: { n: _.count() }
@@ -336,7 +336,7 @@ down via that backend.
 
 Two ways, mix freely per model:
 
-- **Bridge a connector (default).** `connector: main` reuses one of your
+- **Bridge a connector (default).** `connector:` reuses one of your
   `sources.yaml` connectors — a single connection config, with pushdown. Bridged
   connector types:
   - **`csv` / `duckdb`** — share the live in-process DuckDB connection (zero-copy),

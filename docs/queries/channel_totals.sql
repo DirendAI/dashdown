@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Total downloads per channel (a single category/value shape)
 ---
 SELECT channel, SUM(downloads) AS downloads

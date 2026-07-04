@@ -28,24 +28,27 @@ structure exists to avoid.
 
 ## Cheat-sheet
 
-A **page** is Markdown under `pages/**/*.md`: prose + `:::query` blocks + `<Component />`
+A **page** is Markdown under `pages/**/*.md`: prose + fenced query blocks + `<Component />`
 tags. Queries are collected at render and run **in the browser** — never server-side at
 render time, so a page ships instantly and fetches its data after.
 
 ### A page is a query plus components
 
 ````markdown
-:::query name=sales connector=main
+```sql sales
 SELECT month, region, SUM(amount) AS amount
 FROM orders GROUP BY month, region ORDER BY month
-:::
+```
 
 <LineChart data={sales} x="month" y="amount" series="region" title="Sales" />
 <Table data={sales} />
 ````
 
-- `:::query name=… connector=… [cache_ttl=60] [live] [interval=5]` — `connector` is a key
-  in `sources.yaml` (default `main`). The SQL is collected, not run at render.
+- ` ```sql <name> [connector=…] [ttl=60] [live] [interval=5] ` — the first word after the
+  language is the query **name**; `connector` is a key in `sources.yaml` (omit it to use
+  the project's default source). The SQL is collected, not run at render. A plain
+  ` ```sql ` fence with nothing after the language is an ordinary display-only code
+  sample.
 - A query can instead live once in `queries/<name>.sql` (or `.py` for Python) and be
   referenced by name from any page — see `.references/queries.md`.
 - `data={query_name}` wires a component to a result; `column="col"` picks one column.
@@ -83,10 +86,10 @@ Open the one shard your task needs:
 - [Writing pages](.references/pages.md) — Every file under `pages/` is a route
 - [Configuration](.references/configuration.md) — Every project has a `dashdown.yaml` at its root — the single config file for the whole dashboard
 - [Connectors](.references/connectors.md) — Connectors are declared in `sources.yaml` and loaded **lazily** the first time a query asks for that type
-- [Queries](.references/queries.md) — SQL lives either in the shared **query library** under `queries/` (the recommended default) or, for a quick one-off, inline in a `:::query` block on a page
+- [Queries](.references/queries.md) — SQL lives either in the shared **query library** under `queries/` (the recommended default) or, for a quick one-off, inline in a named ` ```sql ` block on a…
 - [Python queries](.references/python-queries.md) — Some questions are awkward — or impossible — in a single SQL statement: a **forecast**, an ML score, a **cross-connector join**, an external-API pull, a…
 - [Semantic layer](.references/semantic-layer.md) — Define your metrics and dimensions **once**, then reference them straight from a component — no per-chart SQL, no copy-pasted queries:
-- [Real-time data](.references/realtime.md) — A `:::query` block opts into **live streaming** with the `live` attribute: `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`)
+- [Real-time data](.references/realtime.md) — A query opts into **live streaming** with the `live` attribute: `interval=N` sets the poll cadence in seconds (default `5`, floored to `1`)
 - [Components](.references/components.md) — A component is a PascalCase tag you drop into a page
 - [Filters & parameters](.references/filters.md) — Filters write into a central reactive store; any query that references the filter's name with `${...}` re-runs when it changes
 - [Formatting](.references/formatting.md) — Tables, counters, values and chart axes all render numbers and dates through **one** formatter, so `63712.895` becomes `$63,712.90` the same way everywhere
@@ -111,7 +114,7 @@ editing a page, run `check`; before wiring a connector, `query` it.
 ```bash
 dashdown check                       # config loads + every page renders? (queries never run)
 dashdown connectors --test           # each connector reachable? (probes SELECT 1)
-dashdown query "SELECT * FROM t LIMIT 5" -c main   # inspect real data / schema (-f json|csv)
+dashdown query "SELECT * FROM t LIMIT 5"   # real data / schema (-c <name> for a non-default source)
 dashdown components                  # dense, introspected attr catalog for every component
 dashdown components --connectors     # config keys + install extra per connector type
 dashdown metric --list               # semantic metrics & dimensions, if a semantic/ model exists

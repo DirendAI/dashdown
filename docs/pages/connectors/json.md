@@ -14,7 +14,7 @@ and `.jsonl` files are all picked up.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: json
   directory: data        # folder of .json/.ndjson/.jsonl files, relative to the project
 ```

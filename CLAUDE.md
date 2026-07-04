@@ -22,7 +22,7 @@ uv run pytest -k "injection"         # match by test name
 pip install -e .                     # editable install (or: uv sync)
 dashdown serve docs                  # run the docs project as a live dashboard at http://127.0.0.1:8000
 dashdown serve . --port 8001 --no-watch
-dashdown query "SELECT * FROM sales LIMIT 5" -p docs -c main   # probe a connector / inspect data (table|json|csv)
+dashdown query "SELECT * FROM sales LIMIT 5" -p docs   # probe a connector / inspect data (table|json|csv); -c names a source, else the default
 dashdown components                  # introspected catalog: component attrs + connector config keys (table|json; --connectors)
 dashdown new my-dashboard            # scaffold a new project
 dashdown build docs --out dist       # static export (pre-rendered HTML + data JSON)
@@ -49,8 +49,16 @@ A page request flows through `server.py` → `render/pipeline.py` → `render/ma
 `render/components.py`. Read these four files together before changing rendering behavior.
 
 1. `parse_markdown()` (`render/markdown.py`) splits the `.md` into: YAML frontmatter, HTML body, and
-   a list of `QuerySpec` (from `:::query name=… connector=…` container directives). The SQL inside a
-   query block is **collected, not executed**, and stripped from the HTML output. `build_md()` is
+   a list of `QuerySpec`. A query is defined by a **fenced query block** — ```` ```sql <name>
+   [connector=…] [ttl=…] [live] [interval=…] [show] ```` (first info-string token after the language
+   is the name; `dax` works too; a plain ```` ```sql ```` fence stays a display-only sample; `show`
+   also renders the SQL) — or the legacy `:::query name=…` container. Either way the SQL is
+   **collected, not executed**, and stripped from the HTML output (fence content is verbatim; the
+   container form scrapes markdown-parsed tokens). A spec without `connector=` parses with an empty
+   connector, resolved later via `data/registry.py::default_connector_name` (the source named by
+   sources.yaml's top-level `default: <source name>` key, else the sole source; several sources
+   without a `default:` have **no** default and an unqualified query fails loudly — source *names*
+   carry no meaning). `build_md()` is
    CommonMark + tables + GitHub-flavored extensions (strikethrough, task lists, footnotes, deflists,
    `h2/h3` heading anchors) + `:::note`/`:::tip`/`:::info`/`:::warning`/`:::danger` callout containers
    (same `:::` machinery as `:::query`, distinct first words so they don't collide). Fenced code is

@@ -90,7 +90,9 @@ class TestDecorator:
         def fn(params, connect):
             return []
 
-        assert getattr(fn, "__dashdown_query__")["connector"] == "main"
+        # No connector= is stored unresolved; load_project fills in the
+        # project's default source (see default_connector_name).
+        assert getattr(fn, "__dashdown_query__")["connector"] == ""
 
 
 def _write_py(path: Path, body: str):

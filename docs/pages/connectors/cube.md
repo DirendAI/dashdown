@@ -11,7 +11,7 @@ Connects to a [Cube](https://cube.dev) deployment — a standalone semantic-laye
 JSON API. Unlike every other connector, **Cube isn't queried with SQL**: the
 connector is a thin HTTP+JWT client that powers the [`backend: cube` semantic
 layer](/semantic-layer/cube), so you reference its model with
-the `metric={…} by={…}` grammar rather than `:::query` SQL.
+the `metric={…} by={…}` grammar rather than inline SQL query blocks.
 
 :::warning Experimental — preview
 The Cube integration is **preview** — fully unit-tested with fakes but not yet

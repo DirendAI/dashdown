@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Total downloads per month across all channels
 cache_ttl: 300
 ---

@@ -23,10 +23,11 @@ from the static-build root.
 
 Run from the repo root:  ``python tooling/gen-agent-docs.py``
 
-It walks ``docs/pages/**`` in sidebar order, drops the frontmatter, the live ``:::query``
-data blocks (their dangling SQL is meaningless out of context — but fenced ``` code and
-``:::note``-style callouts are kept, they teach syntax), and the Jinja ``{% include %}``
-lines, then concatenates the prose into each shard.
+It walks ``docs/pages/**`` in sidebar order, drops the frontmatter, the live query
+definitions (fenced ``` ```sql name ``` blocks and legacy ``:::query`` — their dangling SQL
+is meaningless out of context; display-only fenced code and ``:::note``-style callouts are
+kept, they teach syntax), and the Jinja ``{% include %}`` lines, then concatenates the
+prose into each shard.
 """
 from __future__ import annotations
 
@@ -51,7 +52,7 @@ REFERENCES_LINK_SUBDIR = ".references"
 # Reuse the framework's own frontmatter splitter so the parse matches the renderer.
 sys.path.insert(0, str(REPO_ROOT))
 from dashdown.catalog import build_catalog  # noqa: E402
-from dashdown.render.markdown import split_frontmatter  # noqa: E402
+from dashdown.render.markdown import parse_fence_query, split_frontmatter  # noqa: E402
 
 CATALOG_SLUG = "catalog"  # the registry-introspected reference shard (not a docs/ page)
 
@@ -64,15 +65,34 @@ _CLOSE_RE = re.compile(r"^\s*:::\s*$")
 _NON_PROSE_PREFIXES = ("#", ">", "|", "-", "*", "+", ":::", "```", "~~~", "<", "{", "!", "<!--")
 
 
+def _is_fence_query(info: str) -> bool:
+    """Whether a fence info string defines a live query (``sql name …``)."""
+    try:
+        return parse_fence_query(info, "") is not None
+    except ValueError:
+        return False
+
+
+def _closes(line: str, opening: str) -> bool:
+    """CommonMark close test: same fence char, run at least as long as the opener."""
+    m = _FENCE_RE.match(line)
+    return bool(m) and m.group(1)[0] == opening[0] and len(m.group(1)) >= len(opening)
+
+
 def _strip_body(body: str) -> str:
-    """Drop live ``:::query`` blocks and Jinja includes, keep prose + fenced code."""
+    """Drop live query definitions and Jinja includes, keep prose + display code."""
     out: list[str] = []
-    fence: str | None = None  # the active code-fence marker, or None
+    fence: str | None = None  # marker of the code fence being kept, or None
+    skip_fence: str | None = None  # marker of the fenced query being dropped, or None
     in_query = False
     for line in body.splitlines():
+        if skip_fence is not None:
+            if _closes(line, skip_fence):
+                skip_fence = None
+            continue
         if fence is not None:
             out.append(line)
-            if line.strip().startswith(fence):
+            if _closes(line, fence):
                 fence = None
             continue
         if in_query:
@@ -81,8 +101,16 @@ def _strip_body(body: str) -> str:
             continue
         m = _FENCE_RE.match(line)
         if m:
-            fence = m.group(1)[0] * 3  # normalise ``` / ~~~ run to a 3-char close test
-            out.append(line)
+            marker = m.group(1)
+            info = line.strip()[len(marker):]
+            # A live fenced query definition (```sql name …) is page plumbing,
+            # stripped exactly like the legacy :::query form below. Display-only
+            # fences (plain ```sql, ````markdown examples) are kept.
+            if _is_fence_query(info):
+                skip_fence = marker
+            else:
+                fence = marker
+                out.append(line)
             continue
         if _QUERY_OPEN_RE.match(line):
             in_query = True
@@ -318,24 +346,27 @@ structure exists to avoid.
 CHEAT_SHEET = """\
 ## Cheat-sheet
 
-A **page** is Markdown under `pages/**/*.md`: prose + `:::query` blocks + `<Component />`
+A **page** is Markdown under `pages/**/*.md`: prose + fenced query blocks + `<Component />`
 tags. Queries are collected at render and run **in the browser** — never server-side at
 render time, so a page ships instantly and fetches its data after.
 
 ### A page is a query plus components
 
 ````markdown
-:::query name=sales connector=main
+```sql sales
 SELECT month, region, SUM(amount) AS amount
 FROM orders GROUP BY month, region ORDER BY month
-:::
+```
 
 <LineChart data={sales} x="month" y="amount" series="region" title="Sales" />
 <Table data={sales} />
 ````
 
-- `:::query name=… connector=… [cache_ttl=60] [live] [interval=5]` — `connector` is a key
-  in `sources.yaml` (default `main`). The SQL is collected, not run at render.
+- ` ```sql <name> [connector=…] [ttl=60] [live] [interval=5] ` — the first word after the
+  language is the query **name**; `connector` is a key in `sources.yaml` (omit it to use
+  the project's default source). The SQL is collected, not run at render. A plain
+  ` ```sql ` fence with nothing after the language is an ordinary display-only code
+  sample.
 - A query can instead live once in `queries/<name>.sql` (or `.py` for Python) and be
   referenced by name from any page — see `.references/queries.md`.
 - `data={query_name}` wires a component to a result; `column="col"` picks one column.
@@ -370,7 +401,7 @@ editing a page, run `check`; before wiring a connector, `query` it.
 ```bash
 dashdown check                       # config loads + every page renders? (queries never run)
 dashdown connectors --test           # each connector reachable? (probes SELECT 1)
-dashdown query "SELECT * FROM t LIMIT 5" -c main   # inspect real data / schema (-f json|csv)
+dashdown query "SELECT * FROM t LIMIT 5"   # real data / schema (-c <name> for a non-default source)
 dashdown components                  # dense, introspected attr catalog for every component
 dashdown components --connectors     # config keys + install extra per connector type
 dashdown metric --list               # semantic metrics & dimensions, if a semantic/ model exists

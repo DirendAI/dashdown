@@ -12,7 +12,7 @@ in the directory becomes a queryable view named after the file (`sales.csv` →
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: csv
   directory: data        # folder of .csv files, relative to the project
 ```

@@ -27,16 +27,16 @@ WHERE '${country}' = '' OR country = '${country}'
 ORDER BY downloads DESC
 ```
 
-:::query name=country_rows connector=main
+```sql country_rows
 SELECT country, downloads
 FROM by_country
 WHERE '${country}' = '' OR country = '${country}'
 ORDER BY downloads DESC
-:::
+```
 
-:::query name=countries connector=main
+```sql countries
 SELECT country FROM by_country
-:::
+```
 
 <Combobox name="country" data={countries} column="country" label="Country" placeholder="Search countries…" />
 
@@ -64,12 +64,12 @@ WHERE '${countries}' = '' OR country IN (${countries})
 ORDER BY downloads DESC
 ```
 
-:::query name=country_multi connector=main
+```sql country_multi
 SELECT country, downloads
 FROM by_country
 WHERE '${countries}' = '' OR country IN (${countries})
 ORDER BY downloads DESC
-:::
+```
 
 <Combobox name="countries" data={countries} column="country" label="Countries" multi placeholder="Add a country…" />
 

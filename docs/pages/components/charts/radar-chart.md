@@ -19,9 +19,9 @@ seen for that indicator.
 
 Omit `series` for a single polygon:
 
-:::query name=dashdown_scores connector=main
+```sql dashdown_scores
 SELECT metric, score FROM feature_scores WHERE product = 'Dashdown'
-:::
+```
 
 <RadarChart data={dashdown_scores} x="metric" y="score" title="Dashdown scores" />
 

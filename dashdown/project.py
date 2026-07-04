@@ -14,7 +14,11 @@ import yaml
 from dashdown.auth import AuthConfig, parse_auth_config
 from dashdown.embed import EmbedConfig, parse_embed_config
 from dashdown.data.base import Connector
-from dashdown.data.registry import load_connectors
+from dashdown.data.registry import (
+    default_connector_name,
+    load_connectors,
+    no_default_error,
+)
 from dashdown.llm import LLMAdapter, LLMConfig, create_adapter, parse_llm_config
 from dashdown.python_query import PythonQuerySpec, load_python_queries
 from dashdown.semantic import load_semantic_models
@@ -437,6 +441,10 @@ class Project:
     root: Path
     config: ProjectConfig
     connectors: dict[str, Connector] = field(default_factory=dict)
+    # The source name a query with no explicit `connector=` runs on — computed
+    # once at load by `default_connector_name` (see data/registry.py). None
+    # when there is no unambiguous default (several unflagged sources).
+    default_connector: str | None = None
     # Shared query library: name -> QuerySpec parsed from queries/**/*.{sql,dax}
     # at load time (see dashdown/query_library.py). Pages reference these by name
     # (`data={finance.mrr}`); also the catalogue for introspection / a generated
@@ -649,6 +657,19 @@ def load_project(root: Path) -> Project:
     component_js, component_css = _discover_component_assets(root / "components")
 
     connectors = load_connectors(root / "sources.yaml", root)
+    # The source a query with no explicit `connector=` runs on (sources.yaml's
+    # top-level `default:` key → sole source; None when several sources and no
+    # `default:` make it ambiguous). Library/python specs that parsed without a connector are
+    # resolved against it right below, so everything registered into the global
+    # caches carries a concrete name; an ambiguous unqualified query fails at
+    # startup (mirroring render_page's per-page check).
+    default_connector = default_connector_name(connectors)
+
+    def _resolve_connector(spec) -> None:
+        if not spec.connector:
+            if default_connector is None and len(connectors) > 1:
+                raise no_default_error(f"library query '{spec.name}'")
+            spec.connector = default_connector or ""
 
     # Shared query library: parse queries/**/*.{sql,dax} and register each into
     # the global query-def cache, so the data API and WS stream endpoint resolve
@@ -662,7 +683,10 @@ def load_project(root: Path) -> Project:
     dax_connectors = frozenset(
         name for name, c in connectors.items() if type(c).__name__ == "DAXConnector"
     )
-    queries = compose_library_queries(load_queries(root / "queries"), dax_connectors)
+    queries = load_queries(root / "queries")
+    for spec in queries.values():
+        _resolve_connector(spec)
+    queries = compose_library_queries(queries, dax_connectors)
     register_library_queries(queries)
 
     # Python queries (queries/**/*.py). Same loader machinery (name =
@@ -677,6 +701,8 @@ def load_project(root: Path) -> Project:
         python_queries = load_python_queries(
             root / "queries", reserved_names=set(queries)
         )
+        for py_spec in python_queries.values():
+            _resolve_connector(py_spec)
     else:
         py_dir = root / "queries"
         if py_dir.is_dir() and any(py_dir.rglob("*.py")):
@@ -709,6 +735,7 @@ def load_project(root: Path) -> Project:
         root=root,
         config=cfg,
         connectors=connectors,
+        default_connector=default_connector,
         queries=queries,
         python_queries=python_queries,
         semantic_models=semantic_models,

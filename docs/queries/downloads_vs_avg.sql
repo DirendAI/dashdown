@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Monthly downloads per channel as a signed deviation from each channel's average (a diverging heatmap shape)
 ---
 WITH wide AS (

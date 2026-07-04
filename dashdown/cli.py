@@ -183,7 +183,10 @@ def query(
         Path("."), "--project", "-p", help="Project directory"
     ),
     connector: str = typer.Option(
-        "main", "--connector", "-c", help="Connector name from sources.yaml"
+        None,
+        "--connector",
+        "-c",
+        help="Connector name from sources.yaml (default: the project's default source)",
     ),
     fmt: str = typer.Option(
         "table", "--format", "-f", help="Output format: table, json, or csv"
@@ -203,14 +206,14 @@ def query(
     Test connectivity and inspect data without opening the app — handy for an
     AI agent verifying a connector or exploring the schema:
 
-        dashdown query "SELECT * FROM sales LIMIT 5" -c main
+        dashdown query "SELECT * FROM sales LIMIT 5"
         dashdown query "SELECT count(*) FROM orders" -p . -c warehouse -f json
 
     Schema introspection answers "what tables exist?" / "what columns are in T?"
     in one call — no hand-written `SELECT * LIMIT 0`, dialect handled per connector:
 
-        dashdown query --tables -c main
-        dashdown query --schema sales -c main -f json
+        dashdown query --tables
+        dashdown query --schema sales -f json
 
     (For a semantic model's metrics/dimensions, use `dashdown metric --list`.)
     """
@@ -229,9 +232,16 @@ def query(
 
     proj = load_project(project.resolve())
     try:
+        connector = connector or proj.default_connector
+        avail = ", ".join(sorted(proj.connectors)) or "(none configured)"
+        if connector is None:
+            raise typer.BadParameter(
+                "No --connector given and the project has no default source — "
+                "add a top-level `default: <source name>` line to sources.yaml or pass -c. "
+                f"Available: {avail}"
+            )
         conn = proj.connectors.get(connector)
         if conn is None:
-            avail = ", ".join(sorted(proj.connectors)) or "(none configured)"
             raise typer.BadParameter(
                 f"Connector '{connector}' not found in sources.yaml. Available: {avail}"
             )
@@ -958,7 +968,7 @@ def _scaffold(root: Path, targets: list[str] | None = None) -> None:
         encoding="utf-8",
     )
     (root / "sources.yaml").write_text(
-        "main:\n  type: csv\n  directory: data\n",
+        "sales_data:\n  type: csv\n  directory: data\n",
         encoding="utf-8",
     )
     (root / "data" / "sales.csv").write_text(
@@ -974,12 +984,12 @@ def _scaffold(root: Path, targets: list[str] | None = None) -> None:
     (root / "pages" / "index.md").write_text(
         "# Welcome\n\n"
         "This is your first Dashdown page.\n\n"
-        ":::query name=monthly_sales connector=main\n"
+        "```sql monthly_sales\n"
         "SELECT month, region, SUM(amount) AS sales\n"
         "FROM sales\n"
         "GROUP BY month, region\n"
         "ORDER BY month\n"
-        ":::\n\n"
+        "```\n\n"
         '<Dropdown name="region" data={monthly_sales} column="region" label="Region" />\n\n'
         '<LineChart data={monthly_sales} x="month" y="sales" series="region" title="Monthly Sales" />\n\n'
         '<Table data={monthly_sales} title="Detail" />\n',

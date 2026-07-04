@@ -20,13 +20,13 @@ GROUP BY month
 ORDER BY month
 ```
 
-:::query name=dl_by_channel connector=main
+```sql dl_by_channel
 SELECT month, SUM(downloads) AS downloads
 FROM downloads
 WHERE '${channel}' = '' OR channel = '${channel}'
 GROUP BY month
 ORDER BY month
-:::
+```
 
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 
@@ -46,13 +46,13 @@ GROUP BY month
 ORDER BY month
 ```
 
-:::query name=dl_multi connector=main
+```sql dl_multi
 SELECT month, SUM(downloads) AS downloads
 FROM downloads
 WHERE '${channels}' = '' OR channel IN (${channels})
 GROUP BY month
 ORDER BY month
-:::
+```
 
 <Dropdown name="channels" data={all_channels} column="channel" label="Channels" multi />
 

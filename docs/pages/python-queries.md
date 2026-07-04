@@ -29,11 +29,11 @@ path is its name (`queries/ml/churn.py` → `ml.churn`), just like `.sql`/`.dax`
 # queries/downloads_forecast.py
 from dashdown import query
 
-@query(connector="main", cache_ttl=300)
+@query(cache_ttl=300)
 def downloads_forecast(params, connect):
     # connect(name, sql, params=…) runs SQL on ANY project connector and returns
     # a result with .to_pandas() / .to_arrow().
-    df = connect("main", "SELECT month, SUM(downloads) AS downloads "
+    df = connect("demo", "SELECT month, SUM(downloads) AS downloads "
                          "FROM downloads GROUP BY month ORDER BY month").to_pandas()
     # …a forecast is trivial in pandas, awkward in SQL…
     last = df["downloads"].tail(3).mean()
@@ -71,9 +71,9 @@ A single SQL query can't span two connectors; a Python query can — read from e
 and join in pandas:
 
 ```python
-@query(connector="main")
+@query()
 def revenue_vs_target(params, connect):
-    revenue = connect("main",    "SELECT month, SUM(amount) AS revenue "
+    revenue = connect("sales",   "SELECT month, SUM(amount) AS revenue "
                                  "FROM sales GROUP BY month").to_pandas()
     targets = connect("targets", "SELECT month, SUM(target) AS target "
                                  "FROM targets GROUP BY month").to_pandas()

@@ -24,12 +24,12 @@ WHERE '${min_rating}' = '' OR rating >= CAST(${min_rating} AS DOUBLE)
 ORDER BY rating DESC
 ```
 
-:::query name=devices_rated connector=main
+```sql devices_rated
 SELECT device, rating
 FROM device_specs
 WHERE '${min_rating}' = '' OR rating >= CAST(${min_rating} AS DOUBLE)
 ORDER BY rating DESC
-:::
+```
 
 <Slider name="min_rating" min={0} max={5} step={0.1} default={4} label="Min rating" />
 

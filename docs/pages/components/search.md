@@ -19,13 +19,13 @@ GROUP BY channel
 ORDER BY downloads DESC
 ```
 
-:::query name=channel_like connector=main
+```sql channel_like
 SELECT channel, SUM(downloads) AS downloads
 FROM downloads
 WHERE '${q}' = '' OR channel ILIKE '%' || '${q}' || '%'
 GROUP BY channel
 ORDER BY downloads DESC
-:::
+```
 
 <Search name="q" label="Filter channels" placeholder="Type a channel…" />
 

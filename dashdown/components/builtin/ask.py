@@ -77,7 +77,7 @@ class Ask(Component):
                     '<div class="text-error">Ask requires data={query_name} '
                     "or metric={model.metric}</div>"
                 )
-            connector = ctx.query_connectors.get(name, "main")
+            connector = ctx.query_connectors.get(name, ctx.default_connector)
 
         prompt = attr_str(attrs, "ask") or _inner_text(inner)
         if not prompt:

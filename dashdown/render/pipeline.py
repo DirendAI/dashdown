@@ -16,6 +16,7 @@ from typing import Any
 
 from dashdown.components.base import RenderContext
 from dashdown.data.base import Connector, QueryResult
+from dashdown.data.registry import default_connector_name, no_default_error
 from dashdown.render.components import render_components, _error_card
 from dashdown.render.markdown import parse_markdown, expand_includes, QuerySpec
 
@@ -608,6 +609,18 @@ def render_page(
     # their own queries and components.
     source = expand_includes(source, include_base)
     body_html, local_specs, frontmatter = parse_markdown(source)
+    # A spec without an explicit `connector=` parses with an empty connector —
+    # resolve it here, where the project's sources are in hand (the top-level
+    # `default:` key in sources.yaml → sole source). Several unflagged sources make an unqualified query
+    # ambiguous — fail loudly rather than guess. With *zero* sources there is
+    # nothing to disambiguate; the empty connector surfaces downstream as the
+    # ordinary unknown-connector error on data fetch.
+    default_connector = default_connector_name(connectors)
+    for s in local_specs:
+        if not s.connector:
+            if default_connector is None and len(connectors) > 1:
+                raise no_default_error(f"query '{s.name}'")
+            s.connector = default_connector or ""
     local_names = {s.name for s in local_specs}
 
     # Full async mode: don't execute ANY queries server-side
@@ -640,6 +653,7 @@ def render_page(
         query_connectors=query_connectors,
         semantic_models=semantic_models,
         filter_debounce=filter_debounce,
+        default_connector=default_connector or "",
     )
     body_html = render_components(body_html, ctx)
 

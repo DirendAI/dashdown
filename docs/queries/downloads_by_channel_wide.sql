@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Monthly downloads with each channel as its own column (a multi-metric shape)
 ---
 SELECT

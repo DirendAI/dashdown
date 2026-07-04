@@ -59,6 +59,7 @@ from typing import Any, Callable
 import yaml
 
 from dashdown.data.base import Connector, QueryResult
+from dashdown.data.registry import default_connector_name, no_default_error
 from dashdown.python_query import PythonQuerySpec
 from dashdown.semantic_base import (
     DEFAULT_BACKEND,
@@ -429,7 +430,10 @@ def load_semantic_models(
                 )
             cfg = {k: v for k, v in raw_cfg.items() if k not in _OUR_KEYS}
             file_config[model_name] = cfg
-            connector = str(raw_cfg.get("connector", "main"))
+            raw_conn = raw_cfg.get("connector") or default_connector_name(connectors or {})
+            if not raw_conn:
+                raise no_default_error(f"semantic model {model_name!r}")
+            connector = str(raw_conn)
             model_connectors[model_name] = connector
             model_backends[model_name] = _detect_backend(
                 raw_cfg.get("backend"), connector, connectors

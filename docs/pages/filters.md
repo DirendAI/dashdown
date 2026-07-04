@@ -11,17 +11,17 @@ Filters write into a central reactive store; any query that references the
 filter's name with `${...}` re-runs when it changes. The selection is mirrored to
 the URL, so a filtered view is shareable and bookmarkable.
 
-:::query name=all_channels connector=main
+```sql all_channels
 SELECT DISTINCT channel FROM downloads ORDER BY channel
-:::
+```
 
-:::query name=filtered connector=main
+```sql filtered
 SELECT month, SUM(downloads) AS downloads
 FROM downloads
 WHERE '${channel}' = '' OR channel = '${channel}'
 GROUP BY month
 ORDER BY month
-:::
+```
 
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 

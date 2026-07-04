@@ -11,12 +11,12 @@ from __future__ import annotations
 from dashdown import query
 
 
-@query(connector="main", cache_ttl=300, description="Monthly downloads + forecast")
+@query(cache_ttl=300, description="Monthly downloads + forecast")
 def downloads_forecast(params, connect):
     # connect() runs SQL on any project connector and hands back a result with
     # .to_pandas() / .to_arrow(). No params here, so plain SQL is fine.
     df = connect(
-        "main",
+        "demo",
         "SELECT month, SUM(downloads) AS downloads "
         "FROM downloads GROUP BY month ORDER BY month",
     ).to_pandas()

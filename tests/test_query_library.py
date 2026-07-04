@@ -85,7 +85,8 @@ class TestParseQueryFile:
         f = tmp_path / "all.sql"
         f.write_text("SELECT 1\n", encoding="utf-8")
         spec = parse_query_file(f, "all")
-        assert spec.connector == "main"  # default
+        # Unresolved at parse; load_project fills in the project's default source.
+        assert spec.connector == ""
         assert spec.cache_ttl is None
         assert spec.live is False
         assert spec.sql == "SELECT 1"

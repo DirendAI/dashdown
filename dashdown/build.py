@@ -207,7 +207,7 @@ def _enumerate_static_paths(
     Opt-in frontmatter on the ``[slug]`` page::
 
         static_paths:
-          connector: main          # optional, default "main"
+          connector: main          # optional, default: the project's default source
           query: SELECT DISTINCT channel FROM downloads
 
     The query runs at build time; each row supplies the route params **by column
@@ -233,7 +233,7 @@ def _enumerate_static_paths(
             (app_url, "static_paths.query must be a non-empty SQL string")
         )
         return []
-    connector_name = str(spec.get("connector", "main"))
+    connector_name = str(spec.get("connector") or project.default_connector or "")
     connector = project.connectors.get(connector_name)
     if connector is None:
         result.failed_pages.append(

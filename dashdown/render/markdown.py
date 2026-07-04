@@ -1,4 +1,4 @@
-"""Markdown setup with the :::query container directive."""
+"""Markdown setup with the fenced-query and :::query directives."""
 from __future__ import annotations
 
 import html as _html
@@ -161,6 +161,9 @@ def expand_includes(
 @dataclass
 class QuerySpec:
     name: str
+    # Empty string = "no connector= given" — parse time can't know the
+    # project's default source, so resolution happens where a connectors dict
+    # is in hand (render_page / load_project) via `default_connector_name`.
     connector: str
     sql: str
     cache_ttl: int | None = None
@@ -173,6 +176,81 @@ class QuerySpec:
     # (`queries/**/*.{sql,dax}` frontmatter). Carried on Project.queries for
     # introspection / a generated query reference; doesn't affect execution.
     description: str | None = None
+
+
+def _spec_options(attrs: dict[str, Any]) -> tuple[int | None, bool, int | None]:
+    """Coerce the optional query attrs shared by every definition syntax.
+
+    Returns ``(cache_ttl, live, interval)``. ``ttl`` is an alias for
+    ``cache_ttl`` (the fenced form documents ``ttl=``; ``cache_ttl`` wins when
+    both are given). Bare ``live`` parses to True; ``interval=N`` coerces to
+    int exactly like the ttl.
+    """
+
+    def _as_int(raw: Any) -> int | None:
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            return int(raw)
+        return None
+
+    cache_ttl = _as_int(attrs.get("cache_ttl", attrs.get("ttl")))
+    live = bool(attrs.get("live"))
+    interval = _as_int(attrs.get("interval"))
+    return cache_ttl, live, interval
+
+
+# --- Fenced query definitions -------------------------------------------------
+#
+# The editor-friendly query syntax: a fenced ``sql`` (or ``dax``) block whose
+# info string carries anything after the language is a *query definition* —
+# the first token is the query name, the rest use the same attr grammar as
+# `:::query`:
+#
+#     ```sql deals_count connector=secondary ttl=220 live interval=5
+#     SELECT count(*) FROM deals
+#     ```
+#
+# Standard Markdown editors and GitHub highlight the SQL (they only read the
+# first info-string word), and the fence content is verbatim, so SQL never
+# passes through inline markdown parsing. A plain ```sql fence (nothing after
+# the language) stays an ordinary highlighted code sample. Like `:::query`, a
+# definition emits nothing — unless it carries the bare `show` attr, which
+# *also* renders the SQL as a normal highlighted block (teaching dashboards).
+_FENCE_QUERY_LANGS = ("sql", "dax")
+# Mirrors the DataRef name grammar (`render/attrs.py`), so any fence-defined
+# name is referenceable as `data={name}` (dots included, for namespaced names).
+_FENCE_QUERY_NAME_RE = re.compile(r"^[A-Za-z_][\w.]*$")
+
+
+def parse_fence_query(info: str, content: str) -> tuple[QuerySpec, bool] | None:
+    """Parse a fence token's info string + content as a query definition.
+
+    Returns ``(spec, show)`` when the fence defines a query, else ``None`` for
+    an ordinary display fence. Raises ``ValueError`` when the token after the
+    language can't be a query name — silent fallback to a display block would
+    hide the typo.
+    """
+    parts = info.strip().split(None, 1)
+    if len(parts) < 2 or parts[0].lower() not in _FENCE_QUERY_LANGS:
+        return None
+    lang, rest = parts[0], parts[1]
+    name, _, attr_str = rest.partition(" ")
+    if not _FENCE_QUERY_NAME_RE.match(name):
+        raise ValueError(
+            f"```{lang} query block: the first word after the language must be "
+            f"the query name (got {name!r}). For a plain code sample, write "
+            f"```{lang} with nothing after the language."
+        )
+    attrs = parse_attrs(" " + attr_str) if attr_str.strip() else {}
+    cache_ttl, live, interval = _spec_options(attrs)
+    spec = QuerySpec(
+        name=name,
+        connector=str(attrs.get("connector") or ""),
+        sql=content.strip(),
+        cache_ttl=cache_ttl,
+        live=live,
+        interval=interval,
+    )
+    return spec, bool(attrs.get("show"))
 
 
 def _container_validate(params: str, *args) -> bool:
@@ -197,7 +275,7 @@ def _make_container_render(queries: list[QuerySpec]):
             name = attrs.get("name")
             if not name or not isinstance(name, str):
                 raise ValueError(":::query block requires a `name` attribute")
-            connector = attrs.get("connector") or "main"
+            connector = attrs.get("connector") or ""
 
             # Collect text content from the inner tokens.
             sql_parts: list[str] = []
@@ -407,8 +485,17 @@ def parse_markdown(source: str) -> tuple[str, list[QuerySpec], dict[str, Any]]:
     md = build_md(queries)
     tokens = md.parse(body)
 
+    # Collect query definitions (both `:::query` containers and fenced query
+    # blocks) by walking the raw token stream — the container render function
+    # above only fires during HTML rendering, and the query tokens are stripped
+    # before that.
+    queries.clear()
+    _collect_queries(tokens, queries)
+
     # Remove tokens enclosed by container_query_open/close (inclusive) so we
-    # don't render SQL as a paragraph in the output.
+    # don't render SQL as a paragraph in the output, and drop fence-defined
+    # queries the same way (a `show` fence stays, rewritten to a plain
+    # language-only fence so it renders as an ordinary highlighted block).
     cleaned: list = []
     skip_depth = 0
     for tok in tokens:
@@ -418,14 +505,16 @@ def parse_markdown(source: str) -> tuple[str, list[QuerySpec], dict[str, Any]]:
         if tok.type == "container_query_close":
             skip_depth -= 1
             continue
-        if skip_depth == 0:
-            cleaned.append(tok)
-
-    # We still need queries to be populated; do a second pass that walks the
-    # original token stream just to collect them (the render function above is
-    # only triggered during HTML rendering, so call it via env-less rendering).
-    queries.clear()
-    _collect_queries(tokens, queries)
+        if skip_depth > 0:
+            continue
+        if tok.type == "fence":
+            parsed = parse_fence_query(tok.info, tok.content)
+            if parsed is not None:
+                _spec, show = parsed
+                if not show:
+                    continue
+                tok.info = tok.info.strip().split(None, 1)[0]
+        cleaned.append(tok)
 
     html = md.renderer.render(cleaned, md.options, {})
     return html, queries, frontmatter
@@ -435,6 +524,12 @@ def _collect_queries(tokens, sink: list[QuerySpec]) -> None:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
+        if tok.type == "fence":
+            parsed = parse_fence_query(tok.info, tok.content)
+            if parsed is not None:
+                sink.append(parsed[0])
+            i += 1
+            continue
         if tok.type == "container_query_open":
             params = tok.info.strip()
             after = params[len("query") :].strip()
@@ -442,7 +537,7 @@ def _collect_queries(tokens, sink: list[QuerySpec]) -> None:
             name = attrs.get("name")
             if not name or not isinstance(name, str):
                 raise ValueError(":::query block requires a `name` attribute")
-            connector = attrs.get("connector") or "main"
+            connector = attrs.get("connector") or ""
 
             sql_parts: list[str] = []
             depth = 1
@@ -462,20 +557,7 @@ def _collect_queries(tokens, sink: list[QuerySpec]) -> None:
                         if c.content:
                             sql_parts.append(c.content)
                 j += 1
-            cache_ttl_raw = attrs.get("cache_ttl")
-            cache_ttl: int | None = (
-                int(cache_ttl_raw)
-                if isinstance(cache_ttl_raw, (int, float)) and not isinstance(cache_ttl_raw, bool)
-                else None
-            )
-            # Bare `live` parses to True; `interval=N` coerces to int (like cache_ttl).
-            live = bool(attrs.get("live"))
-            interval_raw = attrs.get("interval")
-            interval: int | None = (
-                int(interval_raw)
-                if isinstance(interval_raw, (int, float)) and not isinstance(interval_raw, bool)
-                else None
-            )
+            cache_ttl, live, interval = _spec_options(attrs)
             sink.append(
                 QuerySpec(
                     name=name,
