@@ -2,10 +2,12 @@
 
 A query with no explicit ``connector=`` runs on the project's **default
 source**: the one flagged ``default: true`` in sources.yaml, else the sole
-configured source, else the source conventionally named ``main``. The flag
-rides the ``Connector.is_default`` attribute (never the connector's config);
-specs parse with an empty connector and are resolved where a connectors dict
-is in hand (``render_page`` / ``load_project``).
+configured source. Source names carry no special meaning (there is no magic
+``main``); several unflagged sources have no default, and an unqualified
+query then fails with a mark-one-``default: true`` error. The flag rides the
+``Connector.is_default`` attribute (never the connector's config); specs
+parse with an empty connector and are resolved where a connectors dict is in
+hand (``render_page`` / ``load_project``).
 """
 from __future__ import annotations
 
@@ -54,8 +56,8 @@ def test_default_true_flags_the_instance(tmp_path):
     assert default_connector_name(connectors) == "primary"
 
 
-def test_flagged_default_wins_over_a_source_named_main(tmp_path):
-    # `main` is just a name; the explicit flag decides the default.
+def test_flagged_default_wins_regardless_of_names(tmp_path):
+    # Names carry no meaning — the explicit flag decides the default.
     connectors = _load(
         tmp_path,
         "main:\n  type: dummy\nsecondary:\n  type: dummy\n  default: true\n",
@@ -68,13 +70,23 @@ def test_single_source_is_implicitly_the_default(tmp_path):
     assert default_connector_name(connectors) == "warehouse"
 
 
-def test_multiple_sources_fall_back_to_main_by_convention(tmp_path):
+def test_multiple_unflagged_sources_have_no_default(tmp_path):
+    # "main" is not special — with several unflagged sources there is no
+    # default and an unqualified query must name its connector.
     connectors = _load(tmp_path, "main:\n  type: dummy\nb:\n  type: dummy\n")
-    assert default_connector_name(connectors) == "main"
+    assert default_connector_name(connectors) is None
 
 
-def test_no_sources_fall_back_to_main(tmp_path):
-    assert default_connector_name({}) == "main"
+def test_no_sources_have_no_default(tmp_path):
+    assert default_connector_name({}) is None
+
+
+def test_unqualified_query_with_ambiguous_sources_raises(tmp_path):
+    from dashdown.render.pipeline import render_page
+
+    connectors = _load(tmp_path, "a:\n  type: dummy\nb:\n  type: dummy\n")
+    with pytest.raises(ValueError, match="default: true"):
+        render_page("```sql deals\nSELECT 1\n```", connectors)
 
 
 def test_two_defaults_raise(tmp_path):

@@ -26,7 +26,7 @@ captured value flows into queries as `${param}`, through the same context-aware,
 
 ````markdown
 <!-- pages/channels/[channel].md  →  /channels/<channel> -->
-```sql channel_months connector=main
+```sql channel_months
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'
@@ -56,7 +56,7 @@ below) that pre-renders one snapshot per record; a plain `dashdown build` skips
 The framework merges route params into every data/WebSocket request (at lowest
 precedence — an explicit filter still wins), which is what makes each record's
 request URL **unique**. Without that, two slugs of one template would produce
-byte-identical, cacheable data URLs (`/api/data/q?_connector=main`) and the
+byte-identical, cacheable data URLs (`/api/data/q?_connector=demo`) and the
 browser would serve the first record's response for the second (and the
 server-side result cache would collide too). A built-in `<Table>`/chart gets this
 for free; a [custom data-driven component](/extending#data-driven-components)
@@ -89,7 +89,7 @@ The table below is a real list page. Each row links to `/detail-pages/<channel>`
 served by the single template `pages/detail-pages/[channel].md` — **click any row**
 to drill into that channel's detail page.
 
-```sql channels_overview connector=main
+```sql channels_overview
 SELECT channel, SUM(downloads) AS downloads
 FROM downloads
 GROUP BY channel
@@ -116,7 +116,6 @@ its own data snapshot.
 ---
 title: Channel detail
 static_paths:
-  connector: main
   query: SELECT DISTINCT channel FROM downloads ORDER BY channel
 ---
 ```

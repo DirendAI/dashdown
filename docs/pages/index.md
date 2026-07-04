@@ -26,7 +26,7 @@ write `.md`, point the CLI at the folder, and get a live dashboard.
 ## A page is just Markdown + SQL + components
 
 ````markdown
-```sql downloads_by_month connector=main
+```sql downloads_by_month
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 ```
@@ -37,7 +37,7 @@ FROM downloads GROUP BY month ORDER BY month
 That snippet renders this — real widgets, drawn in your browser from the query
 result (here via the shared `queries/downloads_by_month.sql`):
 
-```sql downloads_total connector=main
+```sql downloads_total
 SELECT SUM(downloads) AS downloads FROM downloads
 ```
 

@@ -19,7 +19,7 @@ WHERE '${busy}' = '' OR visits >= 500
 ORDER BY date
 ```
 
-```sql daily_traffic connector=main
+```sql daily_traffic
 SELECT date, visits
 FROM daily
 WHERE '${busy}' = '' OR visits >= 500
@@ -60,7 +60,7 @@ WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')
 ORDER BY date
 ```
 
-```sql daily_weekend connector=main
+```sql daily_weekend
 SELECT date, visits
 FROM daily
 WHERE CASE WHEN '${weekend}' = 'Yes' THEN weekday IN ('Sat','Sun')

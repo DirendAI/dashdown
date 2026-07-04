@@ -47,7 +47,7 @@ endpoint re-fetches it each tick. DuckDB (which backs the `csv`/`duckdb`
 connectors) can read a remote JSON API directly, so no new connector is needed:
 
 ````markdown
-```sql btc_price connector=main live interval=5
+```sql btc_price live interval=5
 SELECT CAST(data.amount AS DOUBLE) AS usd
 FROM read_json_auto('https://api.coinbase.com/v2/prices/BTC-USD/spot')
 ```

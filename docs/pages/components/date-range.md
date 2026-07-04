@@ -19,7 +19,7 @@ WHERE ('${from}' = '' OR date >= '${from}')
 ORDER BY date
 ```
 
-```sql daily_in_range connector=main
+```sql daily_in_range
 SELECT date, visits
 FROM daily
 WHERE ('${from}' = '' OR date >= '${from}')

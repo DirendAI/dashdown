@@ -17,7 +17,7 @@ empty-means-all convention as every other filter), so **guard each bound** — t
 empty case (a wide-open slider, or the first fetch before the control seeds)
 then shows everything instead of erroring on `CAST('' AS DOUBLE)`:
 
-```sql devices_in_range connector=main
+```sql devices_in_range
 SELECT device, tier, price
 FROM device_specs
 WHERE ('${price_min}' = '' OR price >= CAST(${price_min} AS DOUBLE))

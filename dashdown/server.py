@@ -136,12 +136,12 @@ def _embed_authorizes(proj: "Project", request: Request) -> bool:
     # Data API: the requested query must be in the token's scope.
     if path.startswith(_DATA_API_PREFIX):
         name = path[len(_DATA_API_PREFIX):]
-        connector = str(request.query_params.get("_connector") or proj.default_connector)
+        connector = str(request.query_params.get("_connector") or proj.default_connector or "")
         return token_allows_query(payload, connector, name)
     # Options API (Combobox): scoped to the same query it reads from.
     if path.startswith(_OPTIONS_API_PREFIX):
         name = path[len(_OPTIONS_API_PREFIX):]
-        connector = str(request.query_params.get("_connector") or proj.default_connector)
+        connector = str(request.query_params.get("_connector") or proj.default_connector or "")
         return token_allows_query(payload, connector, name)
     # Ask API: resolve the opaque id to its underlying query, then scope-check.
     if path.startswith(_ASK_API_PREFIX):
@@ -319,7 +319,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         proj: Project = request.app.state.project
 
         # Get connector name from query params (sent by client)
-        connector_name = str(request.query_params.get("_connector") or proj.default_connector)
+        connector_name = str(request.query_params.get("_connector") or proj.default_connector or "")
 
         # Get query parameters from URL - these are the filter values from dropdowns
         # Convert QueryParams to dict, handling multiple values per key
@@ -438,7 +438,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         from urllib.parse import unquote
 
         proj: Project = request.app.state.project
-        connector_name = str(request.query_params.get("_connector") or proj.default_connector)
+        connector_name = str(request.query_params.get("_connector") or proj.default_connector or "")
         column = str(request.query_params.get("_column", ""))
         search = unquote(str(request.query_params.get("_search", "")))
         try:
@@ -524,7 +524,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         proj: Project = websocket.app.state.project
 
-        connector_name = str(websocket.query_params.get("_connector") or proj.default_connector)
+        connector_name = str(websocket.query_params.get("_connector") or proj.default_connector or "")
 
         # Auth first — reject before accept() (fails the handshake, no frames).
         # A valid embed token scoped to this query also authorizes the socket

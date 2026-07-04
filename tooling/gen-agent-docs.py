@@ -353,7 +353,7 @@ render time, so a page ships instantly and fetches its data after.
 ### A page is a query plus components
 
 ````markdown
-```sql sales connector=main
+```sql sales
 SELECT month, region, SUM(amount) AS amount
 FROM orders GROUP BY month, region ORDER BY month
 ```

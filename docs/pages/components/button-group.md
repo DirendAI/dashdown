@@ -24,7 +24,7 @@ WHERE '${tier}' = '' OR tier = '${tier}'
 ORDER BY price DESC
 ```
 
-```sql devices_by_tier connector=main
+```sql devices_by_tier
 SELECT device, tier, price
 FROM device_specs
 WHERE '${tier}' = '' OR tier = '${tier}'

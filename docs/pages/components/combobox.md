@@ -27,14 +27,14 @@ WHERE '${country}' = '' OR country = '${country}'
 ORDER BY downloads DESC
 ```
 
-```sql country_rows connector=main
+```sql country_rows
 SELECT country, downloads
 FROM by_country
 WHERE '${country}' = '' OR country = '${country}'
 ORDER BY downloads DESC
 ```
 
-```sql countries connector=main
+```sql countries
 SELECT country FROM by_country
 ```
 
@@ -64,7 +64,7 @@ WHERE '${countries}' = '' OR country IN (${countries})
 ORDER BY downloads DESC
 ```
 
-```sql country_multi connector=main
+```sql country_multi
 SELECT country, downloads
 FROM by_country
 WHERE '${countries}' = '' OR country IN (${countries})

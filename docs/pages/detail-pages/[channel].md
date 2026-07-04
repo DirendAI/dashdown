@@ -4,13 +4,12 @@ title: Channel detail
 # `getStaticPaths` pattern): each `channel` value becomes `/detail-pages/<channel>`.
 # Without this block the dynamic page is skipped by the build (live server only).
 static_paths:
-  connector: main
   query: SELECT DISTINCT channel FROM downloads ORDER BY channel
 ---
 
 # Channel detail
 
-```sql channel_summary connector=main
+```sql channel_summary
 SELECT channel,
        SUM(downloads) AS downloads,
        COUNT(DISTINCT month) AS months
@@ -19,7 +18,7 @@ WHERE channel = '${channel}'
 GROUP BY channel
 ```
 
-```sql channel_months connector=main
+```sql channel_months
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'

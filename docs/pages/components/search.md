@@ -19,7 +19,7 @@ GROUP BY channel
 ORDER BY downloads DESC
 ```
 
-```sql channel_like connector=main
+```sql channel_like
 SELECT channel, SUM(downloads) AS downloads
 FROM downloads
 WHERE '${q}' = '' OR channel ILIKE '%' || '${q}' || '%'

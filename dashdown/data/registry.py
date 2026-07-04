@@ -26,8 +26,8 @@ def load_connectors(
     (recorded on the instance as ``is_default``; the key never reaches the
     connector's config). Which source actually answers a query with no
     ``connector=`` is decided by :func:`default_connector_name` — the flag,
-    else a sole source, else the conventional name ``main``. More than one
-    flagged source is a contradiction and fails at load.
+    else a sole source. More than one flagged source is a contradiction and
+    fails at load.
     """
     if not sources_path.exists():
         return {}
@@ -55,17 +55,27 @@ def load_connectors(
     return connectors
 
 
-def default_connector_name(connectors: dict[str, Connector]) -> str:
+def default_connector_name(connectors: dict[str, Connector]) -> str | None:
     """The source name a query with no explicit ``connector=`` resolves to.
 
-    Precedence: the source flagged ``default: true`` in sources.yaml → the
-    sole source, when exactly one is configured → the conventional name
-    ``main`` (which may or may not exist; a miss surfaces downstream as the
-    usual unknown-connector error).
+    The source flagged ``default: true`` in sources.yaml, else the sole source
+    when exactly one is configured. Source *names* carry no special meaning.
+    ``None`` when there is no unambiguous default — with several unflagged
+    sources a query must say ``connector=`` (resolution sites raise a
+    mark-one-``default: true`` error).
     """
     for name, conn in connectors.items():
         if getattr(conn, "is_default", False):
             return name
     if len(connectors) == 1:
         return next(iter(connectors))
-    return "main"
+    return None
+
+
+def no_default_error(context: str) -> ValueError:
+    """The shared no-unambiguous-default error, phrased for its call site."""
+    return ValueError(
+        f"{context} has no connector= and the project has no default source — "
+        "mark one source `default: true` in sources.yaml or name a connector "
+        "explicitly"
+    )

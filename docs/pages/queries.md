@@ -63,7 +63,7 @@ block whose info string names the query — the first word after the language is
 the **name**, the rest are options:
 
 ````markdown
-```sql downloads_by_month connector=main ttl=300
+```sql downloads_by_month ttl=300
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 ```
@@ -83,7 +83,7 @@ the ones on this page. Add the bare `show` option to a query definition to
 The older `:::query` container form still works:
 
 ```markdown
-:::query name=downloads_by_month connector=main
+:::query name=downloads_by_month
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 :::

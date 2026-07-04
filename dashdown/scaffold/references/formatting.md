@@ -60,7 +60,7 @@ These tune the chosen `format`. Set only the ones you need:
 ### Example
 
 ````markdown
-```sql fmt_demo connector=main
+```sql fmt_demo
 SELECT SUM(downloads) AS downloads, SUM(downloads) * 0.12 AS revenue
 FROM downloads
 ```

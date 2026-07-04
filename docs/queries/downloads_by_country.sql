@@ -1,5 +1,4 @@
 ---
-connector: main
 description: Total downloads per country (names match the world GeoJSON)
 ---
 SELECT country, downloads

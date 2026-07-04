@@ -21,7 +21,7 @@ class RenderContext:
         query_connectors: dict[str, str] | None = None,
         semantic_models: dict[str, Any] | None = None,
         filter_debounce: int = 300,
-        default_connector: str = "main",
+        default_connector: str = "",
     ) -> None:
         self.queries = queries
         self.params = params or {}

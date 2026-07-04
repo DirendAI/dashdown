@@ -448,7 +448,7 @@ to SQL as `${id}`:
 
 ````markdown
 <!-- pages/customers/[id].md  →  /customers/<id> -->
-```sql customer connector=main
+```sql customer
 SELECT customer_id, name, plan, monthly_spend
 FROM customers
 WHERE customer_id = ${id}
@@ -837,12 +837,12 @@ params-are-data guarantee.
 
 Connectors are declared in `sources.yaml` and loaded **lazily** the first time a
 query asks for that type. Each backend's heavy dependencies are an optional `pip`
-extra, so you only install what you use. A query's `connector=` (default `main`)
-chooses which one runs it.
+extra, so you only install what you use. A query's `connector=` chooses which one
+runs it; omitted, the [default source](#the-default-source) answers.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: csv
   directory: data
 
@@ -856,13 +856,11 @@ warehouse:
 
 ## The default source
 
-A query with no `connector=` runs on the project's **default source**, resolved
-in this order:
+A query with no `connector=` runs on the project's **default source**:
 
 1. the source marked `default: true` in `sources.yaml`;
 2. otherwise, if exactly **one** source is configured, that one — a
-   single-source project never needs `connector=` anywhere;
-3. otherwise, the source named `main` (the naming convention).
+   single-source project never needs `connector=` anywhere.
 
 ```yaml
 # sources.yaml
@@ -877,9 +875,10 @@ archive:
   path: data/archive.duckdb
 ```
 
-Only one source may set `default: true` (two fail at startup). `main` is just a
-name — a source called `main` can coexist with a different flagged default; the
-flag wins.
+Source **names carry no meaning** — call them whatever reads well. Only one
+source may set `default: true` (two fail at startup), and with several sources
+and no flag there is *no* default: a query that omits `connector=` fails with a
+message asking you to mark one.
 
 ## The built-in connectors
 
@@ -922,7 +921,7 @@ in the directory becomes a queryable view named after the file (`sales.csv` →
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: csv
   directory: data        # folder of .csv files, relative to the project
 ```
@@ -957,7 +956,7 @@ and `.jsonl` files are all picked up.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: json
   directory: data        # folder of .json/.ndjson/.jsonl files, relative to the project
 ```
@@ -992,7 +991,7 @@ or type inference.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: parquet
   directory: data        # folder of .parquet/.pq files, relative to the project
 ```
@@ -1086,7 +1085,7 @@ Parquet, JSON, and remote files via its extensions.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: duckdb
   path: data/warehouse.duckdb    # omit for an in-memory database
 ```
@@ -1107,7 +1106,7 @@ DuckDB reads JSON (and Parquet) straight from a path or URL — no load step. Us
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: duckdb          # no `path:` → in-memory; files are read in the query
 ```
 
@@ -1706,7 +1705,7 @@ block whose info string names the query — the first word after the language is
 the **name**, the rest are options:
 
 ````markdown
-```sql downloads_by_month connector=main ttl=300
+```sql downloads_by_month ttl=300
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 ```
@@ -1726,7 +1725,7 @@ the ones on this page. Add the bare `show` option to a query definition to
 The older `:::query` container form still works:
 
 ```markdown
-:::query name=downloads_by_month connector=main
+:::query name=downloads_by_month
 SELECT month, SUM(downloads) AS downloads
 FROM downloads GROUP BY month ORDER BY month
 :::
@@ -1814,11 +1813,11 @@ path is its name (`queries/ml/churn.py` → `ml.churn`), just like `.sql`/`.dax`
 # queries/downloads_forecast.py
 from dashdown import query
 
-@query(connector="main", cache_ttl=300)
+@query(cache_ttl=300)
 def downloads_forecast(params, connect):
     # connect(name, sql, params=…) runs SQL on ANY project connector and returns
     # a result with .to_pandas() / .to_arrow().
-    df = connect("main", "SELECT month, SUM(downloads) AS downloads "
+    df = connect("demo", "SELECT month, SUM(downloads) AS downloads "
                          "FROM downloads GROUP BY month ORDER BY month").to_pandas()
     # …a forecast is trivial in pandas, awkward in SQL…
     last = df["downloads"].tail(3).mean()
@@ -1856,9 +1855,9 @@ A single SQL query can't span two connectors; a Python query can — read from e
 and join in pandas:
 
 ```python
-@query(connector="main")
+@query()
 def revenue_vs_target(params, connect):
-    revenue = connect("main",    "SELECT month, SUM(amount) AS revenue "
+    revenue = connect("sales",   "SELECT month, SUM(amount) AS revenue "
                                  "FROM sales GROUP BY month").to_pandas()
     targets = connect("targets", "SELECT month, SUM(target) AS target "
                                  "FROM targets GROUP BY month").to_pandas()
@@ -2159,7 +2158,7 @@ against:
 ```yaml
 # semantic/sales.yml
 sales:
-  connector: main          # one of your sources.yaml connectors
+  connector: warehouse     # one of your sources.yaml connectors (omit → default source)
   table: orders
   description: Sales orders
 
@@ -2196,7 +2195,7 @@ that lives in a **different table** — BSL/Ibis plans the join and pushes it do
 ```yaml
 # semantic/sales.yml
 sales:
-  connector: main
+  connector: warehouse
   table: orders
   measures: { revenue: { expr: _.amount.sum() } }
   dimensions: { region: _.region }
@@ -2208,7 +2207,7 @@ sales:
       right_on: region
 
 geo:
-  connector: main
+  connector: warehouse
   table: regions
   dimensions: { region: _.region, manager: _.manager }
   measures: { n: _.count() }
@@ -2247,7 +2246,7 @@ down via that backend.
 
 Two ways, mix freely per model:
 
-- **Bridge a connector (default).** `connector: main` reuses one of your
+- **Bridge a connector (default).** `connector:` reuses one of your
   `sources.yaml` connectors — a single connection config, with pushdown. Bridged
   connector types:
   - **`csv` / `duckdb`** — share the live in-process DuckDB connection (zero-copy),
@@ -2441,7 +2440,7 @@ endpoint re-fetches it each tick. DuckDB (which backs the `csv`/`duckdb`
 connectors) can read a remote JSON API directly, so no new connector is needed:
 
 ````markdown
-```sql btc_price connector=main live interval=5
+```sql btc_price live interval=5
 SELECT CAST(data.amount AS DOUBLE) AS usd
 FROM read_json_auto('https://api.coinbase.com/v2/prices/BTC-USD/spot')
 ```
@@ -4801,7 +4800,7 @@ These tune the chosen `format`. Set only the ones you need:
 ### Example
 
 ````markdown
-```sql fmt_demo connector=main
+```sql fmt_demo
 SELECT SUM(downloads) AS downloads, SUM(downloads) * 0.12 AS revenue
 FROM downloads
 ```
@@ -5098,7 +5097,7 @@ captured value flows into queries as `${param}`, through the same context-aware,
 
 ````markdown
 <!-- pages/channels/[channel].md  →  /channels/<channel> -->
-```sql channel_months connector=main
+```sql channel_months
 SELECT month, downloads
 FROM downloads
 WHERE channel = '${channel}'
@@ -5128,7 +5127,7 @@ below) that pre-renders one snapshot per record; a plain `dashdown build` skips
 The framework merges route params into every data/WebSocket request (at lowest
 precedence — an explicit filter still wins), which is what makes each record's
 request URL **unique**. Without that, two slugs of one template would produce
-byte-identical, cacheable data URLs (`/api/data/q?_connector=main`) and the
+byte-identical, cacheable data URLs (`/api/data/q?_connector=demo`) and the
 browser would serve the first record's response for the second (and the
 server-side result cache would collide too). A built-in `<Table>`/chart gets this
 for free; a [custom data-driven component](/extending#data-driven-components)
@@ -5181,7 +5180,6 @@ its own data snapshot.
 ---
 title: Channel detail
 static_paths:
-  connector: main
   query: SELECT DISTINCT channel FROM downloads ORDER BY channel
 ---
 ```
@@ -5593,7 +5591,7 @@ can't know which slug values exist. Opt in with a `static_paths` frontmatter blo
 ---
 title: Channel detail
 static_paths:
-  connector: main        # optional, default "main"
+  connector: demo        # optional — defaults to the project's default source
   query: SELECT DISTINCT channel FROM downloads ORDER BY channel
 ---
 ```
@@ -6073,7 +6071,7 @@ quickest way to **test that a connector connects** and **inspect real data** whi
 authoring; an agent uses it the same way.
 
 ```bash
-dashdown query "SELECT * FROM sales LIMIT 5"                       # connector: main
+dashdown query "SELECT * FROM sales LIMIT 5"                       # runs on the default source
 dashdown query "SELECT count(*) FROM orders" -c warehouse -f json
 dashdown query "SELECT region, sum(amount) FROM sales GROUP BY region" -p .
 ```
@@ -6081,7 +6079,7 @@ dashdown query "SELECT region, sum(amount) FROM sales GROUP BY region" -p .
 | Option | Default | Notes |
 | --- | --- | --- |
 | `-p, --project` | `.` | Project directory. |
-| `-c, --connector` | `main` | Connector from `sources.yaml`. An unknown name lists the configured ones. |
+| `-c, --connector` | the default source | Connector from `sources.yaml`. An unknown name lists the configured ones. |
 | `-f, --format` | `table` | `table`, `json` (`{columns, rows}`), or `csv`. |
 | `--max-rows` | `50` | Cap rows printed (`0` = all). Total count goes to stderr. |
 | `--tables` | off | List the connector's tables/views (`table`/`schema`/`type`) and exit — instead of a SQL argument. |
@@ -6097,8 +6095,8 @@ Instead of hand-writing a `SELECT * … LIMIT 0` (and remembering each warehouse
 `information_schema` dialect), ask the connector directly:
 
 ```bash
-dashdown query --tables -c main                  # what tables/views exist?
-dashdown query --schema sales -c main -f json    # what columns does `sales` have?
+dashdown query --tables                          # what tables/views exist?
+dashdown query --schema sales -f json            # what columns does `sales` have?
 ```
 
 Each connector knows how to answer in its own dialect, so the same two commands

@@ -45,7 +45,7 @@ to SQL as `${id}`:
 
 ````markdown
 <!-- pages/customers/[id].md  →  /customers/<id> -->
-```sql customer connector=main
+```sql customer
 SELECT customer_id, name, plan, monthly_spend
 FROM customers
 WHERE customer_id = ${id}

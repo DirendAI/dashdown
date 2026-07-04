@@ -9,12 +9,12 @@ icon: "\U0001F50C"
 
 Connectors are declared in `sources.yaml` and loaded **lazily** the first time a
 query asks for that type. Each backend's heavy dependencies are an optional `pip`
-extra, so you only install what you use. A query's `connector=` (default `main`)
-chooses which one runs it.
+extra, so you only install what you use. A query's `connector=` chooses which one
+runs it; omitted, the [default source](#the-default-source) answers.
 
 ```yaml
 # sources.yaml
-main:
+sales_data:
   type: csv
   directory: data
 
@@ -28,13 +28,11 @@ warehouse:
 
 ## The default source
 
-A query with no `connector=` runs on the project's **default source**, resolved
-in this order:
+A query with no `connector=` runs on the project's **default source**:
 
 1. the source marked `default: true` in `sources.yaml`;
 2. otherwise, if exactly **one** source is configured, that one — a
-   single-source project never needs `connector=` anywhere;
-3. otherwise, the source named `main` (the naming convention).
+   single-source project never needs `connector=` anywhere.
 
 ```yaml
 # sources.yaml
@@ -49,9 +47,10 @@ archive:
   path: data/archive.duckdb
 ```
 
-Only one source may set `default: true` (two fail at startup). `main` is just a
-name — a source called `main` can coexist with a different flagged default; the
-flag wins.
+Source **names carry no meaning** — call them whatever reads well. Only one
+source may set `default: true` (two fail at startup), and with several sources
+and no flag there is *no* default: a query that omits `connector=` fails with a
+message asking you to mark one.
 
 ## The built-in connectors
 

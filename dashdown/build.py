@@ -233,7 +233,7 @@ def _enumerate_static_paths(
             (app_url, "static_paths.query must be a non-empty SQL string")
         )
         return []
-    connector_name = str(spec.get("connector") or project.default_connector)
+    connector_name = str(spec.get("connector") or project.default_connector or "")
     connector = project.connectors.get(connector_name)
     if connector is None:
         result.failed_pages.append(

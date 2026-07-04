@@ -27,7 +27,7 @@ one-shot snapshot, so these examples still render (just frozen) with no server.
 
 A counter that re-reads its query every 2 seconds.
 
-```sql downloads_now connector=main live interval=2
+```sql downloads_now live interval=2
 SELECT SUM(downloads) + CAST(random() * 200 AS INT) AS downloads_now
 FROM downloads
 ```
@@ -38,7 +38,7 @@ FROM downloads
 
 Downloads by channel, re-sampled every 2 seconds.
 
-```sql channel_live connector=main live interval=2
+```sql channel_live live interval=2
 SELECT channel, CAST(SUM(downloads) * (0.8 + random() * 0.4) AS INT) AS downloads
 FROM downloads
 GROUP BY channel
@@ -51,7 +51,7 @@ ORDER BY channel
 
 A "recent activity" feed — five daily rows re-shuffled every 3 seconds.
 
-```sql recent_activity connector=main live interval=3
+```sql recent_activity live interval=3
 SELECT date, weekday, visits, signups
 FROM daily
 ORDER BY random()
@@ -68,7 +68,7 @@ endpoint re-fetches it each tick. DuckDB (which backs the `csv`/`duckdb`
 connectors) can read a remote JSON API directly, so no new connector is needed:
 
 ````markdown
-```sql btc_price connector=main live interval=5
+```sql btc_price live interval=5
 SELECT CAST(data.amount AS DOUBLE) AS usd
 FROM read_json_auto('https://api.coinbase.com/v2/prices/BTC-USD/spot')
 ```

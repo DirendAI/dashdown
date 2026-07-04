@@ -18,7 +18,7 @@ lists) plus `right_axis=` (the subset plotted against the right axis).
             title="Visits (bars) vs signups (line)" />
 ```
 
-```sql traffic_combo connector=main
+```sql traffic_combo
 SELECT date, visits, signups
 FROM daily
 ORDER BY date
