@@ -34,7 +34,7 @@ hint.
 This module also owns the ask-prompt registry. ``<Ask />`` placeholders carry
 only an opaque id; the public ``/_dashdown/api/ask/{id}`` endpoint resolves it
 here, so it can never be fed an arbitrary prompt. Ids are a *deterministic*
-hash of (connector, query, prompt) — unlike a per-render uuid, the same
+hash of ((connector, query) pairs, prompt) — unlike a per-render uuid, the same
 authored block keeps the same id across page renders and server restarts,
 which is what lets the answer cache actually absorb repeat page loads.
 """
@@ -46,7 +46,7 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -446,12 +446,17 @@ def resolve_model_name(config: LLMConfig) -> str:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class AskDef:
-    """One authored ``<Ask />`` block: a prompt pinned to a query, plus the
-    block's own knobs (component attributes, not global config)."""
+    """One authored ``<Ask />`` block: a prompt pinned to one or more queries,
+    plus the block's own knobs (component attributes, not global config).
+
+    ``queries`` is the ordered ``(query_name, connector)`` pairs the ask reads
+    (usually one; several for ``data={a,b}`` cross-dataset commentary). Every
+    consumer that runs, caches, or **authorizes** data access must iterate all
+    pairs — the ``query_name``/``connector`` properties expose only the first
+    (primary) pair, for display and single-query call sites."""
 
     id: str
-    query_name: str
-    connector: str
+    queries: tuple[tuple[str, str], ...]
     prompt: str
     max_rows: int = DEFAULT_MAX_ROWS
     cache_ttl: int = DEFAULT_ANSWER_TTL
@@ -465,6 +470,16 @@ class AskDef:
     page_title: str = ""
     page_description: str = ""
 
+    @property
+    def query_name(self) -> str:
+        """The primary (first) referenced query name."""
+        return self.queries[0][0]
+
+    @property
+    def connector(self) -> str:
+        """The primary (first) referenced query's connector."""
+        return self.queries[0][1]
+
 
 # Global, like _query_def_cache: the ask API is a separate request from the
 # page render and must look the prompt back up.
@@ -472,8 +487,7 @@ _ask_def_cache: dict[str, AskDef] = {}
 
 
 def ask_id(
-    query_name: str,
-    connector: str,
+    queries: Sequence[tuple[str, str]],
     prompt: str,
     max_rows: int = DEFAULT_MAX_ROWS,
     page_title: str = "",
@@ -481,22 +495,25 @@ def ask_id(
 ) -> str:
     """Deterministic id for an ask block — stable across renders/restarts.
 
-    ``max_rows`` is part of the hash because it changes the data payload the
-    model sees, so editing it must bust the answer cache; the page context is
-    in because it changes the prompt (changed context ⇒ fresh answer);
-    ``cache_ttl`` only affects expiry and stays out.
+    ``queries`` is the ordered ``(query_name, connector)`` pairs; every pair
+    joins the hash (each changes the data payload). The single-pair layout is
+    byte-identical to the pre-multi-query hash, so existing single-query asks
+    keep their ids (and their caches / baked snapshots). ``max_rows`` is part
+    of the hash because it changes the data payload the model sees, so editing
+    it must bust the answer cache; the page context is in because it changes
+    the prompt (changed context ⇒ fresh answer); ``cache_ttl`` only affects
+    expiry and stays out.
     """
-    digest = hashlib.sha256(
-        "\x00".join(
-            (connector, query_name, prompt, str(max_rows), page_title, page_description)
-        ).encode("utf-8")
-    ).hexdigest()
+    parts: list[str] = []
+    for query_name, connector in queries:
+        parts += [connector, query_name]
+    parts += [prompt, str(max_rows), page_title, page_description]
+    digest = hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
     return digest[:16]
 
 
 def register_ask_def(
-    query_name: str,
-    connector: str,
+    queries: Sequence[tuple[str, str]],
     prompt: str,
     max_rows: int = DEFAULT_MAX_ROWS,
     cache_ttl: int = DEFAULT_ANSWER_TTL,
@@ -504,10 +521,10 @@ def register_ask_def(
     page_description: str = "",
     allow_refresh: bool = True,
 ) -> AskDef:
+    pairs = tuple((str(n), str(c)) for n, c in queries)
     d = AskDef(
-        id=ask_id(query_name, connector, prompt, max_rows, page_title, page_description),
-        query_name=query_name,
-        connector=connector,
+        id=ask_id(pairs, prompt, max_rows, page_title, page_description),
+        queries=pairs,
         prompt=prompt,
         max_rows=max_rows,
         cache_ttl=cache_ttl,
@@ -574,8 +591,9 @@ def cache_answer(
 # --------------------------------------------------------------------------- #
 SYSTEM_PROMPT = (
     "You are a data analyst writing short commentary for an analytics dashboard. "
-    "You are given the result of a database query (column names, inferred types, "
-    "and rows — possibly truncated) plus a question from the dashboard author. "
+    "You are given the result of one or more database queries, each labeled by "
+    "name (column names, inferred types, and rows — possibly truncated), plus a "
+    "question from the dashboard author. "
     "You may also be given the page's title and description, the active filters "
     "that produced the rows, and today's date — use them to ground your answer "
     "(e.g. name the filtered region, interpret 'recent' relative to today). "
@@ -624,15 +642,18 @@ def format_result_for_llm(result: QueryResult, max_rows: int) -> str:
 
 
 def build_ask_prompt(
-    ask: AskDef, result: QueryResult, params: dict[str, str] | None = None
+    ask: AskDef, results: Sequence[QueryResult], params: dict[str, str] | None = None
 ) -> str:
     """The user message for one ask: question + grounding context + capped data.
 
-    The context block (page title/description, active filters, today's date)
-    is what lets the model say "in the East region…" after a viewer filters,
-    instead of commenting blind. ``params`` are the *substituted* values the
-    query actually uses — the same set that keys the answer cache — so the
-    prompt and the cache always agree.
+    ``results`` is one QueryResult per ``ask.queries`` pair, in order — a
+    multi-query ask (``data={a,b}``) concatenates one labeled data block per
+    query, so the model can reason across datasets by name. The context block
+    (page title/description, active filters, today's date) is what lets the
+    model say "in the East region…" after a viewer filters, instead of
+    commenting blind. ``params`` are the *substituted* values the queries
+    actually use — the same set that keys the answer cache — so the prompt and
+    the cache always agree.
     """
     lines = [f"Question: {ask.prompt}"]
     page = " — ".join(p for p in (ask.page_title, ask.page_description) if p)
@@ -643,31 +664,32 @@ def build_ask_prompt(
     if active:
         lines.append("Active filters (already applied to the rows below):")
         lines.extend(f"- {k} = {v}" for k, v in sorted(active.items()))
-    payload = format_result_for_llm(result, ask.max_rows)
-    lines.append(f"\nResult of query '{ask.query_name}':\n{payload}")
+    for (query_name, _connector), result in zip(ask.queries, results):
+        payload = format_result_for_llm(result, ask.max_rows)
+        lines.append(f"\nResult of query '{query_name}':\n{payload}")
     return "\n".join(lines)
 
 
 def generate_answer(
     ask: AskDef,
-    result: QueryResult,
+    results: Sequence[QueryResult],
     adapter: LLMAdapter,
     params: dict[str, str] | None = None,
 ) -> tuple[str, str]:
-    """Run one ask: build the prompt (capped to the ask's ``max_rows``), call
-    the LLM, render the Markdown answer to HTML (raw HTML disabled, so model
-    output can't inject markup into the page).
+    """Run one ask: build the prompt (each result capped to the ask's
+    ``max_rows``), call the LLM, render the Markdown answer to HTML (raw HTML
+    disabled, so model output can't inject markup into the page).
 
     Returns ``(html, raw answer text)`` — the raw text rides along in the
     answer cache / baked snapshot so the client can replay the answer as a
     typewriter (see the answer-cache comment above)."""
-    answer = adapter.complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))
+    answer = adapter.complete(SYSTEM_PROMPT, build_ask_prompt(ask, results, params))
     return render_markdown_text(answer), answer
 
 
 def stream_answer(
     ask: AskDef,
-    result: QueryResult,
+    results: Sequence[QueryResult],
     adapter: LLMAdapter,
     params: dict[str, str] | None = None,
 ) -> Iterator[str]:
@@ -677,4 +699,4 @@ def stream_answer(
     — the same sanitized HTML :func:`generate_answer` produces — so
     streaming never widens what reaches the page.
     """
-    yield from adapter.stream_complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))
+    yield from adapter.stream_complete(SYSTEM_PROMPT, build_ask_prompt(ask, results, params))

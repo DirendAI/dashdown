@@ -770,8 +770,11 @@ def _export_ask(
     ask_path = out_dir / "_dashdown" / "data" / "_ask" / f"{ask.id}.json"
     ask_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # A multi-query ask reads several queries; report them all on failure.
+    display_queries = ", ".join(name for name, _ in ask.queries)
+
     def _write_error(msg: str) -> None:
-        result.failed_asks.append((ask.id, ask.query_name, msg))
+        result.failed_asks.append((ask.id, display_queries, msg))
         ask_path.write_text(
             json.dumps({"ask_id": ask.id, "html": "", "error": msg}),
             encoding="utf-8",
@@ -791,46 +794,54 @@ def _export_ask(
         )
         return
 
-    # Resolve the data source like the live endpoint: a Python / semantic query
+    # Resolve each data source like the live endpoint: a Python / semantic query
     # (synthetic PythonQuerySpec) runs its callable; the SQL path is the fallback.
-    # So <Ask metric={model.metric} /> and queries/*.py sources bake too.
-    py_spec = get_python_query_def(ask.query_name, ask.connector)
-    if py_spec is not None:
-        try:
-            qr = run_python_query(py_spec, dict(params), project.connectors)
-            adapter = project.get_llm_adapter()
-            # Same prompt context the live endpoint sends: all params for a
-            # Python body (no SQL text to narrow against).
-            html, text = generate_answer(ask, qr, adapter, dict(params))
-        except Exception as e:  # noqa: BLE001
-            log.warning("Ask '%s' (%s) failed during build: %s", ask.id, ask.query_name, e)
-            _write_error(f"{type(e).__name__}: {e}")
-            return
-    else:
-        query_def = get_query_def(ask.query_name, ask.connector)
-        if query_def is None:
-            _write_error(
-                f"Query '{ask.query_name}' not registered for connector '{ask.connector}'"
-            )
-            return
-        connector = project.connectors.get(ask.connector)
-        if connector is None:
-            _write_error(f"Connector '{ask.connector}' not found")
-            return
+    # So <Ask metric={model.metric} /> and queries/*.py sources bake too. A
+    # multi-query ask executes every referenced query, and the prompt params
+    # are the union of each query's contribution (all params for a Python body,
+    # the SQL-substituted subset otherwise) — same as the live endpoint.
+    query_results = []
+    prompt_params: dict[str, str] = {}
+    for query_name, connector_name in ask.queries:
+        py_spec = get_python_query_def(query_name, connector_name)
+        if py_spec is not None:
+            try:
+                qr = run_python_query(py_spec, dict(params), project.connectors)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Ask '%s' (%s) failed during build: %s", ask.id, query_name, e)
+                _write_error(f"{type(e).__name__}: {e}")
+                return
+            prompt_params.update(params)
+        else:
+            query_def = get_query_def(query_name, connector_name)
+            if query_def is None:
+                _write_error(
+                    f"Query '{query_name}' not registered for connector '{connector_name}'"
+                )
+                return
+            connector = project.connectors.get(connector_name)
+            if connector is None:
+                _write_error(f"Connector '{connector_name}' not found")
+                return
 
-        sql, default_params, _ttl = query_def
-        final_sql = _substitute_params(sql, {**default_params, **params})
-        try:
-            qr = connector.query(final_sql)
-            adapter = project.get_llm_adapter()
-            # Narrow to the params the SQL substitutes, like the live endpoint.
-            html, text = generate_answer(
-                ask, qr, adapter, relevant_params(sql, {**default_params, **params})
-            )
-        except Exception as e:  # noqa: BLE001
-            log.warning("Ask '%s' (%s) failed during build: %s", ask.id, ask.query_name, e)
-            _write_error(f"{type(e).__name__}: {e}")
-            return
+            sql, default_params, _ttl = query_def
+            final_sql = _substitute_params(sql, {**default_params, **params})
+            try:
+                qr = connector.query(final_sql)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Ask '%s' (%s) failed during build: %s", ask.id, query_name, e)
+                _write_error(f"{type(e).__name__}: {e}")
+                return
+            prompt_params.update(relevant_params(sql, {**default_params, **params}))
+        query_results.append(qr)
+
+    try:
+        adapter = project.get_llm_adapter()
+        html, text = generate_answer(ask, query_results, adapter, prompt_params)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Ask '%s' (%s) failed during build: %s", ask.id, display_queries, e)
+        _write_error(f"{type(e).__name__}: {e}")
+        return
 
     ask_path.write_text(
         json.dumps(

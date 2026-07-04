@@ -25,6 +25,14 @@ class TestDataRef:
         with pytest.raises(AttributeError):
             ref.name = "query2"
 
+    def test_names_single(self):
+        """A plain ref exposes its one name via .names."""
+        assert DataRef("query1").names == ("query1",)
+
+    def test_names_comma_list(self):
+        """A comma-list ref (multi-query <Ask />) splits into all names."""
+        assert DataRef("revenue,churn").names == ("revenue", "churn")
+
 
 # Helper to add leading space as expected by parse_attrs
 # The actual implementation prepends a space: parse_attrs(" " + after)
@@ -65,6 +73,17 @@ class TestParseAttrs:
         """Data reference with spaces around name."""
         result = parse_attrs(_attrs("data={ my_query }"))
         assert result == {"data": DataRef("my_query")}
+
+    def test_data_ref_comma_list(self):
+        """A comma list references several queries (multi-query <Ask />)."""
+        result = parse_attrs(_attrs("data={revenue,churn}"))
+        assert result == {"data": DataRef("revenue,churn")}
+        assert result["data"].names == ("revenue", "churn")
+
+    def test_data_ref_comma_list_normalizes_spaces(self):
+        """Whitespace around list commas is normalized away."""
+        result = parse_attrs(_attrs("data={ revenue , finance.churn }"))
+        assert result == {"data": DataRef("revenue,finance.churn")}
 
     def test_bare_flag(self):
         """Bare attribute flag (no value) sets value to True."""

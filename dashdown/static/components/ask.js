@@ -52,7 +52,6 @@ function relevantFilters(filters) {
 export function initAsk(el) {
   const config = JSON.parse(el.dataset.config);
   const askId = config.ask_id;
-  const queryName = config.query_name;
   const body = el.querySelector(".dashdown-ask-body");
   const refreshBtn = el.querySelector(".dashdown-ask-refresh");
   const modelEl = el.querySelector(".dashdown-ask-model");

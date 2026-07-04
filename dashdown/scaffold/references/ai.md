@@ -53,7 +53,7 @@ it, so the first words appear sub-second instead of after the full generation.
 
 | Attribute   | Purpose                                                          |
 | ----------- | --------------------------------------------------------------- |
-| `data`      | **Required.** The query whose result the model sees.            |
+| `data`      | **Required.** The query whose result the model sees. A comma list (`data={a,b}`) grounds one answer in several results — see [Cross-dataset commentary](#cross-dataset-commentary). |
 | `ask`       | **Required.** The instruction / prompt.                         |
 | `max_rows`  | Cap on rows sent to the model (default in `llm.py`).            |
 | `cache_ttl` | Seconds to cache the answer.                                    |
@@ -115,6 +115,25 @@ length like `font_size="1.25rem"` works too):
 ```
 
 <Ask data={monthly_downloads} font_size="lg" ask="What is the headline takeaway from this data?" />
+
+## Cross-dataset commentary
+
+`data` accepts a **comma list** of queries — the model gets one labeled result
+block per query, so a single ask can reason *across* datasets ("is churn driving
+the revenue dip?") instead of commenting on each in isolation:
+
+```markdown
+<Ask data={monthly_downloads,downloads_by_country}
+     ask="Do the download trend and the country split tell one story?" />
+```
+
+<Ask data={monthly_downloads,downloads_by_country} ask="Do the download trend and the country split tell one story? Answer in three sentences." />
+
+Everything composes as you'd expect: each name resolves its own connector (the
+list can span sources), hovering the card highlights **all** referenced
+charts/tables, the answer cache busts when a filter *any* of the queries uses
+changes (and only then), static builds bake the answer after executing every
+referenced query, and an embed token must be scoped to **all** of them.
 
 ## Works on semantic-layer data too
 
@@ -201,9 +220,9 @@ straight to the finished answer.
 
 ## Caching & cost
 
-Each answer is cached by a **deterministic id** — a hash of (connector, query,
-prompt, `max_rows`, page title/description) plus the filter params the SQL
-actually substitutes — so repeat
+Each answer is cached by a **deterministic id** — a hash of ((connector, query)
+pairs, prompt, `max_rows`, page title/description) plus the filter params the
+SQL actually substitutes (unioned across queries for a multi-query ask) — so repeat
 page loads and shared filter states reuse one answer instead of billing each view.
 `cache_ttl` controls expiry; it isn't part of the id (so changing it doesn't bust
 the cache). A reader's ↻ refresh affordance forces a fresh answer past the cache —
