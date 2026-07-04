@@ -80,16 +80,7 @@ syntax-highlights the SQL. Options are the same as everywhere else:
 the ones on this page. Add the bare `show` option to a query definition to
 *also* render its SQL on the page.
 
-The older `:::query` container form still works:
-
-```markdown
-:::query name=downloads_by_month
-SELECT month, SUM(downloads) AS downloads
-FROM downloads GROUP BY month ORDER BY month
-:::
-```
-
-Either way, the SQL is collected and **never executed server-side during page
+Either way — library file or inline block — the SQL is collected and **never executed server-side during page
 render** — the page ships instantly with empty datasets, and the browser fetches
 each query's data from the data API. This keeps first paint fast and the render
 path pure.

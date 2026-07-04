@@ -48,7 +48,7 @@ FROM orders GROUP BY month, region ORDER BY month
   language is the query **name**; `connector` is a key in `sources.yaml` (omit it to use
   the project's default source). The SQL is collected, not run at render. A plain
   ` ```sql ` fence with nothing after the language is an ordinary display-only code
-  sample. (The legacy `:::query name=…` container form still works.)
+  sample.
 - A query can instead live once in `queries/<name>.sql` (or `.py` for Python) and be
   referenced by name from any page — see `.references/queries.md`.
 - `data={query_name}` wires a component to a result; `column="col"` picks one column.
