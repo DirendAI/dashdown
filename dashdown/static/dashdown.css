@@ -904,6 +904,9 @@ body {
 .dashdown-ask-body ul,
 .dashdown-ask-body ol { margin: 0 0 0.5rem; padding-left: 1.25rem; }
 .dashdown-ask-body li { margin: 0.15rem 0; }
+/* In-flight SSE text: the raw model stream shown as escaped plain text until
+   the final server-rendered HTML swaps in. Preserve the markdown line breaks. */
+.dashdown-ask-stream { white-space: pre-wrap; }
 .dashdown-ask-skeleton .skeleton {
   height: 0.875rem;
   margin-bottom: 0.5rem;

@@ -43,7 +43,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from dashdown.llm import AskDef, generate_answer_html, resolve_model_name
+from dashdown.llm import AskDef, generate_answer_html, relevant_params, resolve_model_name
 from dashdown.project import (
     Project,
     load_project,
@@ -782,7 +782,9 @@ def _export_ask(
         try:
             qr = run_python_query(py_spec, dict(params), project.connectors)
             adapter = project.get_llm_adapter()
-            html = generate_answer_html(ask, qr, adapter)
+            # Same prompt context the live endpoint sends: all params for a
+            # Python body (no SQL text to narrow against).
+            html = generate_answer_html(ask, qr, adapter, dict(params))
         except Exception as e:  # noqa: BLE001
             log.warning("Ask '%s' (%s) failed during build: %s", ask.id, ask.query_name, e)
             _write_error(f"{type(e).__name__}: {e}")
@@ -804,7 +806,10 @@ def _export_ask(
         try:
             qr = connector.query(final_sql)
             adapter = project.get_llm_adapter()
-            html = generate_answer_html(ask, qr, adapter)
+            # Narrow to the params the SQL substitutes, like the live endpoint.
+            html = generate_answer_html(
+                ask, qr, adapter, relevant_params(sql, {**default_params, **params})
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("Ask '%s' (%s) failed during build: %s", ask.id, ask.query_name, e)
             _write_error(f"{type(e).__name__}: {e}")

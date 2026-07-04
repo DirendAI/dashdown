@@ -42,7 +42,9 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from dashdown.data.base import QueryResult
@@ -163,6 +165,16 @@ class LLMAdapter(ABC):
         """Return the model's text answer for a system + user message pair."""
         ...
 
+    def stream_complete(self, system: str, prompt: str) -> Iterator[str]:
+        """Yield the answer incrementally (the SSE "typing" path).
+
+        The base implementation degrades to a single chunk via
+        :meth:`complete`, so an adapter without native streaming still works
+        behind the streaming endpoint; the built-in providers all override
+        with their SDK's native stream.
+        """
+        yield self.complete(system, prompt)
+
 
 class MistralAdapter(LLMAdapter):
     """Mistral chat completions via the official ``mistralai`` SDK
@@ -205,6 +217,24 @@ class MistralAdapter(LLMAdapter):
         if isinstance(content, list):  # SDK v2 may return content chunks
             content = "".join(getattr(chunk, "text", "") or "" for chunk in content)
         return content or ""
+
+    def stream_complete(self, system: str, prompt: str) -> Iterator[str]:
+        client = self._get_client()
+        stream = client.chat.stream(
+            model=self.config.model or self.DEFAULT_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        for event in stream:
+            if not event.data.choices:
+                continue
+            content = event.data.choices[0].delta.content
+            if isinstance(content, list):  # SDK v2 may return content chunks
+                content = "".join(getattr(c, "text", "") or "" for c in content)
+            if content:
+                yield content
 
 
 class AnthropicAdapter(LLMAdapter):
@@ -251,6 +281,16 @@ class AnthropicAdapter(LLMAdapter):
             block.text for block in response.content if block.type == "text"
         )
 
+    def stream_complete(self, system: str, prompt: str) -> Iterator[str]:
+        client = self._get_client()
+        with client.messages.stream(
+            model=self.config.model or self.DEFAULT_MODEL,
+            max_tokens=self.MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            yield from stream.text_stream
+
 
 class OpenAIAdapter(LLMAdapter):
     """OpenAI chat completions via the official ``openai`` SDK
@@ -296,6 +336,22 @@ class OpenAIAdapter(LLMAdapter):
             ],
         )
         return response.choices[0].message.content or ""
+
+    def stream_complete(self, system: str, prompt: str) -> Iterator[str]:
+        client = self._get_client()
+        stream = client.chat.completions.create(
+            model=self.config.model or self.DEFAULT_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            stream=True,
+        )
+        for chunk in stream:
+            # A usage/terminal chunk can carry an empty choices list.
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
 
 
 class OpenRouterAdapter(OpenAIAdapter):
@@ -366,6 +422,11 @@ class AskDef:
     prompt: str
     max_rows: int = DEFAULT_MAX_ROWS
     cache_ttl: int = DEFAULT_ANSWER_TTL
+    # Page frontmatter threaded into the prompt (see build_ask_prompt) so the
+    # model knows what dashboard it's commenting on. Part of the id hash:
+    # changed context ⇒ a different id ⇒ a fresh answer.
+    page_title: str = ""
+    page_description: str = ""
 
 
 # Global, like _query_def_cache: the ask API is a separate request from the
@@ -374,16 +435,24 @@ _ask_def_cache: dict[str, AskDef] = {}
 
 
 def ask_id(
-    query_name: str, connector: str, prompt: str, max_rows: int = DEFAULT_MAX_ROWS
+    query_name: str,
+    connector: str,
+    prompt: str,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    page_title: str = "",
+    page_description: str = "",
 ) -> str:
     """Deterministic id for an ask block — stable across renders/restarts.
 
     ``max_rows`` is part of the hash because it changes the data payload the
-    model sees, so editing it must bust the answer cache; ``cache_ttl`` only
-    affects expiry and stays out.
+    model sees, so editing it must bust the answer cache; the page context is
+    in because it changes the prompt (changed context ⇒ fresh answer);
+    ``cache_ttl`` only affects expiry and stays out.
     """
     digest = hashlib.sha256(
-        f"{connector}\x00{query_name}\x00{prompt}\x00{max_rows}".encode("utf-8")
+        "\x00".join(
+            (connector, query_name, prompt, str(max_rows), page_title, page_description)
+        ).encode("utf-8")
     ).hexdigest()
     return digest[:16]
 
@@ -394,14 +463,18 @@ def register_ask_def(
     prompt: str,
     max_rows: int = DEFAULT_MAX_ROWS,
     cache_ttl: int = DEFAULT_ANSWER_TTL,
+    page_title: str = "",
+    page_description: str = "",
 ) -> AskDef:
     d = AskDef(
-        id=ask_id(query_name, connector, prompt, max_rows),
+        id=ask_id(query_name, connector, prompt, max_rows, page_title, page_description),
         query_name=query_name,
         connector=connector,
         prompt=prompt,
         max_rows=max_rows,
         cache_ttl=cache_ttl,
+        page_title=page_title,
+        page_description=page_description,
     )
     _ask_def_cache[d.id] = d
     return d
@@ -454,6 +527,9 @@ SYSTEM_PROMPT = (
     "You are a data analyst writing short commentary for an analytics dashboard. "
     "You are given the result of a database query (column names, inferred types, "
     "and rows — possibly truncated) plus a question from the dashboard author. "
+    "You may also be given the page's title and description, the active filters "
+    "that produced the rows, and today's date — use them to ground your answer "
+    "(e.g. name the filtered region, interpret 'recent' relative to today). "
     "Answer concisely in Markdown: a short paragraph or a few bullet points. "
     "Base every statement strictly on the data provided; if the question cannot "
     "be answered from the data, say so. Never invent numbers."
@@ -497,16 +573,54 @@ def format_result_for_llm(result: QueryResult, max_rows: int) -> str:
     return "\n".join(lines)
 
 
+def build_ask_prompt(
+    ask: AskDef, result: QueryResult, params: dict[str, str] | None = None
+) -> str:
+    """The user message for one ask: question + grounding context + capped data.
+
+    The context block (page title/description, active filters, today's date)
+    is what lets the model say "in the East region…" after a viewer filters,
+    instead of commenting blind. ``params`` are the *substituted* values the
+    query actually uses — the same set that keys the answer cache — so the
+    prompt and the cache always agree.
+    """
+    lines = [f"Question: {ask.prompt}"]
+    page = " — ".join(p for p in (ask.page_title, ask.page_description) if p)
+    if page:
+        lines.append(f"Dashboard page: {page}")
+    lines.append(f"Today's date: {date.today().isoformat()}")
+    active = {k: v for k, v in (params or {}).items() if v != ""}
+    if active:
+        lines.append("Active filters (already applied to the rows below):")
+        lines.extend(f"- {k} = {v}" for k, v in sorted(active.items()))
+    payload = format_result_for_llm(result, ask.max_rows)
+    lines.append(f"\nResult of query '{ask.query_name}':\n{payload}")
+    return "\n".join(lines)
+
+
 def generate_answer_html(
-    ask: AskDef, result: QueryResult, adapter: LLMAdapter
+    ask: AskDef,
+    result: QueryResult,
+    adapter: LLMAdapter,
+    params: dict[str, str] | None = None,
 ) -> str:
     """Run one ask: build the prompt (capped to the ask's ``max_rows``), call
     the LLM, render the Markdown answer to HTML (raw HTML disabled, so model
     output can't inject markup into the page)."""
-    payload = format_result_for_llm(result, ask.max_rows)
-    user_prompt = (
-        f"Question: {ask.prompt}\n\n"
-        f"Result of query '{ask.query_name}':\n{payload}"
-    )
-    answer = adapter.complete(SYSTEM_PROMPT, user_prompt)
+    answer = adapter.complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))
     return render_markdown_text(answer)
+
+
+def stream_answer(
+    ask: AskDef,
+    result: QueryResult,
+    adapter: LLMAdapter,
+    params: dict[str, str] | None = None,
+) -> Iterator[str]:
+    """Yield the model's raw answer text incrementally (the SSE slow path).
+
+    The caller joins the chunks and renders them with ``render_markdown_text``
+    — the same sanitized HTML :func:`generate_answer_html` produces — so
+    streaming never widens what reaches the page.
+    """
+    yield from adapter.stream_complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))

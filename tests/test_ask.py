@@ -5,6 +5,7 @@ payload row cap, the /_dashdown/api/ask endpoint with a fake adapter
 (including answer caching), and static-build baking.
 """
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,11 +19,13 @@ from dashdown.llm import (
     AskDef,
     LLMAdapter,
     LLMConfig,
+    MistralAdapter,
     OpenAIAdapter,
     OpenRouterAdapter,
     _answer_cache,
     _ask_def_cache,
     ask_id,
+    build_ask_prompt,
     cache_answer,
     create_adapter,
     format_result_for_llm,
@@ -34,6 +37,7 @@ from dashdown.llm import (
     register_ask_def,
     relevant_params,
     resolve_model_name,
+    stream_answer,
 )
 from dashdown.project import load_project
 from dashdown.render import pipeline
@@ -70,6 +74,18 @@ class FakeAdapter(LLMAdapter):
     def complete(self, system: str, prompt: str) -> str:
         self.calls.append((system, prompt))
         return self.reply
+
+
+class StreamingFakeAdapter(FakeAdapter):
+    """Streams the reply in several chunks (native-streaming stand-in)."""
+
+    def __init__(self, chunks=("**North** ", "leads ", "the pack.")):
+        super().__init__(reply="".join(chunks))
+        self.chunks = list(chunks)
+
+    def stream_complete(self, system: str, prompt: str):
+        self.calls.append((system, prompt))
+        yield from self.chunks
 
 
 # --------------------------------------------------------------------------- #
@@ -195,14 +211,31 @@ class TestParseLLMConfig:
 # --------------------------------------------------------------------------- #
 # Provider adapters (request mapping, with the SDK client faked out)
 # --------------------------------------------------------------------------- #
+def _obj(**kwargs):
+    """An anonymous attribute bag (SDK response shapes are attr-based)."""
+    return type("O", (), kwargs)
+
+
 class _FakeAnthropicClient:
-    """Mimics anthropic.Anthropic — records create() kwargs, returns blocks."""
+    """Mimics anthropic.Anthropic — records create()/stream() kwargs."""
 
     class _Block:
         type = "text"
 
         def __init__(self, text):
             self.text = text
+
+    class _Stream:
+        """messages.stream() context manager exposing .text_stream."""
+
+        def __init__(self, chunks):
+            self.text_stream = iter(chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
 
     class _Messages:
         def __init__(self, outer):
@@ -212,13 +245,18 @@ class _FakeAnthropicClient:
             self._outer.create_kwargs = kwargs
             return type("R", (), {"content": [_FakeAnthropicClient._Block("**Hi**")]})
 
+        def stream(self, **kwargs):
+            self._outer.stream_kwargs = kwargs
+            return _FakeAnthropicClient._Stream(["**H", "i**"])
+
     def __init__(self):
         self.create_kwargs = None
+        self.stream_kwargs = None
         self.messages = _FakeAnthropicClient._Messages(self)
 
 
 class _FakeOpenAIClient:
-    """Mimics openai.OpenAI — records create() kwargs, returns a choice."""
+    """Mimics openai.OpenAI — records create() kwargs; streams on stream=True."""
 
     class _Completions:
         def __init__(self, outer):
@@ -226,6 +264,15 @@ class _FakeOpenAIClient:
 
         def create(self, **kwargs):
             self._outer.create_kwargs = kwargs
+            if kwargs.get("stream"):
+                delta = lambda text: _obj(delta=_obj(content=text))  # noqa: E731
+                return iter(
+                    [
+                        _obj(choices=[delta("**H")]),
+                        _obj(choices=[delta("i**")]),
+                        _obj(choices=[]),  # terminal/usage chunk — must be skipped
+                    ]
+                )
             msg = type("M", (), {"content": "**Hi**"})
             choice = type("C", (), {"message": msg})
             return type("R", (), {"choices": [choice]})
@@ -233,6 +280,25 @@ class _FakeOpenAIClient:
     def __init__(self):
         self.create_kwargs = None
         self.chat = type("Chat", (), {"completions": _FakeOpenAIClient._Completions(self)})
+
+
+class _FakeMistralClient:
+    """Mimics mistralai.Mistral's chat.stream() event shape."""
+
+    class _Chat:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def stream(self, **kwargs):
+            self._outer.stream_kwargs = kwargs
+            event = lambda text: _obj(  # noqa: E731
+                data=_obj(choices=[_obj(delta=_obj(content=text))])
+            )
+            return iter([event("**H"), event("i**"), _obj(data=_obj(choices=[]))])
+
+    def __init__(self):
+        self.stream_kwargs = None
+        self.chat = _FakeMistralClient._Chat(self)
 
 
 class TestAdapters:
@@ -292,6 +358,37 @@ class TestAdapters:
         )
         assert isinstance(r, OpenRouterAdapter)
 
+    def test_base_stream_falls_back_to_complete(self):
+        # An adapter without native streaming still works behind the SSE
+        # endpoint: the base stream_complete degrades to one chunk.
+        fake = FakeAdapter(reply="whole answer")
+        assert list(fake.stream_complete("sys", "p")) == ["whole answer"]
+
+    def test_anthropic_stream_maps_request(self):
+        adapter = AnthropicAdapter(LLMConfig(provider="anthropic", api_key="x"))
+        adapter._client = _FakeAnthropicClient()
+        assert list(adapter.stream_complete("sys", "p")) == ["**H", "i**"]
+        kw = adapter._client.stream_kwargs
+        assert kw["model"] == "claude-haiku-4-5"
+        assert kw["system"] == "sys"
+        assert kw["max_tokens"] == AnthropicAdapter.MAX_TOKENS
+
+    def test_openai_stream_maps_request(self):
+        adapter = OpenAIAdapter(LLMConfig(provider="openai", api_key="x"))
+        adapter._client = _FakeOpenAIClient()
+        # Empty-choices (usage/terminal) chunks are skipped, not crashed on.
+        assert list(adapter.stream_complete("sys", "p")) == ["**H", "i**"]
+        kw = adapter._client.create_kwargs
+        assert kw["stream"] is True
+        assert kw["messages"][0] == {"role": "system", "content": "sys"}
+
+    def test_mistral_stream_maps_request(self):
+        adapter = MistralAdapter(LLMConfig(provider="mistral", api_key="x"))
+        adapter._client = _FakeMistralClient()
+        assert list(adapter.stream_complete("sys", "p")) == ["**H", "i**"]
+        kw = adapter._client.stream_kwargs
+        assert kw["model"] == "mistral-small-latest"
+
 
 # --------------------------------------------------------------------------- #
 # Prompt registry
@@ -319,6 +416,25 @@ class TestAskRegistry:
         d = register_ask_def("sales", "main", "Why?")
         assert d.max_rows == DEFAULT_MAX_ROWS
         assert d.cache_ttl == DEFAULT_ANSWER_TTL
+        assert d.page_title == ""
+        assert d.page_description == ""
+
+    def test_page_context_joins_the_hash(self):
+        # Page title/description feed the prompt, so changed context must
+        # produce a different id (⇒ a fresh answer).
+        base = ask_id("sales", "main", "Why?")
+        assert ask_id("sales", "main", "Why?", page_title="Sales") != base
+        assert ask_id("sales", "main", "Why?", page_description="Q3") != base
+
+    def test_register_threads_page_context(self):
+        d = register_ask_def(
+            "sales", "main", "Why?", page_title="Sales", page_description="Q3 numbers"
+        )
+        assert d.page_title == "Sales"
+        assert d.page_description == "Q3 numbers"
+        assert d.id == ask_id(
+            "sales", "main", "Why?", DEFAULT_MAX_ROWS, "Sales", "Q3 numbers"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -390,6 +506,18 @@ class TestAskComponent:
         rendered = render_page(ASK_PAGE, connectors={}, static_build=True)
         assert 'data-async-component="ask"' in rendered.body_html
         assert len(rendered.ask_defs) == 1
+
+    def test_page_frontmatter_threads_into_ask_def(self):
+        source = (
+            "---\ntitle: Sales Overview\ndescription: Regional numbers\n---\n\n"
+            + ASK_PAGE
+        )
+        rendered = render_page(source, connectors={})
+        ask = rendered.ask_defs[0]
+        assert ask.page_title == "Sales Overview"
+        assert ask.page_description == "Regional numbers"
+        # Different page context ⇒ a different id than the bare page's block.
+        assert ask.id != render_page(ASK_PAGE, connectors={}).ask_defs[0].id
 
     def test_semantic_metric_ref_resolves_to_synthetic_query(self):
         """`<Ask metric={model.metric} by={model.dim} />` binds to the same
@@ -472,6 +600,41 @@ class TestPayload:
         html = render_markdown_text("<script>alert(1)</script>")
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
+
+    def test_prompt_includes_grounding_context(self):
+        fake = FakeAdapter()
+        ask = AskDef(
+            id="x",
+            query_name="q",
+            connector="main",
+            prompt="Why?",
+            page_title="Sales Overview",
+            page_description="Regional numbers",
+        )
+        result = QueryResult(columns=["a"], rows=[[1]])
+        generate_answer_html(ask, result, fake, {"region": "East", "blank": ""})
+        _, prompt = fake.calls[0]
+        assert "Dashboard page: Sales Overview — Regional numbers" in prompt
+        assert f"Today's date: {date.today().isoformat()}" in prompt
+        assert "Active filters" in prompt
+        assert "- region = East" in prompt
+        assert "blank" not in prompt  # empty values aren't active filters
+
+    def test_prompt_omits_absent_context(self):
+        ask = AskDef(id="x", query_name="q", connector="main", prompt="Why?")
+        prompt = build_ask_prompt(ask, QueryResult(columns=["a"], rows=[[1]]))
+        assert "Dashboard page:" not in prompt
+        assert "Active filters" not in prompt
+        assert "Today's date:" in prompt  # always present
+
+    def test_stream_answer_uses_same_prompt(self):
+        fake = StreamingFakeAdapter()
+        ask = AskDef(id="x", query_name="q", connector="main", prompt="Why?")
+        result = QueryResult(columns=["a"], rows=[[1]])
+        chunks = list(stream_answer(ask, result, fake, {"region": "East"}))
+        assert "".join(chunks) == "**North** leads the pack."
+        _, prompt = fake.calls[0]
+        assert "- region = East" in prompt
 
 
 # --------------------------------------------------------------------------- #
@@ -598,6 +761,82 @@ class TestAskEndpoint:
         r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}")
         assert r.status_code == 502
         assert "rate limited" in r.json()["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# Streaming endpoint (SSE) — `_stream=1` opts into event-stream on cache miss
+# --------------------------------------------------------------------------- #
+def _parse_sse(text):
+    """Parse an SSE body into [(event, decoded-json-data), …]."""
+    events = []
+    for raw in text.split("\n\n"):
+        if not raw.strip():
+            continue
+        event, data_lines = "message", []
+        for line in raw.split("\n"):
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].strip())
+        events.append((event, json.loads("\n".join(data_lines))))
+    return events
+
+
+class TestAskStreamingEndpoint:
+    def test_streams_chunks_then_done(self, tmp_path):
+        client, fake = _client_with_fake(tmp_path, fake=StreamingFakeAdapter())
+        r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        events = _parse_sse(r.text)
+        chunks = [d["text"] for e, d in events if e == "chunk"]
+        assert chunks == ["**North** ", "leads ", "the pack."]
+        (done,) = [d for e, d in events if e == "done"]
+        # The final event carries the server-rendered sanitized HTML — the
+        # exact payload the blocking JSON path produces.
+        assert "<strong>North</strong>" in done["html"]
+        assert done["model"] == "mistral-small-latest"
+        assert done["cached"] is False
+
+    def test_streamed_answer_lands_in_the_cache(self, tmp_path):
+        client, fake = _client_with_fake(tmp_path, fake=StreamingFakeAdapter())
+        client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        # Cache hit stays a single JSON payload even with _stream=1 —
+        # streaming only ever happens on the slow path.
+        r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.json()["cached"] is True
+        assert "<strong>North</strong>" in r.json()["html"]
+        assert len(fake.calls) == 1
+
+    def test_adapter_without_native_streaming_sends_one_chunk(self, tmp_path):
+        client, _ = _client_with_fake(tmp_path, fake=FakeAdapter())
+        r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        events = _parse_sse(r.text)
+        chunks = [d["text"] for e, d in events if e == "chunk"]
+        assert chunks == ["**North** leads the pack."]
+        assert events[-1][0] == "done"
+
+    def test_stream_error_reported_in_band(self, tmp_path):
+        class BoomStream(FakeAdapter):
+            def stream_complete(self, system, prompt):
+                yield "part"
+                raise RuntimeError("rate limited")
+
+        client, _ = _client_with_fake(tmp_path, fake=BoomStream())
+        r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        assert r.status_code == 200  # headers were already sent — error rides in-band
+        events = _parse_sse(r.text)
+        assert events[-1][0] == "error"
+        assert "rate limited" in events[-1][1]["error"]
+        # A failed stream must not poison the answer cache.
+        assert get_cached_answer(THE_ASK_ID, {}) is None
+
+    def test_stream_prompt_carries_filter_context(self, tmp_path):
+        client, fake = _client_with_fake(tmp_path, fake=StreamingFakeAdapter())
+        client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1&region=North")
+        _, prompt = fake.calls[0]
+        assert "- region = North" in prompt
 
 
 # --------------------------------------------------------------------------- #

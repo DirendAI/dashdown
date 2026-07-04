@@ -89,7 +89,15 @@ class Ask(Component):
         max_rows = max(1, attr_int(attrs, "max_rows", DEFAULT_MAX_ROWS))
         cache_ttl = max(0, attr_int(attrs, "cache_ttl", DEFAULT_ANSWER_TTL))
         ask = register_ask_def(
-            name, connector, prompt, max_rows=max_rows, cache_ttl=cache_ttl
+            name,
+            connector,
+            prompt,
+            max_rows=max_rows,
+            cache_ttl=cache_ttl,
+            # Page frontmatter joins the prompt (and the id hash), so the model
+            # knows which dashboard it's commenting on.
+            page_title=ctx.page_title,
+            page_description=ctx.page_description,
         )
         ctx.ask_defs.append(ask)
 
