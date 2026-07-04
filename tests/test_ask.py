@@ -809,6 +809,17 @@ class TestChartExplain:
         second = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
         assert first.id == second.id  # answer cache absorbs repeat page loads
 
+    def test_cache_ttl_attr_threads_through(self):
+        # Same spelling and default as <Ask cache_ttl=…>; like there, it only
+        # affects expiry — tuning it must not mint a new id (fresh answer).
+        default = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        assert default.cache_ttl == DEFAULT_ANSWER_TTL
+
+        source = EXPLAIN_PAGE.replace(" explain", " explain cache_ttl=86400")
+        tuned = render_page(source, connectors={}).ask_defs[0]
+        assert tuned.cache_ttl == 86400
+        assert tuned.id == default.id  # cache_ttl stays out of the id hash
+
     def test_explain_custom_prompt(self):
         source = EXPLAIN_PAGE.replace(
             "explain", 'explain="Why does the North lead?"'

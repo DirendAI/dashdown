@@ -170,11 +170,13 @@ costs nothing — and while the footer is closed, a filter change defers the
 regeneration to the next open instead of billing for commentary nobody is
 reading.
 
-`explain="…"` pins your own question instead of the canned one:
+`explain="…"` pins your own question instead of the canned one, and
+`cache_ttl=` tunes how long the generated answer stays cached — the same
+attribute (and one-hour default) `<Ask>` takes:
 
 ```markdown
 <LineChart data={monthly_downloads} x="month" y="downloads"
-           explain="Is growth accelerating or slowing?" />
+           explain="Is growth accelerating or slowing?" cache_ttl=86400 />
 ```
 
 Works in embeds; omitted from static builds (on-demand generation needs a live

@@ -17,7 +17,7 @@ from dashdown.components.builtin._util import (
     safe_json,
 )
 from dashdown.components.builtin.ask import ask_surface_inner
-from dashdown.llm import register_ask_def
+from dashdown.llm import DEFAULT_ANSWER_TTL, register_ask_def
 from dashdown.render.attrs import DataRef
 
 
@@ -161,11 +161,16 @@ def _explain_affordance(
     renders) and records it on ``ctx.ask_defs`` so an embed token signed for
     the page covers the ask endpoint too. `explain` bare uses the canned
     prompt; `explain="…"` pins the author's own question — author-supplied at
-    render time either way, exactly the <Ask /> trust model.
+    render time either way, exactly the <Ask /> trust model. `cache_ttl=`
+    controls how long the answer stays cached, same spelling and default as
+    on <Ask /> (and, like there, it only affects expiry — it stays out of the
+    id hash, so tuning it never busts existing answers).
     """
     explain_val = attrs.get("explain")
     if not explain_val or ctx.static_build:
         return ""
+
+    cache_ttl = max(0, attr_int(attrs, "cache_ttl", DEFAULT_ANSWER_TTL))
 
     if isinstance(explain_val, str):
         prompt = explain_val
@@ -193,6 +198,7 @@ def _explain_affordance(
     ask = register_ask_def(
         ((name, connector),),
         prompt,
+        cache_ttl=cache_ttl,
         page_title=ctx.page_title,
         page_description=ctx.page_description,
     )
