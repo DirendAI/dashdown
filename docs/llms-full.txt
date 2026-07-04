@@ -18,45 +18,45 @@ Introspected straight from the registries — the **same data `dashdown componen
 | Component | Attributes | Summary |
 |---|---|---|
 | `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `font_size`, `grain`, `highlight`, `inline`, `label`, `lazy`, `max_rows`, `metric`, `refresh`, `replay`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
-| `BarChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `horizontal`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
-| `BoxPlot` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
+| `BarChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `horizontal`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
+| `BoxPlot` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
 | `ButtonGroup` \* | `all_label`, `bar`, `default`, `filter_bar`, `include_all`, `label`, `name`, `options`, `url_sync` | Single-select filter shown as an inline **segmented control** — a row of pill buttons where exactly one is active ("All · Active · Churned", "Day · Week · Month"). A lower-friction alternative to a `… |
-| `CalendarHeatmap` | `by`, `col-span`, `color`, `currency`, `data`, `date`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | GitHub-style calendar heatmap for daily activity data. |
-| `CandlestickChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Candlestick (OHLC) chart for price/range series. |
-| `Chart` | `auto`, `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Auto-recommended chart: picks line/bar/scatter from the result shape. |
-| `ComboChart` | `bar_color`, `bars`, `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `empty_message`, `format`, `grain`, `height`, `line_color`, `lines`, `locale`, `right_axis`, `right_currency`, `right_decimals`, `right_format`, `right_locale`, `series`, `sort_by`, `span`, `title`, `x` | Combo chart — bars and lines together, with an optional second y-axis. |
+| `CalendarHeatmap` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | GitHub-style calendar heatmap for daily activity data. |
+| `CandlestickChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Candlestick (OHLC) chart for price/range series. |
+| `Chart` | `auto`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Auto-recommended chart: picks line/bar/scatter from the result shape. |
+| `ComboChart` | `bar_color`, `bars`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `empty_message`, `explain`, `format`, `grain`, `height`, `line_color`, `lines`, `locale`, `right_axis`, `right_currency`, `right_decimals`, `right_format`, `right_locale`, `series`, `sort_by`, `span`, `title`, `x` | Combo chart — bars and lines together, with an optional second y-axis. |
 | `Combobox` \* | `bar`, `column`, `data`, `debounce`, `filter_bar`, `label`, `limit`, `min_chars`, `multi`, `name`, `placeholder`, `url_sync` | Searchable single-select filter for a **high-cardinality** column — type-to-filter over thousands of customers / SKUs / users where a plain `<Dropdown>` (which loads *every* distinct value) would cho… |
 | `Counter` | `breakdown`, `breakdown-by`, `breakdown-column`, `breakdown-label`, `breakdown-legend`, `breakdown-values`, `by`, `col-span`, `color`, `column`, `compare`, `compare-column`, `compare-index`, `compare-row`, `currency`, `data`, `date_format`, `decimals`, `delta`, `format`, `grain`, `index`, `invert-delta`, `label`, `locale`, `metric`, `prefix`, `row`, `series`, `span`, `sparkline`, `sparkline-by`, `sparkline-column`, `suffix` | Display a single value as a large counter/KPI. |
 | `DateRange` \* | `bar`, `debounce`, `default`, `end_param`, `filter_bar`, `label`, `name`, `persist`, `presets`, `start_param`, `url_sync` | Date range picker component with preset ranges and custom selection. |
 | `Dropdown` \* | `bar`, `column`, `data`, `filter_bar`, `label`, `multi`, `name`, `options`, `url_sync` | Dropdown filter. Populates options from the distinct values of a column. |
-| `FunnelChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Funnel chart — stage labels (`x`) with descending values (`y`). |
-| `GaugeChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `max`, `metric`, `min`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Speedometer-style gauge for a single KPI value. |
-| `GraphChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Force-directed network graph from an edge-list query. |
+| `FunnelChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Funnel chart — stage labels (`x`) with descending values (`y`). |
+| `GaugeChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max`, `metric`, `min`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Speedometer-style gauge for a single KPI value. |
+| `GraphChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Force-directed network graph from an edge-list query. |
 | `Grid` | `cols`, `columns`, `gap` | Lay children out on a fixed-column CSS grid. |
-| `HeatmapChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Matrix heatmap — a grid of cells shaded by magnitude. |
-| `LineChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Line chart — a metric over an ordered `x` (usually time). |
-| `MapChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `geojson`, `grain`, `height`, `locale`, `location`, `map`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Choropleth map for geospatial data (ECharts geo). |
-| `ParallelChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `dimensions`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Parallel-coordinates plot over several numeric columns. |
-| `PieChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
+| `HeatmapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Matrix heatmap — a grid of cells shaded by magnitude. |
+| `LineChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Line chart — a metric over an ordered `x` (usually time). |
+| `MapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `geojson`, `grain`, `height`, `locale`, `location`, `map`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Choropleth map for geospatial data (ECharts geo). |
+| `ParallelChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `dimensions`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Parallel-coordinates plot over several numeric columns. |
+| `PieChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
 | `PivotTable` | `agg`, `data`, `empty_message`, `title`, `values` | Interactive cross-tabulation with drag-and-drop row/column axes. |
-| `RadarChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Radar (spider) chart for comparing several metrics on one shape. |
+| `RadarChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Radar (spider) chart for comparing several metrics on one shape. |
 | `RangeSlider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `max_param`, `min`, `min_param`, `name`, `step`, `url_sync` | Numeric range filter — a dual-handle slider for a *between* bound on a numeric column (price, age, score, …). |
-| `SankeyChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Sankey flow diagram from an edge-list query. |
-| `ScatterChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Scatter plot — two numeric columns as points (`x` vs `y`). |
+| `SankeyChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Sankey flow diagram from an edge-list query. |
+| `ScatterChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Scatter plot — two numeric columns as points (`x` vs `y`). |
 | `Search` \* | `bar`, `debounce`, `filter_bar`, `label`, `name`, `placeholder`, `url_sync` | Search input component for filtering. |
 | `SiteSearch` | `label`, `max_results`, `placeholder` | Full-text search across every page of the project. |
 | `Slider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
-| `SunburstChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
+| `SunburstChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
 | `Tab` | `title` | One panel inside a `<Tabs>` container. |
 | `Table` | `by`, `col-span`, `currency`, `data`, `date_format`, `detail_slug`, `empty_message`, `export`, `export_filename`, `filename`, `format`, `grain`, `headers`, `heatmap`, `heatmap_scheme`, `limit`, `link_column`, `link_pattern`, `locale`, `metric`, `page-size`, `row_link`, `search`, `series`, `sort`, `span`, `title` | Data table — renders a query result as a sortable, searchable grid. |
 | `Tabs` | `col-span`, `default`, `label`, `name`, `span`, `url_sync` | Switchable tabbed sections — pure **layout**, not a filter. |
-| `ThemeRiver` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
+| `ThemeRiver` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
 | `TimeGrain` \* | `bar`, `default`, `filter_bar`, `grains`, `label`, `name`, `native`, `url_sync` | Time-grain picker — writes a `day`/`week`/`month`/… token for `grain={name}`. |
 | `Toggle` \* | `bar`, `default`, `filter_bar`, `label`, `name`, `off_value`, `on_value`, `url_sync`, `variant` | Boolean / toggle filter — a one-click switch (or checkbox) for a two-valued facet ("show only active", "include archived", "paid only"). |
-| `TreeChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Tree — a hierarchy as a node-link diagram (left-to-right, collapsible). |
-| `TreemapChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Treemap — categories as nested rectangles sized by value. |
+| `TreeChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Tree — a hierarchy as a node-link diagram (left-to-right, collapsible). |
+| `TreemapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Treemap — categories as nested rectangles sized by value. |
 | `Value` | `by`, `column`, `currency`, `data`, `date_format`, `decimals`, `format`, `grain`, `index`, `locale`, `metric`, `prefix`, `row`, `series`, `suffix` | Display a single value from a query result. |
-| `Violin` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Violin (kernel density) distribution chart; same attributes as BoxPlot. |
+| `Violin` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Violin (kernel density) distribution chart; same attributes as BoxPlot. |
 
 ## Connectors (16)
 
@@ -2516,6 +2516,7 @@ example; the common attributes are here.
 | `col-span`     | Columns to span inside a `<Grid>`.                              |
 | `format`, `currency`, `decimals`, `locale`, `date_format` | Value-axis & tooltip number/date formatting — see [Formatting](/formatting). |
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
+| `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question, `cache_ttl=` tunes the answer cache — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
@@ -5359,6 +5360,40 @@ referenced query, and an embed token must be scoped to **all** of them.
 It binds to the *same* synthetic query a chart with those attrs would build, so the
 answer rides the same result cache and filter path. A plain `queries/*.py`
 [Python query](/python-queries) works as a source too.
+
+## Explain any chart
+
+Every [chart](/components/charts) accepts an `explain` attribute: it adds a
+small ✨ button to the chart card (revealed on hover, next to the "filtered by"
+marker) that generates commentary **on demand** into a footer under the plot:
+
+```markdown
+<BarChart data={downloads_by_country} x="country" y="downloads"
+          title="Downloads by country" explain />
+```
+
+<BarChart data={downloads_by_country} x="country" y="downloads" title="Downloads by country" explain />
+
+Hover the chart and click the sparkle. It's sugar over `<Ask>`: at render time
+the chart registers an ordinary ask with a canned prompt (*"explain what is
+notable in this data"*, naming the chart's type and title), so viewers still
+can't send prompts, answers cache and stream exactly the same way, and the ↻
+button regenerates. Nothing is generated until the first click — an idle chart
+costs nothing — and while the footer is closed, a filter change defers the
+regeneration to the next open instead of billing for commentary nobody is
+reading.
+
+`explain="…"` pins your own question instead of the canned one, and
+`cache_ttl=` tunes how long the generated answer stays cached — the same
+attribute (and one-hour default) `<Ask>` takes:
+
+```markdown
+<LineChart data={monthly_downloads} x="month" y="downloads"
+           explain="Is growth accelerating or slowing?" cache_ttl=86400 />
+```
+
+Works in embeds; omitted from static builds (on-demand generation needs a live
+server — the same posture as the ↻ refresh button).
 
 ## Configuration
 

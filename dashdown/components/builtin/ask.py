@@ -61,6 +61,78 @@ def _font_size_value(raw: str | None) -> str | None:
     return None
 
 
+def ask_surface_inner(
+    *, allow_refresh: bool = True, label: str = "", body_style: str = ""
+) -> str:
+    """The innards every ask surface shares: the AI-badge header row (with the
+    optional label, hover-revealed model attribution, and — when the author
+    allows regeneration — the ↻ button) plus the answer body in its
+    blinking-cursor wait state.
+
+    Used by ``<Ask />`` and by the chart ``explain`` footer (line_chart.py), so
+    the two stay visually and behaviorally identical — ask.js finds all its
+    hooks (``.dashdown-ask-body``, ``.dashdown-ask-refresh``,
+    ``.dashdown-ask-model``) by these classes. ``body_style`` is a prebuilt
+    ``style="…"`` attribute string (or empty), landing on the body div.
+    """
+    # The ↻ button is emitted only when the author allows regeneration —
+    # ask.js null-guards its absence, and the endpoint enforces the same
+    # opt-out server-side (see register_ask_def's allow_refresh).
+    refresh_btn = (
+        '<button type="button" class="dashdown-ask-refresh" hidden '
+        'aria-label="Regenerate commentary" title="Regenerate">'
+        '<svg fill="none" stroke="currentColor" stroke-width="2" '
+        'viewBox="0 0 24 24" aria-hidden="true">'
+        '<path stroke-linecap="round" stroke-linejoin="round" '
+        'd="M4 4v6h6M20 20v-6h-6M5.5 10a7 7 0 0 1 12-3.5L20 9M4 15l2.5 2.5A7 7 0 0 0 18.5 14"/>'
+        "</svg></button>"
+        if allow_refresh
+        else ""
+    )
+
+    # Header left: a small sparkle badge marking the block as AI-generated
+    # (native title tooltip carries the detail on hover), plus the author's
+    # optional label text. Provenance without an uppercase banner.
+    label_html = (
+        f'<span class="dashdown-ask-label text-xs font-medium uppercase '
+        f'tracking-wide text-base-content/60">{esc(label)}</span>'
+        if label
+        else ""
+    )
+    # The model attribution lives inside the badge, revealed while the
+    # card is hovered (CSS — see the .dashdown-ask:hover rules); ask.js
+    # fills it from the answer payload's `model` field and drops `hidden`
+    # once an answer arrives.
+    badge = (
+        '<span class="dashdown-ask-badge" title="AI-generated commentary">'
+        '<svg fill="none" stroke="currentColor" stroke-width="1.5" '
+        'viewBox="0 0 24 24" role="img" aria-label="AI-generated commentary">'
+        '<path stroke-linejoin="round" '
+        'd="M12 4.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1-5.1-1.9 5.1-1.9 1.9-5.1z"/>'
+        '<path stroke-linejoin="round" '
+        'd="M18.8 3.2l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"/>'
+        "</svg>"
+        # aria-hidden: the svg's aria-label already says "AI-generated
+        # commentary" — without it a screen reader announces "AI" twice.
+        '<span class="dashdown-ask-badge-text" aria-hidden="true">AI</span>'
+        f"{label_html}"
+        '<span class="dashdown-ask-model" hidden></span></span>'
+    )
+
+    # Loading state: a lone blinking terminal cursor (.dashdown-ask-cursor
+    # in dashdown.css) — the answer types in like terminal output, so the
+    # wait state speaks the same language. The refresh button stays hidden
+    # until ask.js confirms a live server.
+    return (
+        f'<div class="flex items-center justify-between gap-2">'
+        f"{badge}"
+        f"{refresh_btn}"
+        f"</div>"
+        f'<div class="dashdown-ask-body"{body_style}>'
+        f'<span class="dashdown-ask-cursor"></span></div>'
+    )
+
+
 @register_component("Ask")
 class Ask(Component):
     """Pin a question to a query's result and render the LLM's answer as a
@@ -229,50 +301,6 @@ class Ask(Component):
         span = grid_span_style(attrs)
         style_attr = f' style="{span}"' if span else ""
 
-        # The ↻ button is emitted only when the author allows regeneration —
-        # ask.js null-guards its absence, and the endpoint enforces the same
-        # opt-out server-side (see register_ask_def's allow_refresh).
-        refresh_btn = (
-            '<button type="button" class="dashdown-ask-refresh" hidden '
-            'aria-label="Regenerate commentary" title="Regenerate">'
-            '<svg fill="none" stroke="currentColor" stroke-width="2" '
-            'viewBox="0 0 24 24" aria-hidden="true">'
-            '<path stroke-linecap="round" stroke-linejoin="round" '
-            'd="M4 4v6h6M20 20v-6h-6M5.5 10a7 7 0 0 1 12-3.5L20 9M4 15l2.5 2.5A7 7 0 0 0 18.5 14"/>'
-            "</svg></button>"
-            if allow_refresh
-            else ""
-        )
-
-        # Header left: a small sparkle badge marking the block as AI-generated
-        # (native title tooltip carries the detail on hover), plus the author's
-        # optional label text. Provenance without an uppercase banner.
-        label_html = (
-            f'<span class="dashdown-ask-label text-xs font-medium uppercase '
-            f'tracking-wide text-base-content/60">{esc(label)}</span>'
-            if label
-            else ""
-        )
-        # The model attribution lives inside the badge, revealed while the
-        # card is hovered (CSS — see the .dashdown-ask:hover rules); ask.js
-        # fills it from the answer payload's `model` field and drops `hidden`
-        # once an answer arrives.
-        badge = (
-            '<span class="dashdown-ask-badge" title="AI-generated commentary">'
-            '<svg fill="none" stroke="currentColor" stroke-width="1.5" '
-            'viewBox="0 0 24 24" role="img" aria-label="AI-generated commentary">'
-            '<path stroke-linejoin="round" '
-            'd="M12 4.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1-5.1-1.9 5.1-1.9 1.9-5.1z"/>'
-            '<path stroke-linejoin="round" '
-            'd="M18.8 3.2l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"/>'
-            "</svg>"
-            # aria-hidden: the svg's aria-label already says "AI-generated
-            # commentary" — without it a screen reader announces "AI" twice.
-            '<span class="dashdown-ask-badge-text" aria-hidden="true">AI</span>'
-            f"{label_html}"
-            '<span class="dashdown-ask-model" hidden></span></span>'
-        )
-
         # `inline` swaps the card chrome for a bare prose block; the hover
         # reveal of badge/refresh is CSS (.dashdown-ask-inline rules).
         container_class = (
@@ -281,21 +309,14 @@ class Ask(Component):
             else "dashdown-ask card bg-base-100 border border-base-300 p-4"
         )
 
-        # Loading state: a lone blinking terminal cursor (.dashdown-ask-cursor
-        # in dashdown.css) — the answer types in like terminal output, so the
-        # wait state speaks the same language. The refresh button stays hidden
-        # until ask.js confirms a live server.
         return (
             f'<div id="{cid}"{style_attr} '
             f'data-async-component="ask" '
             f'data-config="{config_json}" '
             f'data-query-name="{esc(",".join(query_names))}" '
             f'class="{container_class}">'
-            f'<div class="flex items-center justify-between gap-2">'
-            f"{badge}"
-            f"{refresh_btn}"
-            f"</div>"
-            f'<div class="dashdown-ask-body"{body_style}>'
-            f'<span class="dashdown-ask-cursor"></span></div>'
-            f"</div>"
+            + ask_surface_inner(
+                allow_refresh=allow_refresh, label=label, body_style=body_style
+            )
+            + "</div>"
         )

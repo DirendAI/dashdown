@@ -32,6 +32,7 @@ from dashdown.components.builtin._util import (
     resolve_semantic_query,
     safe_json,
 )
+from dashdown.components.builtin.line_chart import _chart_card
 from dashdown.render.attrs import DataRef
 
 
@@ -154,18 +155,9 @@ def _combo_html(attrs: dict[str, Any], ctx: RenderContext) -> str:
     config_json = esc(safe_json(config))
     height = attr_int(attrs, "height", 320) or 320
     span = grid_span_style(attrs)
-    return (
-        f'<div class="dashdown-chart card bg-base-100 border border-base-300" '
-        f'id="{cid}" '
-        f'style="width:100%;height:{height}px;{span}" '
-        f'data-async-component="chart" '
-        f'data-config="{config_json}" '
-        f'data-component-id="{cid}" '
-        f'data-query-name="{esc(name)}">'
-        f'<div class="card-body p-4 h-full">'
-        f'<div class="dashdown-chart-skeleton skeleton w-full h-full"></div>'
-        f'</div>'
-        f'</div>'
+    return _chart_card(
+        attrs, ctx, chart_type="combo", cid=cid, name=name,
+        config_json=config_json, height=height, span=span,
     )
 
 

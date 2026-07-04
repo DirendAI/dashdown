@@ -47,9 +47,16 @@ function relevantFilters(filters) {
 
 /**
  * Initialize an ask component
- * @param {HTMLElement} el - Element with data-async-component="ask"
+ * @param {HTMLElement} el - Element with data-async-component="ask" (or a
+ *   chart's explain footer, which carries the same config/markup shape)
+ * @param {Object} [opts]
+ * @param {() => boolean} [opts.paused] - When it returns true, filter-driven
+ *   loads are deferred instead of fired (an LLM call for a hidden surface is
+ *   a bill nobody reads). The returned handle's `flush()` fires the newest
+ *   deferred load — call it when the surface is revealed again.
+ * @returns {{flush: () => void} | undefined}
  */
-export function initAsk(el) {
+export function initAsk(el, opts = {}) {
   const config = JSON.parse(el.dataset.config);
   const askId = config.ask_id;
   const body = el.querySelector(".dashdown-ask-body");
@@ -60,10 +67,12 @@ export function initAsk(el) {
   const loadingHtml = body.innerHTML; // the blinking-cursor wait state
   const build = readBuildConfig();
   const isStatic = !!(build && build.static);
+  const paused = opts.paused || (() => false);
   let requestSeq = 0; // drop responses that a newer request has superseded
   let abortController = null; // aborts the superseded in-flight fetch/stream
   let debounceTimer = null;
   let lastUrl = null;
+  let pendingUrl = null; // load deferred while paused() held
 
   function urlFor(filters, refresh) {
     if (isStatic) {
@@ -276,7 +285,20 @@ export function initAsk(el) {
 
   function scheduleLoad(filters, refresh = false) {
     const url = urlFor(filters, refresh);
-    if (!refresh && url === lastUrl) return; // nothing relevant changed
+    if (!refresh && url === lastUrl) {
+      // Nothing relevant changed — including filters churning away and back
+      // while paused, so any intermediate deferred load is obsolete too.
+      pendingUrl = null;
+      return;
+    }
+    if (paused()) {
+      // Newest wins; flush() fires it on reveal. Kill any timer armed while
+      // the surface was still visible — this URL supersedes it.
+      clearTimeout(debounceTimer);
+      pendingUrl = url;
+      return;
+    }
+    pendingUrl = null;
     lastUrl = url;
     clearTimeout(debounceTimer);
     if (requestSeq === 0 || refresh) {
@@ -284,7 +306,17 @@ export function initAsk(el) {
       // churn is debounced.
       load(url);
     } else {
-      debounceTimer = setTimeout(() => load(url), _DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => {
+        // Re-check at fire time: the surface may have been hidden during the
+        // debounce window (explain footer closed) — divert to pendingUrl so
+        // the load waits for the next reveal instead of billing an LLM call
+        // for a panel nobody is reading.
+        if (paused()) {
+          pendingUrl = url;
+          return;
+        }
+        load(url);
+      }, _DEBOUNCE_MS);
     }
   }
 
@@ -371,6 +403,17 @@ export function initAsk(el) {
     );
     io.observe(el);
   }
+
+  return {
+    flush() {
+      if (pendingUrl === null) return;
+      const url = pendingUrl;
+      pendingUrl = null;
+      lastUrl = url;
+      clearTimeout(debounceTimer);
+      load(url); // reveal is deliberate, like refresh — no debounce
+    },
+  };
 }
 
 /**
@@ -379,5 +422,44 @@ export function initAsk(el) {
 export function initAllAsks() {
   document.querySelectorAll('[data-async-component="ask"]').forEach((el) => {
     initAsk(el);
+  });
+}
+
+/**
+ * Wire a chart's `explain` affordance: the ✨ button toggles the commentary
+ * footer, and the footer's ask machinery is initialized only on the first
+ * open — an unclicked chart never spends an LLM call. While the footer is
+ * closed its filter subscription stays paused (see initAsk's `paused` gate),
+ * so filter churn defers the regeneration until the next open instead of
+ * billing for commentary nobody is reading.
+ * @param {HTMLElement} el - The chart card hosting the button + footer
+ */
+export function initExplain(el) {
+  const btn = el.querySelector(".dashdown-explain-btn");
+  const panel = el.querySelector(".dashdown-explain-panel");
+  if (!btn || !panel) return;
+  let ask = null;
+  btn.addEventListener("click", () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    if (!ask) {
+      ask = initAsk(panel, { paused: () => panel.hidden }) || null;
+    } else {
+      ask.flush();
+    }
+  });
+}
+
+/**
+ * Initialize the explain affordance on every chart that has one. (The server
+ * emits it only on live pages — never in static builds — so this is a no-op
+ * in an export.)
+ */
+export function initAllExplains() {
+  document.querySelectorAll(".dashdown-explain-btn").forEach((btn) => {
+    const host = btn.closest("[data-async-component]");
+    if (host) initExplain(host);
   });
 }

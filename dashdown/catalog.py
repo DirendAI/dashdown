@@ -187,6 +187,21 @@ def _chart_base_attrs() -> frozenset[str]:
     return frozenset(_attrs_from_func(node, path, {"_chart_html"}))
 
 
+@lru_cache(maxsize=None)
+def _chart_card_attrs() -> frozenset[str]:
+    """Attrs read by the shared ``_chart_card`` shell in ``line_chart.py``
+    (height/explain/…). ComboChart calls it cross-module — its bespoke config
+    path skips ``_chart_html`` — so it's followed by name the same way."""
+    from dashdown.components.builtin import line_chart
+
+    path = inspect.getsourcefile(line_chart)
+    funcs = _module_funcs(path)
+    node = funcs.get("_chart_card")
+    if node is None:  # pragma: no cover - defensive
+        return frozenset()
+    return frozenset(_attrs_from_func(node, path, {"_chart_card"}))
+
+
 def _attrs_from_func(
     node: ast.FunctionDef, path: str, visited: set[str]
 ) -> set[str]:
@@ -196,6 +211,8 @@ def _attrs_from_func(
     for name in calls:
         if name == "_chart_html":
             keys |= _chart_base_attrs()
+        elif name == "_chart_card":
+            keys |= _chart_card_attrs()
         elif name in funcs and name not in visited:
             visited.add(name)
             keys |= _attrs_from_func(funcs[name], path, visited)

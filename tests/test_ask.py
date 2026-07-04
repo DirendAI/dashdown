@@ -766,6 +766,144 @@ class TestAskComponent:
 
 
 # --------------------------------------------------------------------------- #
+# Chart `explain` affordance (sugar over the ask machinery)
+# --------------------------------------------------------------------------- #
+EXPLAIN_PAGE = """# Sales
+
+:::query name=by_region connector=main
+SELECT region, SUM(amount) AS total FROM sales GROUP BY region
+:::
+
+<BarChart data={by_region} x="region" y="total" title="Revenue by region" explain />
+"""
+
+
+class TestChartExplain:
+    def test_explain_registers_canned_ask_and_emits_footer(self):
+        rendered = render_page(EXPLAIN_PAGE, connectors={})
+        # An ordinary AskDef with a canned prompt naming the chart — the
+        # opaque-id model is untouched (viewers still can't send prompts).
+        assert len(rendered.ask_defs) == 1
+        ask = rendered.ask_defs[0]
+        assert ask.queries == (("by_region", "main"),)
+        assert 'bar chart titled "Revenue by region"' in ask.prompt
+        assert "Explain what is notable" in ask.prompt
+        assert get_ask_def(ask.id) == ask
+        # Button + hidden footer; the placeholder carries only the opaque id.
+        assert "dashdown-explain-btn" in rendered.body_html
+        assert "dashdown-explain-panel" in rendered.body_html
+        assert ask.id in rendered.body_html
+        assert "Explain what is notable" not in rendered.body_html
+        # The footer is initialized on first click by initExplain — it must
+        # NOT be an async ask component (initAllAsks would eager-load it).
+        assert 'data-async-component="ask"' not in rendered.body_html
+        # The footer never glows its own host chart on hover.
+        assert "&quot;highlight_queries&quot;: []" in rendered.body_html
+        # The fixed height moves onto the inner region so the card can grow
+        # when the footer opens.
+        assert "dashdown-chart-region" in rendered.body_html
+        assert 'style="height:300px"' in rendered.body_html
+
+    def test_explain_id_is_deterministic_across_renders(self):
+        first = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        second = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        assert first.id == second.id  # answer cache absorbs repeat page loads
+
+    def test_cache_ttl_attr_threads_through(self):
+        # Same spelling and default as <Ask cache_ttl=…>; like there, it only
+        # affects expiry — tuning it must not mint a new id (fresh answer).
+        default = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        assert default.cache_ttl == DEFAULT_ANSWER_TTL
+
+        source = EXPLAIN_PAGE.replace(" explain", " explain cache_ttl=86400")
+        tuned = render_page(source, connectors={}).ask_defs[0]
+        assert tuned.cache_ttl == 86400
+        assert tuned.id == default.id  # cache_ttl stays out of the id hash
+
+    def test_explain_custom_prompt(self):
+        source = EXPLAIN_PAGE.replace(
+            "explain", 'explain="Why does the North lead?"'
+        )
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.prompt == "Why does the North lead?"
+
+    def test_untitled_chart_gets_generic_prompt(self):
+        source = EXPLAIN_PAGE.replace(' title="Revenue by region"', "")
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert "shown as a bar chart:" in ask.prompt
+        assert "titled" not in ask.prompt
+
+    def test_no_explain_keeps_classic_markup(self):
+        source = EXPLAIN_PAGE.replace(" explain", "")
+        rendered = render_page(source, connectors={})
+        assert rendered.ask_defs == []
+        assert "dashdown-explain" not in rendered.body_html
+        # Height stays inline on the card root, exactly as before.
+        assert "dashdown-chart-region" not in rendered.body_html
+        assert "height:300px" in rendered.body_html
+
+    def test_explain_false_is_off(self):
+        source = EXPLAIN_PAGE.replace(" explain", " explain=false")
+        rendered = render_page(source, connectors={})
+        assert rendered.ask_defs == []
+        assert "dashdown-explain" not in rendered.body_html
+
+    def test_explain_stripped_in_static_build(self):
+        # On-demand generation needs a live server: a static build gets no
+        # button, no footer — and nothing joins ask_defs, so nothing is baked.
+        rendered = render_page(EXPLAIN_PAGE, connectors={}, static_build=True)
+        assert rendered.ask_defs == []
+        assert "dashdown-explain" not in rendered.body_html
+
+    def test_combo_chart_rides_the_shared_shell(self):
+        source = """# T
+
+:::query name=q connector=main
+SELECT month, revenue, orders FROM t
+:::
+
+<ComboChart data={q} x="month" bars="revenue" lines="orders" explain />
+"""
+        rendered = render_page(source, connectors={})
+        assert "dashdown-explain-btn" in rendered.body_html
+        assert len(rendered.ask_defs) == 1
+        assert rendered.ask_defs[0].queries == (("q", "main"),)
+        assert "combo chart" in rendered.ask_defs[0].prompt
+
+    def test_semantic_chart_explain_binds_synthetic_query(self):
+        from dashdown.components.base import RenderContext
+        from dashdown.render.components import render_components
+        from dashdown.semantic import SemanticModelHandle
+
+        dims = {"region"}
+        measures = {"revenue"}
+        handle = SemanticModelHandle(
+            name="sales",
+            connector="warehouse",
+            file_config={},
+            table_connectors={"orders": "warehouse"},
+            profile=None,
+            profile_path=None,
+            measures=measures,
+            dimensions=dims,
+            time_dimension=None,
+            measure_formats={},
+            dim_lookup={d: d for d in dims},
+            measure_lookup={m: m for m in measures},
+        )
+        ctx = RenderContext(queries={}, semantic_models={"sales": handle})
+        html = render_components(
+            "<BarChart metric={sales.revenue} by={sales.region} explain />", ctx
+        )
+        assert "dashdown-explain-btn" in html
+        assert len(ctx.ask_defs) == 1
+        ask = ctx.ask_defs[0]
+        # Same synthetic query name/connector a chart registers, so the ask
+        # endpoint resolves the exact spec this chart reads.
+        assert ask.queries == (("_sem.sales.revenue.by.region", "warehouse"),)
+
+
+# --------------------------------------------------------------------------- #
 # Payload cap + answer rendering
 # --------------------------------------------------------------------------- #
 class TestPayload:

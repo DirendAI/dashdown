@@ -77,12 +77,19 @@ function expectedQueries() {
   return names;
 }
 
-/** Every chart placeholder has drawn its canvas (or surfaced an error card). */
+/** Every chart placeholder has drawn its canvas (or surfaced an error card).
+ * Scoped to the ECharts container: the chart root can carry other SVGs (the
+ * `explain` button + its footer's AI badge), which must not count as "drew". */
 function chartsRendered() {
   const charts = document.querySelectorAll('[data-async-component="chart"]');
   for (const el of charts) {
     if (el.querySelector(".dashdown-error, .dashdown-error-card")) continue;
-    if (!el.querySelector("canvas, svg")) return false;
+    if (
+      !el.querySelector(
+        ".dashdown-chart-container canvas, .dashdown-chart-container svg"
+      )
+    )
+      return false;
   }
   return true;
 }
