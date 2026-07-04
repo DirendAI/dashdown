@@ -96,23 +96,17 @@ export function initAsk(el) {
 
   // ---- Typewriter replay of a cached / static-baked answer ---------------
 
-  // sessionStorage key for replay="once": the ask + the *filter* params only —
-  // control params (_stream, _refresh, _embed) vary between requests for the
-  // same answer and must not defeat the once-per-answer tracking.
-  function replayStorageKey(url) {
-    let qs = "";
-    const i = url.indexOf("?");
-    if (i !== -1) {
-      const kept = [...new URLSearchParams(url.slice(i + 1))].filter(
-        ([k]) => !k.startsWith("_")
-      );
-      kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      qs = new URLSearchParams(kept).toString();
-    }
-    return `dashdown-ask-replayed:${askId}:${qs}`;
+  // sessionStorage key for replay="once": the ask + its route params (a
+  // dynamic [slug] page shares one ask id across records, and each record's
+  // answer deserves its first showing). Deliberately NOT keyed on filters —
+  // a filter-heavy dashboard would otherwise re-type on every combination,
+  // which reads as noise rather than delivery.
+  function replayStorageKey() {
+    const route = new URLSearchParams(readRouteParams()).toString();
+    return `dashdown-ask-replayed:${askId}${route ? `:${route}` : ""}`;
   }
 
-  function shouldReplay(data, url) {
+  function shouldReplay(data) {
     if (!data.text) return false; // pre-replay server / old snapshot payload
     const mode = config.replay || "once";
     if (mode === "off") return false;
@@ -124,7 +118,7 @@ export function initAsk(el) {
     }
     if (mode === "once") {
       try {
-        if (sessionStorage.getItem(replayStorageKey(url))) return false;
+        if (sessionStorage.getItem(replayStorageKey())) return false;
       } catch {
         /* storage unavailable — replay anyway */
       }
@@ -134,10 +128,10 @@ export function initAsk(el) {
 
   // Called once the viewer has seen the full typing effect — a genuine live
   // stream counts too, so a later cache hit doesn't re-type the same answer.
-  function markReplayed(url) {
+  function markReplayed() {
     if ((config.replay || "once") !== "once") return;
     try {
-      sessionStorage.setItem(replayStorageKey(url), "1");
+      sessionStorage.setItem(replayStorageKey(), "1");
     } catch {
       /* storage unavailable */
     }
@@ -191,7 +185,7 @@ export function initAsk(el) {
   // Consume an SSE cache-miss response: `chunk` events accumulate as escaped
   // plain text (textContent — the raw model stream never renders as HTML),
   // then `done` swaps in the server-rendered sanitized HTML.
-  async function consumeStream(response, seq, url) {
+  async function consumeStream(response, seq) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -221,7 +215,7 @@ export function initAsk(el) {
         renderDone(data);
         // The viewer just watched the live stream — a later cache hit of the
         // same answer shouldn't re-type it (replay="once").
-        markReplayed(url);
+        markReplayed();
       } else if (event === "error") {
         renderError(data.error || "LLM request failed");
       }
@@ -253,7 +247,7 @@ export function initAsk(el) {
       if (seq !== requestSeq) return; // stale — a newer request is in flight
       const contentType = response.headers.get("Content-Type") || "";
       if (response.ok && contentType.includes("text/event-stream")) {
-        await consumeStream(response, seq, url);
+        await consumeStream(response, seq);
         return;
       }
       const data = await response.json().catch(() => null);
@@ -268,9 +262,9 @@ export function initAsk(el) {
       }
       // A cached / static-baked answer replays as a typewriter when the
       // policy allows; otherwise it renders instantly.
-      if (shouldReplay(data, url)) {
+      if (shouldReplay(data)) {
         await replayAnswer(data, seq);
-        if (seq === requestSeq) markReplayed(url); // only a *finished* replay counts
+        if (seq === requestSeq) markReplayed(); // only a *finished* replay counts
       } else {
         renderDone(data);
       }
@@ -298,11 +292,11 @@ export function initAsk(el) {
   // --- Provenance highlight -------------------------------------------
   // Hovering the ask glows the page elements bound to the queries it
   // comments on (every data component stamps data-query-name on its node).
-  // Pure decoration, works in static exports too; config.ref_queries is []
-  // when the author set ref=false.
-  const refQueries = config.ref_queries || [];
-  if (refQueries.length) {
-    const selector = refQueries
+  // Pure decoration, works in static exports too; config.highlight_queries
+  // is [] when the author set highlight=false.
+  const highlightQueries = config.highlight_queries || [];
+  if (highlightQueries.length) {
+    const selector = highlightQueries
       .map((q) => `[data-query-name="${CSS.escape(q)}"]`)
       .join(", ");
     let lit = [];
@@ -311,10 +305,10 @@ export function initAsk(el) {
       lit = [...document.querySelectorAll(selector)].filter(
         (n) => n !== el && n.dataset.asyncComponent !== "ask"
       );
-      lit.forEach((n) => n.classList.add("dashdown-ref-glow"));
+      lit.forEach((n) => n.classList.add("dashdown-ask-highlight"));
     });
     el.addEventListener("mouseleave", () => {
-      lit.forEach((n) => n.classList.remove("dashdown-ref-glow"));
+      lit.forEach((n) => n.classList.remove("dashdown-ask-highlight"));
       lit = [];
     });
   }

@@ -510,7 +510,10 @@ class TestAskComponent:
         assert 'title="AI-generated commentary"' in rendered.body_html
         # The sparkle carries a small "AI" wordmark — provenance is legible,
         # not just iconographic.
-        assert '<span class="dashdown-ask-badge-text">AI</span>' in rendered.body_html
+        assert (
+            '<span class="dashdown-ask-badge-text" aria-hidden="true">AI</span>'
+            in rendered.body_html
+        )
         assert "Commentary" not in rendered.body_html
         assert "dashdown-ask-label" not in rendered.body_html
         # Exactly one model-attribution slot, inside the badge (hover-revealed);
@@ -536,22 +539,25 @@ class TestAskComponent:
         rendered = render_page(source, connectors={})
         assert "&quot;lazy&quot;: false" in rendered.body_html
 
-    def test_ref_highlight_defaults_to_own_query(self):
+    def test_highlight_defaults_to_own_query(self):
         # Hover provenance: ask.js glows the data-query-name nodes named in
-        # config.ref_queries — by default the ask's own data query.
+        # config.highlight_queries — by default the ask's own data query.
         rendered = render_page(ASK_PAGE, connectors={})
-        assert "&quot;ref_queries&quot;: [&quot;by_region&quot;]" in rendered.body_html
-
-        source = ASK_PAGE.replace("max_rows=2", 'max_rows=2 ref="daily, totals"')
-        rendered = render_page(source, connectors={})
         assert (
-            "&quot;ref_queries&quot;: [&quot;daily&quot;, &quot;totals&quot;]"
+            "&quot;highlight_queries&quot;: [&quot;by_region&quot;]"
             in rendered.body_html
         )
 
-        source = ASK_PAGE.replace("max_rows=2", "max_rows=2 ref=false")
+        source = ASK_PAGE.replace("max_rows=2", 'max_rows=2 highlight="daily, totals"')
         rendered = render_page(source, connectors={})
-        assert "&quot;ref_queries&quot;: []" in rendered.body_html
+        assert (
+            "&quot;highlight_queries&quot;: [&quot;daily&quot;, &quot;totals&quot;]"
+            in rendered.body_html
+        )
+
+        source = ASK_PAGE.replace("max_rows=2", "max_rows=2 highlight=false")
+        rendered = render_page(source, connectors={})
+        assert "&quot;highlight_queries&quot;: []" in rendered.body_html
 
     def test_inline_variant_drops_card_chrome(self):
         rendered = render_page(ASK_PAGE, connectors={})
@@ -919,7 +925,7 @@ class TestGracefulDegradation:
         finally:
             project.close()
 
-    def test_misconfigured_llm_notice_names_the_problem(self, tmp_path, monkeypatch):
+    def test_misconfigured_llm_notice_stays_generic(self, tmp_path, monkeypatch):
         monkeypatch.delenv("DASHDOWN_TEST_UNSET_VAR", raising=False)
         client, _ = _client_with_fake(tmp_path, llm_block=_MISCONFIGURED_LLM)
         r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}")
@@ -927,13 +933,17 @@ class TestGracefulDegradation:
         notice = r.json()["notice"]
         assert "AI commentary is not available" in notice
         assert "misconfigured" in notice
-        # The author reads this while setting up — name the actual problem.
-        assert "DASHDOWN_TEST_UNSET_VAR" in notice
+        # Any viewer sees this text (and static exports bake it) — the config
+        # detail (env var names, …) belongs in the server log, never here.
+        assert "DASHDOWN_TEST_UNSET_VAR" not in notice
+        assert "server log" in notice
 
     def test_unavailable_notice_wording(self):
         assert "no LLM provider is configured" in unavailable_notice(LLMConfig())
-        broken = LLMConfig(error="boom")
-        assert "misconfigured: boom" in unavailable_notice(broken)
+        broken = LLMConfig(error="env var SECRET_KEY not set")
+        notice = unavailable_notice(broken)
+        assert "misconfigured" in notice
+        assert "SECRET_KEY" not in notice  # detail stays in the log
 
     def test_build_with_misconfigured_llm_succeeds(self, tmp_path, monkeypatch):
         monkeypatch.delenv("DASHDOWN_TEST_UNSET_VAR", raising=False)
@@ -949,7 +959,9 @@ class TestGracefulDegradation:
         assert result.failed_asks == []
         snapshot = tmp_path / "dist" / "_dashdown" / "data" / "_ask" / f"{THE_ASK_ID}.json"
         payload = json.loads(snapshot.read_text(encoding="utf-8"))
-        assert "DASHDOWN_TEST_UNSET_VAR" in payload["notice"]
+        # The baked notice is public — generic wording, no config internals.
+        assert "misconfigured" in payload["notice"]
+        assert "DASHDOWN_TEST_UNSET_VAR" not in payload["notice"]
 
 
 # --------------------------------------------------------------------------- #

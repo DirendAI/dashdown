@@ -400,14 +400,15 @@ def unavailable_notice(config: LLMConfig) -> str:
     """Reader-facing message for an <Ask /> card when the LLM is off.
 
     One wording shared by the live endpoint and the static build, so a card
-    says the same thing everywhere. A misconfigured block names the problem
-    (it's the author who reads this while setting up); an absent block is the
-    plain "not configured" case.
+    says the same thing everywhere. Deliberately *without* the config error
+    detail: any viewer (and any static export) sees this text, and the detail
+    can name internals like env vars — the author gets the specifics from the
+    server log (``load_project`` warns with the full reason).
     """
     if config.error:
         return (
-            "AI commentary is not available — the `llm:` block in "
-            f"dashdown.yaml is misconfigured: {config.error}"
+            "AI commentary is not available — the LLM provider is "
+            "misconfigured (see the server log)."
         )
     return (
         "AI commentary is not available — no LLM provider is configured "

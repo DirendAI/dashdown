@@ -610,7 +610,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         the referenced query exactly like the data API; the answer is cached
         per (ask id, params the SQL actually uses) so repeat page loads don't
         spend LLM credits. `_refresh=1` (the card's ↻ button) bypasses the
-        cache read. Deliberately a sync `def`: FastAPI runs it in the
+        cache read — unless the ask was authored with `refresh=false`, which
+        is enforced here, not just by hiding the button (a regeneration is a
+        billable LLM call). Deliberately a sync `def`: FastAPI runs it in the
         threadpool, so a multi-second LLM call doesn't block the event loop.
 
         `_stream=1` (sent by ask.js) opts into Server-Sent Events on the slow

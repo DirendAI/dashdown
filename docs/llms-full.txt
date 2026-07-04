@@ -17,7 +17,7 @@ Introspected straight from the registries — the **same data `dashdown componen
 
 | Component | Attributes | Summary |
 |---|---|---|
-| `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `grain`, `inline`, `label`, `lazy`, `max_rows`, `metric`, `ref`, `refresh`, `replay`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
+| `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `grain`, `highlight`, `inline`, `label`, `lazy`, `max_rows`, `metric`, `refresh`, `replay`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
 | `BarChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `horizontal`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
 | `BoxPlot` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
 | `ButtonGroup` \* | `all_label`, `bar`, `default`, `filter_bar`, `include_all`, `label`, `name`, `options`, `url_sync` | Single-select filter shown as an inline **segmented control** — a row of pill buttons where exactly one is active ("All · Active · Churned", "Day · Week · Month"). A lower-friction alternative to a `… |
@@ -5273,7 +5273,7 @@ it, so the first words appear sub-second instead of after the full generation.
 | `replay`    | Typewriter replay of a cached/baked answer: `"once"` (default), `"always"`, or `"off"`. |
 | `refresh`   | `refresh=false` removes the viewer ↻ regenerate button — and the server stops honoring `_refresh` for this ask, so viewers can't force billable LLM calls. |
 | `inline`    | Chrome-less: no card border/background — the answer reads as part of the page prose (blog style). The small ✦ AI badge stays visible; the ↻ button and model attribution appear on hover. |
-| `ref`       | Hover provenance: while the ask is hovered, the charts/tables bound to these queries glow amber. Defaults to the ask's own `data` query; `ref="a,b"` names others, `ref=false` disables. |
+| `highlight` | Hover provenance: while the ask is hovered, the charts/tables bound to these queries glow amber. Defaults to the ask's own `data` query; `highlight="a,b"` names others, `highlight=false` disables. |
 | `lazy`      | On by default: the answer is generated only once the card scrolls into view — an unseen ask costs nothing, and the viewer watches it type in. `lazy=false` generates on page load. PDF/screenshot exports always load eagerly. |
 
 ## Live example
@@ -5289,7 +5289,7 @@ server — see [Graceful degradation](#graceful-degradation)).
 <Ask data={monthly_downloads} ask="Summarize the download trend in two sentences." replay="always" />
 
 Hover the commentary card: the chart above **glows amber** — it's bound to the
-same query the answer was generated from (see the `ref` attribute).
+same query the answer was generated from (see the `highlight` attribute).
 
 ### The knobs at a glance
 

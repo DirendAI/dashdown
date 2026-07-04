@@ -30,7 +30,7 @@ it, so the first words appear sub-second instead of after the full generation.
 | `replay`    | Typewriter replay of a cached/baked answer: `"once"` (default), `"always"`, or `"off"`. |
 | `refresh`   | `refresh=false` removes the viewer ↻ regenerate button — and the server stops honoring `_refresh` for this ask, so viewers can't force billable LLM calls. |
 | `inline`    | Chrome-less: no card border/background — the answer reads as part of the page prose (blog style). The small ✦ AI badge stays visible; the ↻ button and model attribution appear on hover. |
-| `ref`       | Hover provenance: while the ask is hovered, the charts/tables bound to these queries glow amber. Defaults to the ask's own `data` query; `ref="a,b"` names others, `ref=false` disables. |
+| `highlight` | Hover provenance: while the ask is hovered, the charts/tables bound to these queries glow amber. Defaults to the ask's own `data` query; `highlight="a,b"` names others, `highlight=false` disables. |
 | `lazy`      | On by default: the answer is generated only once the card scrolls into view — an unseen ask costs nothing, and the viewer watches it type in. `lazy=false` generates on page load. PDF/screenshot exports always load eagerly. |
 
 ## Live example
@@ -51,7 +51,7 @@ FROM downloads GROUP BY month ORDER BY month
 <Ask data={monthly_downloads} ask="Summarize the download trend in two sentences." replay="always" />
 
 Hover the commentary card: the chart above **glows amber** — it's bound to the
-same query the answer was generated from (see the `ref` attribute).
+same query the answer was generated from (see the `highlight` attribute).
 
 ### The knobs at a glance
 

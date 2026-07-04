@@ -70,10 +70,12 @@ class Ask(Component):
                          small ✦ AI badge stays visible so generated text is
                          always marked; the ↻ button and model attribution
                          appear on hover.
-        ref="a,b"        hover provenance: while the ask is hovered, page
+        highlight="a,b"  hover provenance: while the ask is hovered, page
                          elements bound to these queries (charts, tables, …)
                          glow amber. Defaults to the ask's own data query;
-                         `ref=false` disables the highlight.
+                         `highlight=false` disables. (Named `highlight`, not
+                         `ref` — the query library's dbt-style ref() is a
+                         different concept.)
         lazy=true        generate only once the card scrolls into view — an
                          unseen ask costs nothing, and the viewer watches the
                          answer type in. `lazy=false` loads on page load;
@@ -119,16 +121,19 @@ class Ask(Component):
 
         # Provenance highlight: which query names glow while the ask is
         # hovered (ask.js matches their data-query-name nodes). Defaults to
-        # the ask's own data query; ref="a,b" points elsewhere; ref=false off.
-        ref_val = attrs.get("ref")
-        if ref_val is False:
-            ref_queries: list[str] = []
-        elif ref_val is None:
-            ref_queries = [name]
-        elif isinstance(ref_val, DataRef):
-            ref_queries = [ref_val.name]
+        # the ask's own data query; highlight="a,b" points elsewhere;
+        # highlight=false turns it off.
+        highlight_val = attrs.get("highlight")
+        if highlight_val is False:
+            highlight_queries: list[str] = []
+        elif highlight_val is None:
+            highlight_queries = [name]
+        elif isinstance(highlight_val, DataRef):
+            highlight_queries = [highlight_val.name]
         else:
-            ref_queries = [r.strip() for r in str(ref_val).split(",") if r.strip()]
+            highlight_queries = [
+                h.strip() for h in str(highlight_val).split(",") if h.strip()
+            ]
         ask = register_ask_def(
             name,
             connector,
@@ -161,7 +166,7 @@ class Ask(Component):
                     "ask_id": ask.id,
                     "query_name": name,
                     "replay": replay,
-                    "ref_queries": ref_queries,
+                    "highlight_queries": highlight_queries,
                     "lazy": lazy,
                 }
             )
@@ -206,7 +211,9 @@ class Ask(Component):
             '<path stroke-linejoin="round" '
             'd="M18.8 3.2l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z"/>'
             "</svg>"
-            '<span class="dashdown-ask-badge-text">AI</span>'
+            # aria-hidden: the svg's aria-label already says "AI-generated
+            # commentary" — without it a screen reader announces "AI" twice.
+            '<span class="dashdown-ask-badge-text" aria-hidden="true">AI</span>'
             f"{label_html}"
             '<span class="dashdown-ask-model" hidden></span></span>'
         )

@@ -1189,7 +1189,7 @@ body {
    the queries it comments on light up in the same warning-amber as the AI
    badge — subtle border + soft shadow. !important so it beats the elevation
    rules above regardless of the element's own hover state. */
-.dashdown-ref-glow {
+.dashdown-ask-highlight {
   border-color: oklch(var(--wa, 75% 0.16 75) / 0.38) !important;
   box-shadow:
     0 0 0 1px oklch(var(--wa, 75% 0.16 75) / 0.2),
