@@ -17,7 +17,11 @@ usually want to pin a cheaper/faster one via ``llm.model`` (every cache-miss
 is billed).
 
 No ``llm:`` block (the default) leaves the feature off; ``<Ask />`` blocks
-then report that no provider is configured instead of failing the page.
+then report that no provider is configured instead of failing the page. A
+*misconfigured* block (unset ``${API_KEY}`` env var, unknown provider, …)
+behaves the same way: ``load_project`` logs the problem and disables the
+feature (``LLMConfig.error`` carries the reason for the ask cards) rather
+than refusing to serve or build.
 Per-ask knobs (``max_rows``, ``cache_ttl``) are component attributes with
 defaults below — mirroring how ``cache_ttl`` works on ``:::query`` blocks —
 not global config.
@@ -72,11 +76,17 @@ class LLMConfig:
     is a general LLM gateway that future features can share — anything
     specific to one consumer (like ``<Ask />``'s ``max_rows``/``cache_ttl``)
     belongs on that consumer.
+
+    ``error`` carries the reason a present-but-broken ``llm:`` block was
+    disabled (e.g. an unset ``${API_KEY}`` env var). Unlike ``auth:``, a bad
+    llm block must NOT refuse to start the server — the feature just turns
+    off and every ``<Ask />`` card explains why (see ``load_project``).
     """
 
     provider: str = "none"
     model: str | None = None
     api_key: str = ""
+    error: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -101,8 +111,11 @@ def _resolve_secret(value: Any) -> str:
 def parse_llm_config(raw: dict | None) -> LLMConfig:
     """Build an :class:`LLMConfig` from the ``llm`` block of dashdown.yaml.
 
-    Raises ``ValueError`` on misconfiguration so the server refuses to start
-    half-configured (same policy as ``auth:`` / ``branding:``).
+    Raises ``ValueError`` on misconfiguration — but unlike ``auth:``, the
+    caller (``load_project``) catches it and degrades to a *disabled* config
+    carrying the message, so `dashdown serve` / `dashdown build` still run
+    without the key and each ``<Ask />`` card explains why commentary is off.
+    (Auth stays fail-hard: a half-configured guard must never start open.)
     """
     if not raw:
         return LLMConfig()
@@ -383,6 +396,25 @@ def known_providers() -> list[str]:
     return sorted(_PROVIDERS)
 
 
+def unavailable_notice(config: LLMConfig) -> str:
+    """Reader-facing message for an <Ask /> card when the LLM is off.
+
+    One wording shared by the live endpoint and the static build, so a card
+    says the same thing everywhere. A misconfigured block names the problem
+    (it's the author who reads this while setting up); an absent block is the
+    plain "not configured" case.
+    """
+    if config.error:
+        return (
+            "AI commentary is not available — the `llm:` block in "
+            f"dashdown.yaml is misconfigured: {config.error}"
+        )
+    return (
+        "AI commentary is not available — no LLM provider is configured "
+        "(add an `llm:` block to dashdown.yaml)."
+    )
+
+
 def create_adapter(config: LLMConfig) -> LLMAdapter:
     if not config.enabled:
         raise ValueError("no LLM provider configured (add an `llm:` block to dashdown.yaml)")
@@ -422,6 +454,10 @@ class AskDef:
     prompt: str
     max_rows: int = DEFAULT_MAX_ROWS
     cache_ttl: int = DEFAULT_ANSWER_TTL
+    # Whether the endpoint honors `_refresh=1` (the card's ↻ button). Off ⇒
+    # viewers can't force fresh (billable) LLM calls — enforced server-side,
+    # not just by hiding the button. Like cache_ttl, stays out of the id hash.
+    allow_refresh: bool = True
     # Page frontmatter threaded into the prompt (see build_ask_prompt) so the
     # model knows what dashboard it's commenting on. Part of the id hash:
     # changed context ⇒ a different id ⇒ a fresh answer.
@@ -465,6 +501,7 @@ def register_ask_def(
     cache_ttl: int = DEFAULT_ANSWER_TTL,
     page_title: str = "",
     page_description: str = "",
+    allow_refresh: bool = True,
 ) -> AskDef:
     d = AskDef(
         id=ask_id(query_name, connector, prompt, max_rows, page_title, page_description),
@@ -475,6 +512,7 @@ def register_ask_def(
         cache_ttl=cache_ttl,
         page_title=page_title,
         page_description=page_description,
+        allow_refresh=allow_refresh,
     )
     _ask_def_cache[d.id] = d
     return d
@@ -485,9 +523,16 @@ def get_ask_def(id: str) -> AskDef | None:
 
 
 # --------------------------------------------------------------------------- #
-# Answer cache: (ask id, relevant substituted params) -> (html, expiry)
+# Answer cache: (ask id, relevant substituted params) -> (html, text, expiry)
+#
+# ``text`` is the model's raw Markdown answer, kept alongside the rendered
+# ``html`` so a cache hit (and a static bake) can *replay* the answer with the
+# same typewriter effect a live stream has — ask.js types the text out, then
+# swaps in the sanitized html. Rendering always uses ``html``; the raw text is
+# only ever shown as escaped plain text (textContent), exactly like the live
+# SSE chunks, so shipping it widens nothing.
 # --------------------------------------------------------------------------- #
-_answer_cache: dict[tuple[str, tuple], tuple[str, float]] = {}
+_answer_cache: dict[tuple[str, tuple], tuple[str, str, float]] = {}
 
 
 def relevant_params(sql: str, params: dict[str, str]) -> dict[str, str]:
@@ -504,20 +549,23 @@ def _freeze(params: dict[str, str]) -> tuple:
     return tuple(sorted(params.items()))
 
 
-def get_cached_answer(ask_id: str, params: dict[str, str]) -> str | None:
+def get_cached_answer(ask_id: str, params: dict[str, str]) -> tuple[str, str] | None:
+    """Return ``(html, raw answer text)`` for a live cache entry, else None."""
     key = (ask_id, _freeze(params))
     entry = _answer_cache.get(key)
     if entry is None:
         return None
-    html, expiry = entry
+    html, text, expiry = entry
     if time.monotonic() > expiry:
         del _answer_cache[key]
         return None
-    return html
+    return html, text
 
 
-def cache_answer(ask_id: str, params: dict[str, str], html: str, ttl: int) -> None:
-    _answer_cache[(ask_id, _freeze(params))] = (html, time.monotonic() + ttl)
+def cache_answer(
+    ask_id: str, params: dict[str, str], html: str, ttl: int, text: str = ""
+) -> None:
+    _answer_cache[(ask_id, _freeze(params))] = (html, text, time.monotonic() + ttl)
 
 
 # --------------------------------------------------------------------------- #
@@ -598,17 +646,21 @@ def build_ask_prompt(
     return "\n".join(lines)
 
 
-def generate_answer_html(
+def generate_answer(
     ask: AskDef,
     result: QueryResult,
     adapter: LLMAdapter,
     params: dict[str, str] | None = None,
-) -> str:
+) -> tuple[str, str]:
     """Run one ask: build the prompt (capped to the ask's ``max_rows``), call
     the LLM, render the Markdown answer to HTML (raw HTML disabled, so model
-    output can't inject markup into the page)."""
+    output can't inject markup into the page).
+
+    Returns ``(html, raw answer text)`` — the raw text rides along in the
+    answer cache / baked snapshot so the client can replay the answer as a
+    typewriter (see the answer-cache comment above)."""
     answer = adapter.complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))
-    return render_markdown_text(answer)
+    return render_markdown_text(answer), answer
 
 
 def stream_answer(
@@ -620,7 +672,7 @@ def stream_answer(
     """Yield the model's raw answer text incrementally (the SSE slow path).
 
     The caller joins the chunks and renders them with ``render_markdown_text``
-    — the same sanitized HTML :func:`generate_answer_html` produces — so
+    — the same sanitized HTML :func:`generate_answer` produces — so
     streaming never widens what reaches the page.
     """
     yield from adapter.stream_complete(SYSTEM_PROMPT, build_ask_prompt(ask, result, params))

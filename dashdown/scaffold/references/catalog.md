@@ -11,7 +11,7 @@ Introspected straight from the registries — the **same data `dashdown componen
 
 | Component | Attributes | Summary |
 |---|---|---|
-| `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `grain`, `label`, `max_rows`, `metric`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
+| `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `grain`, `inline`, `label`, `lazy`, `max_rows`, `metric`, `ref`, `refresh`, `replay`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
 | `BarChart` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `horizontal`, `locale`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
 | `BoxPlot` | `by`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `format`, `grain`, `height`, `locale`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
 | `ButtonGroup` \* | `all_label`, `bar`, `default`, `filter_bar`, `include_all`, `label`, `name`, `options`, `url_sync` | Single-select filter shown as an inline **segmented control** — a row of pill buttons where exactly one is active ("All · Active · Churned", "Day · Week · Month"). A lower-friction alternative to a `… |

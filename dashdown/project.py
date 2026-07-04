@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass, field
@@ -629,12 +630,23 @@ def load_project(root: Path) -> Project:
     cfg = ProjectConfig()
     if cfg_path.exists():
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        # A broken `llm:` block (unset ${API_KEY} env var, unknown provider, …)
+        # must not stop `serve`/`build` — AI commentary is a convenience, not a
+        # guard. Degrade to disabled and carry the reason so every <Ask /> card
+        # can explain why commentary is off. (`auth:` below stays fail-hard.)
+        try:
+            llm_config = parse_llm_config(raw.get("llm"))
+        except ValueError as e:
+            logging.getLogger(__name__).warning(
+                "llm: %s — AI commentary disabled", e
+            )
+            llm_config = LLMConfig(error=str(e))
         cfg = ProjectConfig(
             title=raw.get("title", cfg.title),
             auth=parse_auth_config(raw.get("auth")),
             branding=parse_branding_config(raw.get("branding")),
             format=parse_format_config(raw.get("format")),
-            llm=parse_llm_config(raw.get("llm")),
+            llm=llm_config,
             embed=parse_embed_config(raw.get("embed")),
             global_date=parse_global_filters_config(raw.get("global_filters")),
             filters=parse_filters_config(raw.get("filters")),
@@ -706,8 +718,6 @@ def load_project(root: Path) -> Project:
     else:
         py_dir = root / "queries"
         if py_dir.is_dir() and any(py_dir.rglob("*.py")):
-            import logging
-
             logging.getLogger(__name__).info(
                 "python_queries.enabled is false — skipping queries/*.py in %s", root
             )
@@ -724,8 +734,6 @@ def load_project(root: Path) -> Project:
     else:
         sem_dir = root / "semantic"
         if sem_dir.is_dir() and (any(sem_dir.rglob("*.yml")) or any(sem_dir.rglob("*.yaml"))):
-            import logging
-
             logging.getLogger(__name__).info(
                 "python_queries.enabled is false — skipping semantic/*.yml in %s", root
             )
@@ -772,8 +780,6 @@ def _import_user_modules(directory: Path) -> None:
         try:
             spec.loader.exec_module(module)
         except Exception as e:  # noqa: BLE001
-            import logging
-
             logging.getLogger(__name__).error(
                 "Failed to load user module %s: %s", py, e
             )

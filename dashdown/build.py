@@ -43,7 +43,13 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from dashdown.llm import AskDef, generate_answer_html, relevant_params, resolve_model_name
+from dashdown.llm import (
+    AskDef,
+    generate_answer,
+    relevant_params,
+    resolve_model_name,
+    unavailable_notice,
+)
 from dashdown.project import (
     Project,
     load_project,
@@ -753,11 +759,14 @@ def _export_ask(
     """Generate one <Ask /> commentary with ``params`` substituted and bake the JSON.
 
     Snapshots live under ``_dashdown/data/_ask/`` — the leading underscore
-    keeps the directory clear of connector names. A failure (no ``llm:``
-    block, missing extra, provider error) writes an ``error`` payload the
-    ask card renders as a muted note; the build doesn't abort. Ask ids dedupe
-    across pages, so on a dynamic page the first record's ``params`` win (the
-    static client has no per-record ask path — see the module docstring)."""
+    keeps the directory clear of connector names. An absent/misconfigured
+    ``llm:`` block bakes a ``notice`` payload ("commentary not available")
+    without counting as a failure — a keyless build is expected to succeed.
+    A real failure (missing extra, provider/query error) writes an ``error``
+    payload the ask card renders as a muted note; the build doesn't abort.
+    Ask ids dedupe across pages, so on a dynamic page the first record's
+    ``params`` win (the static client has no per-record ask path — see the
+    module docstring)."""
     ask_path = out_dir / "_dashdown" / "data" / "_ask" / f"{ask.id}.json"
     ask_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -769,8 +778,16 @@ def _export_ask(
         )
 
     if not project.config.llm.enabled:
-        _write_error(
-            "No LLM provider configured — add an `llm:` block to dashdown.yaml"
+        log.info("Ask '%s': LLM not configured — baking a notice payload", ask.id)
+        ask_path.write_text(
+            json.dumps(
+                {
+                    "ask_id": ask.id,
+                    "html": "",
+                    "notice": unavailable_notice(project.config.llm),
+                }
+            ),
+            encoding="utf-8",
         )
         return
 
@@ -784,7 +801,7 @@ def _export_ask(
             adapter = project.get_llm_adapter()
             # Same prompt context the live endpoint sends: all params for a
             # Python body (no SQL text to narrow against).
-            html = generate_answer_html(ask, qr, adapter, dict(params))
+            html, text = generate_answer(ask, qr, adapter, dict(params))
         except Exception as e:  # noqa: BLE001
             log.warning("Ask '%s' (%s) failed during build: %s", ask.id, ask.query_name, e)
             _write_error(f"{type(e).__name__}: {e}")
@@ -807,7 +824,7 @@ def _export_ask(
             qr = connector.query(final_sql)
             adapter = project.get_llm_adapter()
             # Narrow to the params the SQL substitutes, like the live endpoint.
-            html = generate_answer_html(
+            html, text = generate_answer(
                 ask, qr, adapter, relevant_params(sql, {**default_params, **params})
             )
         except Exception as e:  # noqa: BLE001
@@ -820,6 +837,9 @@ def _export_ask(
             {
                 "ask_id": ask.id,
                 "html": html,
+                # Raw answer text: lets the static client replay the answer as
+                # a typewriter (escaped plain text) before swapping in `html`.
+                "text": text,
                 "model": resolve_model_name(project.config.llm),
             },
             default=_json_default,
