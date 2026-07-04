@@ -81,7 +81,7 @@ the component keeps showing its last good value — live queries are **self-heal
 so an occasional upstream hiccup isn't fatal.
 
 :::note
-Live streaming needs a running server, so it pairs with `auth: none` (browsers
-can't send Basic/api-key credentials on a WebSocket handshake). See the framework
-README's "Real-time" section for the fan-out and caching details.
+Live streaming needs a running server (a static export snapshots data at build
+time, so live queries fall back to that snapshot). See the framework README's
+"Real-time" section for the fan-out and caching details.
 :::

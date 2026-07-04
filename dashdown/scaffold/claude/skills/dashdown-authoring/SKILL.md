@@ -33,7 +33,7 @@ The guide is **sharded for cheap reading**. Load only what the task needs:
 | A `semantic/*.yml` metric model | [semantic-layer](../../../.references/semantic-layer.md) | `dashdown metric --list` |
 | A dropdown / search / date filter | [filters](../../../.references/filters.md) | `dashdown serve .` (interact) |
 | Number / date display | [formatting](../../../.references/formatting.md) | `dashdown serve .` |
-| `dashdown.yaml` (theme/auth/search/embed) | [configuration](../../../.references/configuration.md) (+ [theming](../../../.references/theming.md), [authentication](../../../.references/authentication.md), [embedding](../../../.references/embedding.md)) | `dashdown check` |
+| `dashdown.yaml` (theme/search/branding) | [configuration](../../../.references/configuration.md) (+ [theming](../../../.references/theming.md)) | `dashdown check` |
 | A custom component or connector | [extending](../../../.references/extending.md) | `dashdown check` |
 | Static export / PDF / CSV | [exporting](../../../.references/exporting.md) | `dashdown build . --out dist` |
 

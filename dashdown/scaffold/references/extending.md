@@ -62,7 +62,7 @@ components/Timeline/
 
 Dashdown imports the `.py` and serves the `.js`/`.css` at
 `/_dashdown/components/<folder>/<file>`, injecting them into every page — on the
-dev server, in `dashdown build` exports, and in embeds alike. No `assets/`
+dev server and in `dashdown build` exports alike. No `assets/`
 wiring, no `<script>` tag in `render()`, and the `.py` source is **never**
 web-served. The contract:
 

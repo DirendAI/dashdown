@@ -132,8 +132,8 @@ the revenue dip?") instead of commenting on each in isolation:
 Everything composes as you'd expect: each name resolves its own connector (the
 list can span sources), hovering the card highlights **all** referenced
 charts/tables, the answer cache busts when a filter *any* of the queries uses
-changes (and only then), static builds bake the answer after executing every
-referenced query, and an embed token must be scoped to **all** of them.
+changes (and only then), and static builds bake the answer after executing every
+referenced query.
 
 ## Works on semantic-layer data too
 
@@ -179,7 +179,7 @@ attribute (and one-hour default) `<Ask>` takes:
            explain="Is growth accelerating or slowing?" cache_ttl=86400 />
 ```
 
-Works in embeds; omitted from static builds (on-demand generation needs a live
+Omitted from static builds (on-demand generation needs a live
 server — the same posture as the ↻ refresh button).
 
 ## Configuration
@@ -260,7 +260,7 @@ SQL actually substitutes (unioned across queries for a multi-query ask) — so r
 page loads and shared filter states reuse one answer instead of billing each view.
 `cache_ttl` controls expiry; it isn't part of the id (so changing it doesn't bust
 the cache). A reader's ↻ refresh affordance forces a fresh answer past the cache —
-each click is a billable LLM call, so on a public or embedded dashboard consider
+each click is a billable LLM call, so on a public dashboard consider
 `refresh=false`, which removes the button *and* makes the endpoint ignore
 `_refresh` for that ask (the opt-out holds even against hand-crafted requests).
 

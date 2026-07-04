@@ -127,7 +127,7 @@ format:
 ```
 
 All three keys are optional, and a malformed block fails fast at startup (like
-`auth:` / `branding:`), so the server never runs with a half-broken config.
+`branding:`), so the server never runs with a half-broken config.
 
 **Precedence — component attribute wins, the block fills the gaps.** A widget's
 own `locale=` / `currency=` / `date_format=` always overrides the project default;
@@ -142,8 +142,8 @@ number (a row count, a download total) into money. The block sets *values*, not
 *whether* a value is formatted.
 :::
 
-Defaults are baked into the page, so they apply identically on the dev server, in
-a `dashdown build` static export, and in an embed.
+Defaults are baked into the page, so they apply identically on the dev server and
+in a `dashdown build` static export.
 
 :::note
 These docs themselves set `format: { locale: en-US }` in `docs/dashdown.yaml` —

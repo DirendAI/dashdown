@@ -90,8 +90,6 @@ Point an agent straight at a task:
 - **[AI](/ai)** — LLM commentary in your dashboard (`<Ask />`) + building with coding agents.
 - **[Full-text search](/search)** — how `<SiteSearch />` works.
 - **[Exporting](/exporting)** — static builds, PDF, CSV.
-- **[Embedding](/embedding)** — drop a page into another site.
-- **[Authentication](/authentication)** — password-protect a dashboard.
 - **[Extending](/extending)** — write your own components and connectors.
 - **[CLI reference](/cli)** — every `dashdown` command from the terminal.
 

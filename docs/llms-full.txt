@@ -146,7 +146,7 @@ A Dashdown *project* is a directory the CLI points at:
 
 ```text
 my-dashboard/
-├── dashdown.yaml     # project config (title, auth, embed, branding, …)
+├── dashdown.yaml     # project config (title, branding, format, …)
 ├── sources.yaml      # data connectors
 ├── pages/            # one .md per route  →  pages/sales.md = /sales
 │   └── index.md      # the home page  →  /
@@ -157,8 +157,8 @@ my-dashboard/
 └── assets/           # custom.css, logos, images
 ```
 
-`dashdown.yaml` configures the whole dashboard (title, auth, branding,
-embedding, …) — see **[Configuration](/configuration)** for every block.
+`dashdown.yaml` configures the whole dashboard (title, branding, formatting,
+…) — see **[Configuration](/configuration)** for every block.
 
 :::tip
 There are two distinct domains: **the framework** (the `dashdown` package you
@@ -505,7 +505,7 @@ A ` ```mermaid ` fenced code block renders as an SVG diagram **client-side and
 fully offline** — the Mermaid bundle is vendored and lazy-loaded only on pages
 that contain a diagram, and every diagram re-themes itself when the reader toggles
 light/dark. There is no data API and no CDN, so diagrams render identically on the
-dev server, in a `dashdown build` export, and inside an embed. Sequence,
+dev server and in a `dashdown build` export. Sequence,
 flowchart, entity-relationship, state, class, Gantt, and pie diagrams are all
 supported.
 
@@ -635,17 +635,6 @@ format:                        # → Formatting
   currency: USD
   date_format: MMM D, YYYY
 
-auth:                          # → Authentication
-  type: basic
-  users:
-    admin: ${ADMIN_PASSWORD}
-
-embed:                         # → Embedding
-  enabled: true
-  frame_ancestors: ["https://example.com"]
-  secret: ${EMBED_SECRET}
-  token_ttl: 3600
-
 llm:                           # → Ask
   provider: anthropic
   api_key: ${ANTHROPIC_API_KEY}
@@ -684,7 +673,7 @@ python_queries:                # → Python queries
 :::note
 **Theme** is not configured here — it's viewer-controlled. The page follows the
 visitor's OS light/dark preference by default; the header toggle overrides it
-(saved per browser). An embedding host can pin a theme with `?_theme=light|dark`.
+(saved per browser).
 To restyle the look — colours, radii, spacing, chrome — drop a `assets/custom.css`
 in your project; see **[Theming & styling](/theming)**.
 :::
@@ -715,20 +704,6 @@ Project-wide defaults for number, currency and date display (`locale`, `currency
 `date_format`). A component's own `format=` attributes override these.
 
 → **[Formatting](/formatting)** for the full reference.
-
-## `auth`
-
-Password-protect the whole dashboard. `type: basic` (HTTP Basic) or `type: api_key`
-(a shared secret in a header); default `none`. Secrets support `${VAR}`.
-
-→ **[Authentication](/authentication)** for setup and the cross-origin caveats.
-
-## `embed`
-
-Serve pages chrome-less inside an iframe on another site, with framing allowlists
-and (when `auth` is on) signed access tokens.
-
-→ **[Embedding](/embedding)** for the framing rules and token flow.
 
 ## `llm`
 
@@ -2445,9 +2420,9 @@ the component keeps showing its last good value — live queries are **self-heal
 so an occasional upstream hiccup isn't fatal.
 
 :::note
-Live streaming needs a running server, so it pairs with `auth: none` (browsers
-can't send Basic/api-key credentials on a WebSocket handshake). See the framework
-README's "Real-time" section for the fan-out and caching details.
+Live streaming needs a running server (a static export snapshots data at build
+time, so live queries fall back to that snapshot). See the framework README's
+"Real-time" section for the fan-out and caching details.
 :::
 
 <!-- AUTO-GENERATED from docs/pages/ by tooling/gen-agent-docs.py — do not edit. -->
@@ -3724,7 +3699,7 @@ rows into drill-down links:
 Formatting helpers (`currency`, `decimals`, `locale`, `date_format`) work like
 they do on charts — see [Formatting](/formatting) for the full reference and the
 project-wide `format:` defaults. CSV export is built client-side (RFC 4180) and
-works in static exports and authed embeds for free.
+works in static exports for free.
 
 ## Heatmap cells
 
@@ -4722,9 +4697,7 @@ selection still applies once you navigate to a date-aware page.
 **Placement & persistence.** On a normal page the control lives in the sticky
 app header (reachable even when scrolled). The selection **persists across
 navigation** (localStorage), so it behaves as one global filter rather than a
-per-page one — URL params still win over the remembered value. When a page is
-[embedded](/embedding) (`?_embed`) the header chrome is omitted, so the control
-renders as an ordinary filter in the filter bar instead. [Static builds](/exporting)
+per-page one — URL params still win over the remembered value. [Static builds](/exporting)
 omit it (a fixed snapshot can't be re-filtered), like the other filter controls.
 
 It reuses the same control as the [`<DateRange>`](/components/date-range)
@@ -4853,7 +4826,7 @@ format:
 ```
 
 All three keys are optional, and a malformed block fails fast at startup (like
-`auth:` / `branding:`), so the server never runs with a half-broken config.
+`branding:`), so the server never runs with a half-broken config.
 
 **Precedence — component attribute wins, the block fills the gaps.** A widget's
 own `locale=` / `currency=` / `date_format=` always overrides the project default;
@@ -4868,8 +4841,8 @@ number (a row count, a download total) into money. The block sets *values*, not
 *whether* a value is formatted.
 :::
 
-Defaults are baked into the page, so they apply identically on the dev server, in
-a `dashdown build` static export, and in an embed.
+Defaults are baked into the page, so they apply identically on the dev server and
+in a `dashdown build` static export.
 
 :::note
 These docs themselves set `format: { locale: en-US }` in `docs/dashdown.yaml` —
@@ -4906,13 +4879,13 @@ before it:
 4. **`assets/custom.css`** — *your* project, linked **last → highest priority**.
 
 Because `custom.css` loads last, its rules win by plain stylesheet order — you
-rarely need `!important`. It applies identically on the dev server, in a
-`dashdown build` static export, and in an embedded page.
+rarely need `!important`. It applies identically on the dev server and in a
+`dashdown build` static export.
 
 :::note
 **Theme (light/dark) is viewer-controlled, not configured.** The page follows
-the visitor's OS preference, the header toggle overrides it (saved per browser),
-and an embed host can pin one with `?_theme=light|dark`. `custom.css` restyles
+the visitor's OS preference, the header toggle overrides it (saved per browser).
+`custom.css` restyles
 *both* themes — scope rules to `[data-theme="light"]` / `[data-theme="dark"]`
 when you want them to differ.
 :::
@@ -5345,8 +5318,8 @@ the revenue dip?") instead of commenting on each in isolation:
 Everything composes as you'd expect: each name resolves its own connector (the
 list can span sources), hovering the card highlights **all** referenced
 charts/tables, the answer cache busts when a filter *any* of the queries uses
-changes (and only then), static builds bake the answer after executing every
-referenced query, and an embed token must be scoped to **all** of them.
+changes (and only then), and static builds bake the answer after executing every
+referenced query.
 
 ## Works on semantic-layer data too
 
@@ -5392,7 +5365,7 @@ attribute (and one-hour default) `<Ask>` takes:
            explain="Is growth accelerating or slowing?" cache_ttl=86400 />
 ```
 
-Works in embeds; omitted from static builds (on-demand generation needs a live
+Omitted from static builds (on-demand generation needs a live
 server — the same posture as the ↻ refresh button).
 
 ## Configuration
@@ -5473,7 +5446,7 @@ SQL actually substitutes (unioned across queries for a multi-query ask) — so r
 page loads and shared filter states reuse one answer instead of billing each view.
 `cache_ttl` controls expiry; it isn't part of the id (so changing it doesn't bust
 the cache). A reader's ↻ refresh affordance forces a fresh answer past the cache —
-each click is a billable LLM call, so on a public or embedded dashboard consider
+each click is a billable LLM call, so on a public dashboard consider
 `refresh=false`, which removes the button *and* makes the endpoint ignore
 `_refresh` for that ask (the opt-out holds even against hand-crafted requests).
 
@@ -5695,8 +5668,7 @@ your own box on a page.
    body occurrences; every search term must appear for a page to match.
 
 Because the index is plain JSON and the ranking is in the browser, search works
-identically on the live server, in a `dashdown build` static export, and inside
-an embedded page.
+identically on the live server and in a `dashdown build` static export.
 
 :::note
 Unlike the `<Search>` *filter* (which drives SQL substitution and is stripped
@@ -5728,8 +5700,7 @@ search keeps working with no server.
 Every built page shows a small **"Generated &lt;time&gt;"** stamp at the foot of the
 content, so readers know exactly when the snapshot was produced. It's automatic
 (nothing to configure), localized to the reader's time zone, and appears only in
-`dashdown build` output — never on the live server. It's hidden in embeds and in
-PDF/print.
+`dashdown build` output — never on the live server. It's hidden in PDF/print.
 :::
 
 ### Dynamic detail pages (`static_paths`)
@@ -5782,127 +5753,6 @@ the breadcrumb line (top-right of every page) that renders the current page
 Every `<Table>` has a ↓ button in its header that downloads its *current,
 filtered* rows as RFC 4180 CSV — built client-side, no server endpoint. Opt out
 with `export=false`, rename with `export_filename=`.
-
-<!-- AUTO-GENERATED from docs/pages/ by tooling/gen-agent-docs.py — do not edit. -->
-<!-- Topic: embedding. Regenerate with: python tooling/gen-agent-docs.py -->
-
-<!-- source: docs/pages/embedding.md -->
-
-# Embedding
-
-Any page can be served chrome-less for embedding in another site via an
-auto-resizing iframe. Framing is **deny-by-default**: you opt in per project.
-
-```yaml
-# dashdown.yaml
-embed:
-  enabled: true
-  frame_ancestors:
-    - https://your-site.example
-  # secret: ${EMBED_SECRET}   # required when auth is on (signed, page-scoped tokens)
-  # token_ttl: 3600
-```
-
-Add `?_embed` to a page URL to render it without the header/sidebar/breadcrumbs.
-The host page includes the small `embed.js` loader, which drops an
-auto-resizing iframe and listens for the posted content height.
-
-## Authenticated embeds
-
-When the project has an `auth:` block, a cross-origin iframe can't send
-credentials — so an authed page is embedded with a signed, page-scoped token
-(`?_embed=<token>`), minted by `GET /_dashdown/api/embed-token?path=…` or the
-`dashdown embed-token` CLI. The token is an HMAC scoped to that exact page and the
-queries it reads, so it can't be replayed for other resources.
-
-:::tip
-The **Embed** button (on the breadcrumb line, top-right of every page) copies a ready-made snippet for the current page.
-:::
-
-<!-- AUTO-GENERATED from docs/pages/ by tooling/gen-agent-docs.py — do not edit. -->
-<!-- Topic: authentication. Regenerate with: python tooling/gen-agent-docs.py -->
-
-<!-- source: docs/pages/authentication.md -->
-
-# Authentication
-
-Dashdown ships optional built-in auth, configured with an `auth:` block in
-`dashdown.yaml`. The default is `none` — the app is open. There are two modes:
-`basic` (HTTP Basic, browser-friendly) and `api_key` (a shared secret in a
-header).
-
-:::warning
-A malformed `auth:` block makes the server **refuse to start**, so it never comes
-up open when you meant to lock it down. Fix the config rather than working around
-the error.
-:::
-
-## Basic auth
-
-Browser-friendly: the browser prompts for a username/password and resends it on
-every request.
-
-```yaml
-# dashdown.yaml
-auth:
-  type: basic
-  username: admin
-  password: ${DASH_PASSWORD}   # ${VAR} reads from the environment
-```
-
-For several accounts, use a `users` mapping instead of `username`/`password`:
-
-```yaml
-auth:
-  type: basic
-  users:
-    admin: ${ADMIN_PW}
-    viewer: readonly
-```
-
-## API-key auth
-
-For proxies and programmatic access: the client sends a shared secret in a
-header (default `X-API-Key`).
-
-```yaml
-auth:
-  type: api_key
-  header: X-API-Key      # optional — this is the default
-  key: ${DASH_API_KEY}
-  # or, to accept several keys:
-  # keys: [${KEY_A}, ${KEY_B}]
-```
-
-## How it works
-
-- **Secrets support `${ENV_VAR}` expansion** — keep real passwords and keys out
-  of the file and in the environment. A referenced variable that isn't set is an
-  error at startup.
-- **Every route is protected** except the `/_dashdown/health` check. An
-  unauthorized request gets a `401`; basic mode also returns a
-  `WWW-Authenticate` challenge so the browser prompts.
-- **Secrets compare in constant time** (`secrets.compare_digest`), so the check
-  doesn't leak length or content through timing.
-- **Config reloads live** — changing the `auth:` block is picked up without a
-  restart.
-
-## Auth and the cross-origin features
-
-Some features can't carry Basic/api-key credentials and need a different path
-when auth is on:
-
-- **Embedding** — a cross-origin iframe can't send credentials, so an authed
-  page is embedded with a **signed token** instead. See
-  [Authenticated embeds](/embedding#authenticated-embeds).
-- **Real-time streaming** — browsers can't send credentials on a WebSocket
-  handshake from JS, so live queries pair with `auth: none` (or cookie/proxy
-  auth in front). See [Real-time data](/realtime).
-
-:::note
-OAuth / SSO is intentionally out of scope for the built-in auth. Put Dashdown
-behind a reverse proxy (or an identity-aware proxy) for those.
-:::
 
 <!-- AUTO-GENERATED from docs/pages/ by tooling/gen-agent-docs.py — do not edit. -->
 <!-- Topic: extending. Regenerate with: python tooling/gen-agent-docs.py -->
@@ -5968,7 +5818,7 @@ components/Timeline/
 
 Dashdown imports the `.py` and serves the `.js`/`.css` at
 `/_dashdown/components/<folder>/<file>`, injecting them into every page — on the
-dev server, in `dashdown build` exports, and in embeds alike. No `assets/`
+dev server and in `dashdown build` exports alike. No `assets/`
 wiring, no `<script>` tag in `render()`, and the `.py` source is **never**
 web-served. The contract:
 
@@ -6110,7 +5960,6 @@ dashdown <command> --help  # options for one command
 | [`build`](#build) | Export a static site (HTML + pre-rendered data) |
 | [`pdf`](#pdf) | Export a presentation PDF |
 | [`screenshot`](#screenshot) | Capture a page to a PNG and verify its charts drew |
-| [`embed-token`](#embed-token) | Mint a signed token for an authenticated embed |
 
 ## serve
 
@@ -6379,28 +6228,6 @@ playwright install chromium
 ```
 
 See [Exporting](exporting).
-
-## embed-token
-
-Mint a signed embed token and a ready-to-paste `<script>` snippet for one page.
-Needed only when the dashboard has [auth](authentication) enabled — a cross-origin
-iframe can't send credentials, so it carries a scoped token instead. Requires an
-`embed:` block with a `secret` in `dashdown.yaml`.
-
-```bash
-dashdown embed-token . /sales
-dashdown embed-token . /sales --ttl 3600 --host https://dash.example
-```
-
-| Argument / Option | Default | Notes |
-| --- | --- | --- |
-| `page` | — | Page path to embed (positional), e.g. `/sales`. |
-| `-p, --project` | `.` | Project directory (positional). |
-| `--ttl` | `embed.token_ttl` | Token lifetime in seconds. |
-| `--host` | — | Public dashboard origin baked into the snippet. |
-
-The token is scoped to that exact page and the queries it reads, so it can't be
-replayed against other resources. See [Embedding](embedding).
 
 <!-- AUTO-GENERATED from docs/pages/ by tooling/gen-agent-docs.py — do not edit. -->
 <!-- Topic: telemetry. Regenerate with: python tooling/gen-agent-docs.py -->

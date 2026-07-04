@@ -98,8 +98,6 @@ Open the one shard your task needs:
 - [AI](.references/ai.md) — Dashdown is built for AI in **two directions** — the LLM that helps your *readers* understand a dashboard, and the coding agent that helps *you* build one
 - [Full-text search](.references/search.md) — `<SiteSearch />` is a built-in component that searches **every page** of the project
 - [Exporting](.references/exporting.md) — Renders the project to a serverless static site through the *exact same* render path as the live server
-- [Embedding](.references/embedding.md) — Any page can be served chrome-less for embedding in another site via an auto-resizing iframe
-- [Authentication](.references/authentication.md) — Dashdown ships optional built-in auth, configured with an `auth:` block in `dashdown.yaml`
 - [Extending Dashdown](.references/extending.md) — Dashdown has two extension points, both plain Python: **custom components** and **custom connectors**
 - [CLI reference](.references/cli.md) — Everything Dashdown does from the terminal goes through the `dashdown` command
 - [Telemetry & privacy](.references/telemetry.md) — Dashdown is pip-installed and self-hosted, with no accounts and no server in the loop
