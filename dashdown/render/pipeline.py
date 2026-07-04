@@ -654,6 +654,8 @@ def render_page(
         semantic_models=semantic_models,
         filter_debounce=filter_debounce,
         default_connector=default_connector or "",
+        page_title=str(frontmatter.get("title") or ""),
+        page_description=str(frontmatter.get("description") or ""),
     )
     body_html = render_components(body_html, ctx)
 

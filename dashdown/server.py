@@ -28,12 +28,15 @@ from dashdown.embed import (
 )
 from dashdown.llm import (
     cache_answer,
-    generate_answer_html,
+    generate_answer,
     get_ask_def,
     get_cached_answer,
     relevant_params,
     resolve_model_name,
+    stream_answer,
+    unavailable_notice,
 )
+from dashdown.render.markdown import render_markdown_text
 from dashdown.project import (
     Project,
     load_project,
@@ -607,8 +610,17 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         the referenced query exactly like the data API; the answer is cached
         per (ask id, params the SQL actually uses) so repeat page loads don't
         spend LLM credits. `_refresh=1` (the card's ↻ button) bypasses the
-        cache read. Deliberately a sync `def`: FastAPI runs it in the
+        cache read — unless the ask was authored with `refresh=false`, which
+        is enforced here, not just by hiding the button (a regeneration is a
+        billable LLM call). Deliberately a sync `def`: FastAPI runs it in the
         threadpool, so a multi-second LLM call doesn't block the event loop.
+
+        `_stream=1` (sent by ask.js) opts into Server-Sent Events on the slow
+        path: raw text chunks stream as `chunk` events while the model writes,
+        then one `done` event carries the server-rendered sanitized HTML —
+        exactly the JSON payload's `html` — which is also what gets cached.
+        A cache hit returns the single JSON payload instantly regardless, so
+        streaming only ever happens on a cache miss.
         """
         from fastapi import HTTPException
         from fastapi.responses import JSONResponse
@@ -622,9 +634,11 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         llm_cfg = proj.config.llm
         if not llm_cfg.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="No LLM provider configured — add an `llm:` block to dashdown.yaml",
+            # Absent or misconfigured `llm:` block: not an error — the page and
+            # its data still work, so answer 200 with a `notice` the card
+            # renders as a muted note (instead of 503-ing every ask on it).
+            return JSONResponse(
+                {"ask_id": ask_id, "html": "", "notice": unavailable_notice(llm_cfg)}
             )
         # The model that authored the commentary, surfaced to the reader. Derived
         # from config (not the adapter), so a cache hit reports it without
@@ -680,11 +694,28 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             def _run_query():
                 return connector.query(_substitute_params(sql, all_params))
 
-        if request.query_params.get("_refresh") != "1":
-            cached_html = get_cached_answer(ask_id, cache_params)
-            if cached_html is not None:
+        # `_refresh=1` (the card's ↻ button) bypasses the cache read — but only
+        # when the author allows it (<Ask refresh=false> must hold server-side
+        # too, or hiding the button is theater: a fresh call is billable).
+        wants_refresh = (
+            request.query_params.get("_refresh") == "1" and ask.allow_refresh
+        )
+        if not wants_refresh:
+            cached = get_cached_answer(ask_id, cache_params)
+            if cached is not None:
+                cached_html, cached_text = cached
+                # `text` is the raw answer the stream originally delivered —
+                # ask.js replays it as a typewriter (per its replay policy)
+                # before swapping in the sanitized html, so a cache hit can
+                # look exactly like the live generation did.
                 return JSONResponse(
-                    {"ask_id": ask_id, "html": cached_html, "cached": True, "model": model}
+                    {
+                        "ask_id": ask_id,
+                        "html": cached_html,
+                        "text": cached_text,
+                        "cached": True,
+                        "model": model,
+                    }
                 )
 
         # Run the referenced query, sharing the data API's result cache.
@@ -702,19 +733,64 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         try:
             adapter = proj.get_llm_adapter()
-            answer_html = generate_answer_html(ask, result, adapter)
         except ImportError as e:
             # Missing optional extra — surface the install hint.
             raise HTTPException(status_code=503, detail=str(e))
+
+        if request.query_params.get("_stream") == "1":
+            def _sse(event: str, data: dict) -> str:
+                return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+            def event_stream():
+                chunks: list[str] = []
+                try:
+                    for chunk in stream_answer(ask, result, adapter, cache_params):
+                        chunks.append(chunk)
+                        yield _sse("chunk", {"text": chunk})
+                except Exception as e:  # noqa: BLE001 — reported in-band (headers sent)
+                    log.exception("LLM stream failed for ask %s", ask_id)
+                    yield _sse(
+                        "error",
+                        {"error": f"LLM request failed: {type(e).__name__}: {e}"},
+                    )
+                    return
+                # Same sanitized render + cache write as the blocking path, so a
+                # streamed answer is indistinguishable once finished. The raw
+                # text is cached alongside so later cache hits can replay it.
+                answer_text = "".join(chunks)
+                answer_html = render_markdown_text(answer_text)
+                cache_answer(
+                    ask_id, cache_params, answer_html, ask.cache_ttl, answer_text
+                )
+                yield _sse(
+                    "done",
+                    {"ask_id": ask_id, "html": answer_html, "cached": False, "model": model},
+                )
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                # SSE must reach the client per-event, not buffered by a proxy.
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        try:
+            answer_html, answer_text = generate_answer(ask, result, adapter, cache_params)
         except Exception as e:
             log.exception("LLM request failed for ask %s", ask_id)
             raise HTTPException(
                 status_code=502, detail=f"LLM request failed: {type(e).__name__}: {e}"
             )
 
-        cache_answer(ask_id, cache_params, answer_html, ask.cache_ttl)
+        cache_answer(ask_id, cache_params, answer_html, ask.cache_ttl, answer_text)
         return JSONResponse(
-            {"ask_id": ask_id, "html": answer_html, "cached": False, "model": model}
+            {
+                "ask_id": ask_id,
+                "html": answer_html,
+                "text": answer_text,
+                "cached": False,
+                "model": model,
+            }
         )
 
     @app.get("/_dashdown/api/pdf")

@@ -22,10 +22,17 @@ class RenderContext:
         semantic_models: dict[str, Any] | None = None,
         filter_debounce: int = 300,
         default_connector: str = "",
+        page_title: str = "",
+        page_description: str = "",
     ) -> None:
         self.queries = queries
         self.params = params or {}
         self.current_path = current_path
+        # Page frontmatter (title/description), so a component whose output
+        # depends on what page it's on (e.g. <Ask />'s prompt context) can
+        # read it at render time.
+        self.page_title = page_title
+        self.page_description = page_description
         # True during `dashdown build`: filter components (which can't re-query a
         # fixed snapshot) are omitted from the output.
         self.static_build = static_build

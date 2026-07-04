@@ -1,14 +1,32 @@
 // Dashdown Ask Component
 // Authored LLM commentary on a query's data. Fetches the rendered answer from
 // /_dashdown/api/ask/{id} (or the baked _ask/{id}.json snapshot in a static
-// export), with a loading shimmer, debounced regeneration when filters the
+// export), with a blinking-cursor wait state, debounced regeneration when filters the
 // referenced query uses change, and an explicit ↻ refresh affordance.
+//
+// On a live server the request opts into streaming (`_stream=1`): a cache miss
+// arrives as Server-Sent Events — `chunk` events append escaped plain text
+// while the model writes, then one `done` event carries the server-rendered
+// sanitized HTML that replaces it (model output is only ever rendered
+// server-side with raw HTML disabled). A cache hit stays a single JSON
+// payload, so the branch below is decided by the response Content-Type.
+//
+// A cached / static-baked answer carries the raw answer text (`text`) so it
+// can be *replayed* with the same typewriter feel the live stream had: the
+// text types out as escaped plain text (identical rendering to live chunks),
+// then the sanitized HTML swaps in. Pacing is synthetic — a smooth cadence
+// capped to a short total, not recorded wall-clock timings (real streams
+// stall). Policy via the <Ask replay=…> attr: "once" (default; per session
+// per answer, tracked in sessionStorage), "always", or "off";
+// prefers-reduced-motion always skips straight to the final HTML.
 
 "use strict";
 
 import { readBuildConfig, readEmbedToken, readRouteParams, esc } from "../core.js";
 
 const _DEBOUNCE_MS = 400;
+const _REPLAY_TICK_MS = 30; // typewriter cadence for replayed answers
+const _REPLAY_CAP_MS = 2500; // whole replay finishes within this budget
 
 /**
  * Non-empty, non-internal filter values for the request URL. Query SQL is never
@@ -40,10 +58,11 @@ export function initAsk(el) {
   const modelEl = el.querySelector(".dashdown-ask-model");
   if (!body) return;
 
-  const skeletonHtml = body.innerHTML;
+  const loadingHtml = body.innerHTML; // the blinking-cursor wait state
   const build = readBuildConfig();
   const isStatic = !!(build && build.static);
   let requestSeq = 0; // drop responses that a newer request has superseded
+  let abortController = null; // aborts the superseded in-flight fetch/stream
   let debounceTimer = null;
   let lastUrl = null;
 
@@ -57,6 +76,7 @@ export function initAsk(el) {
       ...readRouteParams(),
       ...relevantFilters(filters),
     });
+    params.set("_stream", "1"); // SSE on a cache miss; a hit still returns JSON
     if (refresh) params.set("_refresh", "1");
     const embedToken = readEmbedToken();
     if (embedToken) params.set("_embed", embedToken);
@@ -68,29 +88,188 @@ export function initAsk(el) {
     body.innerHTML = `<div class="dashdown-ask-error">${esc(message)}</div>`;
   }
 
+  // An expected "commentary is off" state (no/broken `llm:` block) — not an
+  // error. Muted note, refresh affordance stays hidden (nothing to retry).
+  function renderNotice(message) {
+    body.innerHTML = `<div class="dashdown-ask-notice">${esc(message)}</div>`;
+  }
+
+  // ---- Typewriter replay of a cached / static-baked answer ---------------
+
+  // sessionStorage key for replay="once": the ask + its route params (a
+  // dynamic [slug] page shares one ask id across records, and each record's
+  // answer deserves its first showing). Deliberately NOT keyed on filters —
+  // a filter-heavy dashboard would otherwise re-type on every combination,
+  // which reads as noise rather than delivery.
+  function replayStorageKey() {
+    const route = new URLSearchParams(readRouteParams()).toString();
+    return `dashdown-ask-replayed:${askId}${route ? `:${route}` : ""}`;
+  }
+
+  function shouldReplay(data) {
+    if (!data.text) return false; // pre-replay server / old snapshot payload
+    const mode = config.replay || "once";
+    if (mode === "off") return false;
+    if (
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return false;
+    }
+    if (mode === "once") {
+      try {
+        if (sessionStorage.getItem(replayStorageKey())) return false;
+      } catch {
+        /* storage unavailable — replay anyway */
+      }
+    }
+    return true;
+  }
+
+  // Called once the viewer has seen the full typing effect — a genuine live
+  // stream counts too, so a later cache hit doesn't re-type the same answer.
+  function markReplayed() {
+    if ((config.replay || "once") !== "once") return;
+    try {
+      sessionStorage.setItem(replayStorageKey(), "1");
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  // Type the recorded answer out as escaped plain text (the exact rendering
+  // the live SSE chunks get), then swap in the sanitized HTML via renderDone.
+  // Pacing is synthetic: word-sized steps at a fixed cadence, batching words
+  // per tick so long answers still finish inside _REPLAY_CAP_MS.
+  function replayAnswer(data, seq) {
+    const words = data.text.match(/\S+\s*/g) || [];
+    if (!words.length) {
+      renderDone(data);
+      return Promise.resolve();
+    }
+    const perTick = Math.max(
+      1,
+      Math.ceil(words.length / (_REPLAY_CAP_MS / _REPLAY_TICK_MS))
+    );
+    const streamEl = document.createElement("div");
+    streamEl.className = "dashdown-ask-stream";
+    body.replaceChildren(streamEl);
+    let i = 0;
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (seq !== requestSeq) return resolve(); // superseded — stop typing
+        streamEl.textContent += words.slice(i, i + perTick).join("");
+        i += perTick;
+        if (i >= words.length) {
+          renderDone(data);
+          return resolve();
+        }
+        setTimeout(tick, _REPLAY_TICK_MS);
+      };
+      tick();
+    });
+  }
+
+  function renderDone(data) {
+    body.innerHTML = data.html || "";
+    // Attribute the answer to the model that wrote it (server/build payload).
+    if (modelEl && data.model) {
+      modelEl.textContent = `Generated by ${data.model}`;
+      modelEl.hidden = false;
+    }
+    // Regeneration needs the live endpoint; a static snapshot is fixed, so the
+    // refresh affordance is revealed only on a live server.
+    if (refreshBtn && !isStatic) refreshBtn.hidden = false;
+  }
+
+  // Consume an SSE cache-miss response: `chunk` events accumulate as escaped
+  // plain text (textContent — the raw model stream never renders as HTML),
+  // then `done` swaps in the server-rendered sanitized HTML.
+  async function consumeStream(response, seq) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamEl = null;
+
+    const handleEvent = (raw) => {
+      let event = "message";
+      const dataLines = [];
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      let data;
+      try {
+        data = JSON.parse(dataLines.join("\n"));
+      } catch {
+        return;
+      }
+      if (event === "chunk") {
+        if (!streamEl) {
+          streamEl = document.createElement("div");
+          streamEl.className = "dashdown-ask-stream";
+          body.replaceChildren(streamEl);
+        }
+        streamEl.textContent += data.text || "";
+      } else if (event === "done") {
+        renderDone(data);
+        // The viewer just watched the live stream — a later cache hit of the
+        // same answer shouldn't re-type it (replay="once").
+        markReplayed();
+      } else if (event === "error") {
+        renderError(data.error || "LLM request failed");
+      }
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (seq !== requestSeq) return; // stale — a newer request took over
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        if (raw.trim()) handleEvent(raw);
+      }
+    }
+  }
+
   async function load(url) {
     const seq = ++requestSeq;
-    body.innerHTML = skeletonHtml;
+    if (abortController) abortController.abort();
+    const controller = new AbortController();
+    abortController = controller;
+    body.innerHTML = loadingHtml;
     if (modelEl) modelEl.hidden = true; // re-hide while (re)loading
     try {
-      const response = await fetch(url);
-      const data = await response.json().catch(() => null);
+      const response = await fetch(url, { signal: controller.signal });
       if (seq !== requestSeq) return; // stale — a newer request is in flight
+      const contentType = response.headers.get("Content-Type") || "";
+      if (response.ok && contentType.includes("text/event-stream")) {
+        await consumeStream(response, seq);
+        return;
+      }
+      const data = await response.json().catch(() => null);
+      if (seq !== requestSeq) return;
       if (!response.ok || !data || data.error) {
         renderError((data && (data.error || data.detail)) || `HTTP ${response.status}`);
         return;
       }
-      body.innerHTML = data.html || "";
-      // Attribute the answer to the model that wrote it (server/build payload).
-      if (modelEl && data.model) {
-        modelEl.textContent = `Generated by ${data.model}`;
-        modelEl.hidden = false;
+      if (data.notice) {
+        renderNotice(data.notice);
+        return;
       }
-      // Regeneration needs the live endpoint; a static snapshot is fixed, so the
-      // refresh affordance is revealed only on a live server.
-      if (refreshBtn && !isStatic) refreshBtn.hidden = false;
+      // A cached / static-baked answer replays as a typewriter when the
+      // policy allows; otherwise it renders instantly.
+      if (shouldReplay(data)) {
+        await replayAnswer(data, seq);
+        if (seq === requestSeq) markReplayed(); // only a *finished* replay counts
+      } else {
+        renderDone(data);
+      }
     } catch (error) {
-      if (seq !== requestSeq) return;
+      if (seq !== requestSeq || error.name === "AbortError") return;
       console.error(`Ask component error for ${askId}:`, error);
       renderError(error.message);
     }
@@ -110,6 +289,30 @@ export function initAsk(el) {
     }
   }
 
+  // --- Provenance highlight -------------------------------------------
+  // Hovering the ask glows the page elements bound to the queries it
+  // comments on (every data component stamps data-query-name on its node).
+  // Pure decoration, works in static exports too; config.highlight_queries
+  // is [] when the author set highlight=false.
+  const highlightQueries = config.highlight_queries || [];
+  if (highlightQueries.length) {
+    const selector = highlightQueries
+      .map((q) => `[data-query-name="${CSS.escape(q)}"]`)
+      .join(", ");
+    let lit = [];
+    el.addEventListener("mouseenter", () => {
+      // Charts/tables only — never other ask cards, even on the same query.
+      lit = [...document.querySelectorAll(selector)].filter(
+        (n) => n !== el && n.dataset.asyncComponent !== "ask"
+      );
+      lit.forEach((n) => n.classList.add("dashdown-ask-highlight"));
+    });
+    el.addEventListener("mouseleave", () => {
+      lit.forEach((n) => n.classList.remove("dashdown-ask-highlight"));
+      lit = [];
+    });
+  }
+
   // The refresh affordance only works against a live server; a static export's
   // answer is a fixed baked snapshot, so leave the button hidden and unwired.
   if (refreshBtn && !isStatic) {
@@ -119,25 +322,55 @@ export function initAsk(el) {
     });
   }
 
-  // A static snapshot ignores filters — fetch the baked answer once.
-  if (isStatic) {
-    scheduleLoad({});
-    return;
+  // Kick off the data flow: static snapshots fetch the baked answer once
+  // (filters are ignored); live pages subscribe to the filters store via an
+  // Alpine effect (same single reactive path as counter.js) — runs once
+  // immediately, then on any filter change; the relevant-filter URL dedup
+  // above skips refetches the query can't see.
+  function start() {
+    if (isStatic) {
+      scheduleLoad({});
+      return;
+    }
+    const subscribe = () => {
+      Alpine.effect(() => {
+        const filters = { ...(Alpine.store("filters") || {}) };
+        scheduleLoad(filters);
+      });
+    };
+    if (window.Alpine) {
+      subscribe();
+    } else {
+      document.addEventListener("alpine:init", subscribe);
+    }
   }
 
-  // Single reactive path (same as counter.js): subscribe to the filters store
-  // via an Alpine effect. Runs once immediately, then on any filter change;
-  // the relevant-filter URL dedup above skips refetches the query can't see.
-  const subscribe = () => {
-    Alpine.effect(() => {
-      const filters = { ...(Alpine.store("filters") || {}) };
-      scheduleLoad(filters);
-    });
-  };
-  if (window.Alpine) {
-    subscribe();
+  // Lazy by default: an ask the viewer never scrolls to must not spend LLM
+  // credits, so nothing loads (and no filter subscription runs) until the
+  // card first approaches the viewport. Eager when the author set lazy=false,
+  // in print/screenshot runs (headless Chromium never scrolls — the page must
+  // settle for the readiness handshake), or without IntersectionObserver.
+  const eager =
+    config.lazy === false ||
+    window.__dashdownPrint ||
+    window.__dashdownCapture ||
+    typeof IntersectionObserver === "undefined";
+  if (eager) {
+    start();
   } else {
-    document.addEventListener("alpine:init", subscribe);
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          io.disconnect();
+          start();
+        }
+      },
+      // Fire only once the card is genuinely on screen (a fifth visible) —
+      // no pre-trigger, deliberately: generating early means a slow scroll
+      // arrives at finished text and the viewer never sees the typing.
+      { threshold: 0.2 }
+    );
+    io.observe(el);
   }
 }
 

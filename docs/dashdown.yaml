@@ -9,3 +9,10 @@ branding:
 
 format:
   locale: en-US
+
+# Powers the live <Ask /> example on the AI page. With MISTRAL_API_KEY unset
+# the site still serves and builds — the ask card just shows a "commentary is
+# not available" note instead of failing.
+llm:
+  provider: mistral
+  api_key: ${MISTRAL_API_KEY}
