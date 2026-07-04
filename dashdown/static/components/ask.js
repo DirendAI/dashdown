@@ -292,7 +292,10 @@ export function initAsk(el, opts = {}) {
       return;
     }
     if (paused()) {
-      pendingUrl = url; // newest wins; flush() fires it on reveal
+      // Newest wins; flush() fires it on reveal. Kill any timer armed while
+      // the surface was still visible — this URL supersedes it.
+      clearTimeout(debounceTimer);
+      pendingUrl = url;
       return;
     }
     pendingUrl = null;
@@ -303,7 +306,17 @@ export function initAsk(el, opts = {}) {
       // churn is debounced.
       load(url);
     } else {
-      debounceTimer = setTimeout(() => load(url), _DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => {
+        // Re-check at fire time: the surface may have been hidden during the
+        // debounce window (explain footer closed) — divert to pendingUrl so
+        // the load waits for the next reveal instead of billing an LLM call
+        // for a panel nobody is reading.
+        if (paused()) {
+          pendingUrl = url;
+          return;
+        }
+        load(url);
+      }, _DEBOUNCE_MS);
     }
   }
 

@@ -45,12 +45,15 @@ _DEFAULT_HEIGHT = 800
 # an error, and tally page-wide server-rendered error cards. Run in the page
 # after the readiness handshake. An empty-result chart still draws a canvas (the
 # "No data" message), so it counts as drawn — blank means it never painted.
+# Scoped to the ECharts container (like print.js::chartsRendered): the chart
+# root can carry other SVGs (the `explain` button + its footer's AI badge),
+# which must not make a never-painted chart count as drawn.
 _SIGNAL_JS = """
 () => {
   const charts = Array.from(document.querySelectorAll('[data-async-component="chart"]'));
   let drawn = 0, blank = 0, errored = 0;
   for (const el of charts) {
-    if (el.querySelector('canvas, svg')) drawn++;
+    if (el.querySelector('.dashdown-chart-container canvas, .dashdown-chart-container svg')) drawn++;
     else if (el.querySelector('.alert-error, .dashdown-error')) errored++;
     else blank++;
   }
