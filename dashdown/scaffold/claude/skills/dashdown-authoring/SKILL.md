@@ -6,7 +6,7 @@ description: Author this Dashdown analytics dashboard — pages, embedded SQL qu
 # Authoring this Dashdown dashboard
 
 This project is a **Dashdown** dashboard: Markdown files under `pages/` with embedded SQL
-(`:::query` blocks) and `<Component />` tags render to an interactive analytics app — no
+(fenced ```` ```sql <name> ```` query blocks) and `<Component />` tags render to an interactive analytics app — no
 JavaScript to write, no frontend toolchain.
 
 ## Start here — don't read everything
@@ -14,7 +14,7 @@ JavaScript to write, no frontend toolchain.
 The guide is **sharded for cheap reading**. Load only what the task needs:
 
 1. **[`AGENTS.md`](../../../AGENTS.md)** (project root) — the *map*: a one-screen cheat-sheet
-   (`:::query` / `${param}` / component syntax) + an index of per-topic references. Skim it first.
+   (fenced ```` ```sql <name> ```` query / `${param}` / component syntax) + an index of per-topic references. Skim it first.
 2. **`.references/<topic>.md`** (project root, linked below) — the full docs for one topic. Open the
    **one** shard your task needs, not the whole set.
 3. **The `dashdown` CLI** — for *facts* (a component's attrs, a connector's keys, real data),
@@ -39,8 +39,9 @@ The guide is **sharded for cheap reading**. Load only what the task needs:
 
 ## Task playbooks
 
-**Add a chart of a query.** Write a `:::query name=q connector=main` block (or reuse a
-`queries/*.sql`), then `<LineChart data={q} x="…" y="…" [series="…"] title="…" />`. Run
+**Add a chart of a query.** Write a fenced query block — ```` ```sql q ```` … ```` ``` ```` (first word
+after the language = name; add `connector=` only for a non-default source) — or reuse a
+`queries/*.sql`, then `<LineChart data={q} x="…" y="…" [series="…"] title="…" />`. Run
 `dashdown components` for the exact attrs; `dashdown check` to confirm it renders.
 
 **Add a connector.** Add a block to `sources.yaml` (`name:` → `type: postgres` + keys). Get the
@@ -63,7 +64,7 @@ never hand-concatenate values. The global date filter uses `${date_start}`/`${da
 `dashdown connectors --test` (is the connector reachable?) → `dashdown query --tables -c <conn>` /
 `dashdown query --schema <table> -c <conn>` (does the table/column exist + spelled right?) →
 `dashdown query "<the SQL>" -c <conn>` (does the SQL return rows with the right column names?).
-Confirm `data={name}` matches `:::query name=`.
+Confirm `data={name}` matches the query's name (the first word after ```` ```sql ````).
 
 **Verify your work.** Charts draw **client-side**, so `dashdown check` proves a page *renders*,
 not that a chart *painted*. Full loop: `dashdown check` (renders, no bad tags/attrs?) →
@@ -77,8 +78,8 @@ reports `N/M chart(s) drew`, exits non-zero if any stayed blank or errored — y
 
 A polished page: a filter bar on top, a KPI row, sections of charts each with its own `title=`, then a
 table. Controls marked `bar` **collect into the page's filter bar automatically — so there is no
-"Filters" heading to add**. Queries live in `queries/*.sql` (referenced by name) or inline `:::query` at
-the top; either way the query text renders nothing itself.
+"Filters" heading to add**. Queries live in `queries/*.sql` (referenced by name) or inline fenced ```` ```sql <name> ```` blocks
+at the top; either way the query text renders nothing itself.
 
 ````markdown
 ---
@@ -147,7 +148,7 @@ The mistakes coding agents make most on Dashdown — avoid them up front:
   between `<Grid …>` and its child components renders as **literal text**, not a heading. Put the section
   heading on its own line *above* the grid, give each chart its own `title="…"`, and keep a grid's children
   to components — one per line, blank-line-separated.
-- **`:::query` blocks are invisible.** Their SQL is collected and stripped — they render nothing on the
+- **Query definition blocks are invisible.** Their SQL is collected and stripped — they render nothing on the
   page. Never give them a heading of their own (any heading — "Queries", "Query Definitions", …) — it just
   leaves a dangling empty section. Put the blocks at the very top of the page (above the first heading) or
   in `queries/*.sql`, and let the components below display the data.
@@ -162,8 +163,8 @@ dashdown check              # config loads + every page renders? (queries never 
 dashdown components         # dense attr catalog for every component (-f json for machine-readable)
 dashdown components --connectors   # config keys + install extra per connector type
 dashdown connectors --test  # probe each connector (SELECT 1)
-dashdown query "SELECT * FROM t LIMIT 5" -c main   # inspect real data
-dashdown query --tables -c main            # what tables/views exist? (--schema <t> for columns)
+dashdown query "SELECT * FROM t LIMIT 5"          # inspect real data (-c <name> for a non-default source)
+dashdown query --tables                    # what tables/views exist? (--schema <t> for columns)
 dashdown metric --list      # semantic metrics & dimensions, if a semantic/ model exists
 dashdown screenshot /page   # PNG + verdict: did the chart canvases actually draw? (needs [pdf])
 ```

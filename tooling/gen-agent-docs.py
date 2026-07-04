@@ -401,7 +401,7 @@ editing a page, run `check`; before wiring a connector, `query` it.
 ```bash
 dashdown check                       # config loads + every page renders? (queries never run)
 dashdown connectors --test           # each connector reachable? (probes SELECT 1)
-dashdown query "SELECT * FROM t LIMIT 5" -c main   # inspect real data / schema (-f json|csv)
+dashdown query "SELECT * FROM t LIMIT 5"   # real data / schema (-c <name> for a non-default source)
 dashdown components                  # dense, introspected attr catalog for every component
 dashdown components --connectors     # config keys + install extra per connector type
 dashdown metric --list               # semantic metrics & dimensions, if a semantic/ model exists
