@@ -36,6 +36,7 @@ import json
 import logging
 import re
 import shutil
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -321,15 +322,40 @@ def build_site(
             f"directory, not an output directory. Choose a separate --out."
         )
 
+    # Wall-clock start of the whole build (project load included) — the "built in
+    # <N>" half of the provenance footer measures against this.
+    started_at = time.perf_counter()
     project = load_project(project_root)
     try:
-        return _build(project, out_dir, only_pages=only_pages)
+        return _build(project, out_dir, only_pages=only_pages, started_at=started_at)
     finally:
         project.close()
 
 
+# Filled into the "built in <N>" footer at render time and swapped for the real,
+# formatted duration in one final pass once the total build time is known (a page
+# can't know it while rendering — the render *is* most of the build). Distinct
+# enough never to collide with page content; carries no HTML-special chars so it
+# survives Jinja autoescaping verbatim.
+_BUILD_DURATION_PLACEHOLDER = "__DASHDOWN_BUILD_DURATION__"
+
+
+def _format_build_duration(seconds: float) -> str:
+    """Human-readable build duration for the provenance footer."""
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {secs:02d}s"
+
+
 def _build(
-    project: Project, out_dir: Path, *, only_pages: list[str] | None = None
+    project: Project,
+    out_dir: Path,
+    *,
+    only_pages: list[str] | None = None,
+    started_at: float | None = None,
 ) -> BuildResult:
     result = BuildResult(out_dir=out_dir)
 
@@ -426,6 +452,7 @@ def _build(
         custom_css_url=custom_css_url,
         built_at=built_at,
         built_at_display=built_at_display,
+        built_duration_display=_BUILD_DURATION_PLACEHOLDER,
         exported=exported,
         exported_asks=exported_asks,
     )
@@ -469,6 +496,20 @@ def _build(
             continue
 
         _emit_page(ctx, app_url, md_path, params, result)
+
+    # Now that every page is written, the total build time is known — swap the
+    # duration placeholder in each emitted page for the real, formatted value.
+    # A no-op when the build wasn't timed (defensive; `build_site` always is).
+    if started_at is not None:
+        duration = _format_build_duration(time.perf_counter() - started_at)
+        for app_url in result.pages:
+            out_file = _output_file(app_url, out_dir)
+            html = out_file.read_text(encoding="utf-8")
+            if _BUILD_DURATION_PLACEHOLDER in html:
+                out_file.write_text(
+                    html.replace(_BUILD_DURATION_PLACEHOLDER, duration),
+                    encoding="utf-8",
+                )
 
     return result
 
@@ -535,6 +576,7 @@ class _PageCtx:
     custom_css_url: str | None
     built_at: str
     built_at_display: str
+    built_duration_display: str
     exported: set[tuple]
     exported_asks: set[str]
 
@@ -638,6 +680,9 @@ def _emit_page(
         # readable <time datetime>; `built_at_display` the no-JS fallback text.
         built_at=ctx.built_at,
         built_at_display=ctx.built_at_display,
+        # A placeholder while rendering; the final pass swaps it for the real
+        # total-build duration once every page is written (see `_build`).
+        built_duration_display=ctx.built_duration_display,
         # Root-relative like every other asset URL; the <base> resolves it.
         logo_url=resolve_logo_url(project.config.branding.logo, prefix=""),
         favicon_url=resolve_logo_url(project.config.branding.favicon, prefix=""),

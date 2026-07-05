@@ -321,6 +321,19 @@ def test_build_injects_generated_timestamp(tmp_path):
         datetime.fromisoformat(iso.group(1))
         built_at = re.search(r'"builtAt": "([^"]+)"', html)
         assert built_at and built_at.group(1) == iso.group(1)
+        # The "built in <duration>" half is patched in once the total build time
+        # is known — the placeholder must never survive into the output.
+        assert re.search(r"built in \S+", html)
+        assert "__DASHDOWN_BUILD_DURATION__" not in html
+
+
+def test_format_build_duration():
+    """The provenance footer's duration reads naturally across magnitudes."""
+    from dashdown.build import _format_build_duration
+
+    assert _format_build_duration(0.42) == "420ms"
+    assert _format_build_duration(2.37) == "2.4s"
+    assert _format_build_duration(65) == "1m 05s"
 
 
 def test_dev_server_omits_generated_timestamp(tmp_path):
