@@ -1488,6 +1488,12 @@ function buildChartOptionBase(config, records) {
   // the first row at the top, so an `ORDER BY value DESC` query reads top-down.
   const horizontal = type === "bar" && config.horizontal;
   const categoryAxis = { type: "category", data: xCategories };
+  // A line/area trend should span the full plot width: pin the first and last
+  // points to the axis edges instead of ECharts' default half-band padding,
+  // which leaves conspicuous dead space at both ends. Bars keep the default gap
+  // so columns stay centered within their band. A lone point (degenerate line,
+  // handled below) keeps the centered gap so it isn't pinned to the far edge.
+  if (type === "line" && xCategories.length > 1) categoryAxis.boundaryGap = false;
   const valueAxis = { type: "value" };
   // Honor the chart's format/currency/decimals attrs on the value axis labels
   // (so `63712.895` reads as `$63,712.90`) and the shared axis tooltip; big
