@@ -1173,9 +1173,55 @@ body {
     pointer-events: auto;
   }
 }
-/* Both corner affordances on one chart: the informational funnel yields the
-   corner to the actionable sparkle. */
-.dashdown-chart:has(.dashdown-explain-btn) .dashdown-filter-badge { right: 2.25rem; }
+/* --- Chart ⛶ fullscreen button ------------------------------------------ */
+/* On every chart, beside the `explain` sparkle, revealed on the same hover
+   trigger. Neutral base-content tone (not the sparkle's AI amber) so the two
+   corner affordances read as distinct. Opens the fullscreen viewer modal (see
+   fullscreen.js): the chart, or its data as a table / pivot. */
+.dashdown-chart-expand-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--dashdown-radius-control, 0.5rem);
+  color: oklch(var(--bc) / 0.55);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.dashdown-chart-expand-btn svg { width: 0.875rem; height: 0.875rem; }
+[data-async-component]:hover .dashdown-chart-expand-btn,
+.dashdown-chart-expand-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dashdown-chart-expand-btn:hover,
+.dashdown-chart-expand-btn:focus-visible {
+  color: oklch(var(--bc) / 1);
+  background: color-mix(in oklch, oklch(var(--bc) / 1) 10%, transparent);
+  outline: none;
+}
+/* Touch devices can't hover-reveal — keep the affordance reachable. */
+@media (hover: none) {
+  .dashdown-chart-expand-btn { opacity: 1; pointer-events: auto; }
+}
+/* Corner order: when `explain` is set, the sparkle keeps the very corner and the
+   expand button tucks to its left. */
+.dashdown-chart:has(.dashdown-explain-btn) .dashdown-chart-expand-btn { right: 2.25rem; }
+
+/* The informational funnel yields the corner to the actionable buttons: it
+   clears the expand button (always present on a chart), plus the sparkle when
+   `explain` is set. */
+.dashdown-chart:has(.dashdown-chart-expand-btn) .dashdown-filter-badge { right: 2.25rem; }
+.dashdown-chart:has(.dashdown-chart-expand-btn):has(.dashdown-explain-btn) .dashdown-filter-badge { right: 4rem; }
 
 /* The commentary footer: separated from the plot by a hairline, compact
    padding (the ask surface's own header/body spacing does the rest). */
@@ -2957,6 +3003,7 @@ body {
 .dashdown-print .dashdown-filter-bar,
 .dashdown-print .dashdown-filter-badge,
 .dashdown-print .dashdown-explain-btn,
+.dashdown-print .dashdown-chart-expand-btn,
 .dashdown-print .dashdown-build-stamp,
 .dashdown-print .dashdown-made-with,
 .dashdown-print .dashdown-code-copy {
@@ -3181,12 +3228,129 @@ dialog.dashdown-export-modal::backdrop {
   width: 1.25rem;
 }
 
+/* === Fullscreen viewer modal ============================================
+   The ⛶ button on a chart / table opens this near-fullscreen <dialog> with a
+   Chart / Table / Pivot view switcher (fullscreen.js). Native <dialog> gives the
+   top-layer render + ::backdrop + Escape-to-close; these rules supply what
+   DaisyUI's un-vendored .modal-box would (same posture as .dashdown-export-modal
+   above). */
+dialog.dashdown-fullscreen-modal {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+dialog.dashdown-fullscreen-modal[open] {
+  display: grid;
+  place-items: center;
+}
+dialog.dashdown-fullscreen-modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.dashdown-fullscreen-modal .modal-box {
+  display: flex;
+  flex-direction: column;
+  width: 95vw;
+  height: 92vh;
+  max-width: 1400px;
+  padding: 0;
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
+  border-radius: var(--dashdown-radius-card);
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.dashdown-fs-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 0 0 auto;
+  padding: 0.625rem 0.75rem 0.625rem 1rem;
+  border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
+.dashdown-fs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Segmented Chart/Table switcher — a pill track with a raised active tab.
+   Hand-styled (DaisyUI's .tabs/.join aren't in the vendored bundle). */
+.dashdown-fs-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.125rem;
+  padding: 0.1875rem;
+  border-radius: var(--dashdown-radius-control, 0.5rem);
+  background: color-mix(in oklch, oklch(var(--bc) / 1) 8%, transparent);
+}
+.dashdown-fs-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: oklch(var(--bc) / 0.6);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25;
+  padding: 0.25rem 0.75rem;
+  border-radius: calc(var(--dashdown-radius-control, 0.5rem) - 0.1875rem);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.dashdown-fs-tab:hover { color: oklch(var(--bc) / 0.9); }
+.dashdown-fs-tab.is-active {
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: oklch(var(--bc) / 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+}
+.dashdown-fs-close { flex: 0 0 auto; }
+/* Body is a flex column so a single view child fills the height — the chart
+   needs a measurable box for ECharts, the table/pivot scroll within it. */
+.dashdown-fs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+.dashdown-fs-chart {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+.dashdown-fs-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.dashdown-fs-loading {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: var(--dashdown-radius-control, 0.5rem);
+}
+
 /* Per-table CSV export button (in the table toolbar). Muted until hovered,
    matching the quiet card chrome. */
 .dashdown-table-export {
   color: var(--fallback-bc2, oklch(var(--bc) / 0.6));
 }
 .dashdown-table-export:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+/* Table toolbar fullscreen (⛶) button — same quiet-until-hover chrome. */
+.dashdown-table-fullscreen {
+  color: var(--fallback-bc2, oklch(var(--bc) / 0.6));
+}
+.dashdown-table-fullscreen:hover {
   color: var(--fallback-bc, oklch(var(--bc) / 1));
 }
 
