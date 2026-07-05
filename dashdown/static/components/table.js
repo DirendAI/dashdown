@@ -17,6 +17,14 @@ const EXPORT_ICON =
   'stroke-linejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 ' +
   '002-2v-2"/></svg>';
 
+// Expand glyph (four corner arrows) for the fullscreen button — the delegated
+// listener in fullscreen.js catches clicks on `.dashdown-table-fullscreen`.
+const FULLSCREEN_ICON =
+  '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" ' +
+  'stroke-linejoin="round" d="M8 3H4a1 1 0 00-1 1v4m0 8v4a1 1 0 001 1h4m8 0h4a1 1 0 ' +
+  '001-1v-4m0-8V4a1 1 0 00-1-1h-4"/></svg>';
+
 // Re-export so existing importers of the table-scoped name keep working.
 export { formatValue };
 
@@ -565,8 +573,12 @@ function ensureShell(el) {
   const showSearch =
     config.search && (!config.search_auto || (el._records || []).length >= 2);
   const showExport = config.export && (el._records || []).length > 0;
+  // Fullscreen viewer button — on by default; `fullscreen=false` opts out. The
+  // modal's own (re-rendered) table passes fullscreen:false so it isn't nested.
+  const showFullscreen =
+    config.fullscreen !== false && (el._records || []).length > 0;
   let html = "";
-  if (config.title || showSearch || showExport) {
+  if (config.title || showSearch || showExport || showFullscreen) {
     html += '<div class="dashdown-table-toolbar flex items-center justify-between gap-3 mb-3">';
     html += config.title
       ? `<div class="dashdown-table-title font-semibold">${esc(config.title)}</div>`
@@ -581,6 +593,11 @@ function ensureShell(el) {
       html +=
         `<button type="button" class="dashdown-table-export btn btn-ghost btn-sm btn-square" ` +
         `title="Export CSV" aria-label="Export CSV">${EXPORT_ICON}</button>`;
+    }
+    if (showFullscreen) {
+      html +=
+        `<button type="button" class="dashdown-table-fullscreen btn btn-ghost btn-sm btn-square" ` +
+        `title="View fullscreen" aria-label="View fullscreen">${FULLSCREEN_ICON}</button>`;
     }
     html += "</div></div>";
   }
@@ -598,6 +615,22 @@ export function renderTable(el) {
   const host = ensureShell(el);
   const view = host.querySelector(".dashdown-table-view");
   view.innerHTML = buildTableView(el);
+}
+
+/**
+ * Render a table into an arbitrary host element from a records array + a plain
+ * config object — the reuse hook for the fullscreen modal's "view as table"
+ * (fullscreen.js). Wires the delegated sort/search/export handlers on the host
+ * (a clone/detached node is otherwise inert) and paints via the normal
+ * updateTable path, so the fullscreen table gets sort, pagination, search and
+ * CSV export for free.
+ * @param {HTMLElement} host - A detached/standalone element to render into
+ * @param {Array<Object>} records - Array of record objects
+ * @param {Object} config - Table configuration (must carry query_name for CSV)
+ */
+export function renderTableInto(host, records, config) {
+  wireInteractions(host);
+  updateTable(host, records, config);
 }
 
 /**

@@ -78,6 +78,32 @@ def test_scatter_passes_series(ctx):
     assert config["series_by"] == "group"
 
 
+@pytest.mark.parametrize("tag", ["LineChart", "BarChart", "PieChart", "ScatterChart"])
+def test_chart_has_fullscreen_button(ctx, tag):
+    """Every chart card carries the hover-revealed ⛶ fullscreen button (a
+    distinct class from the `explain` sparkle, so ask.js doesn't grab it)."""
+    html = render_components(f'<{tag} data={{sales}} x="m" y="r" />', ctx)
+    assert "dashdown-chart-expand-btn" in html
+    assert "dashdown-explain-btn" not in html  # no `explain` attr → no sparkle
+
+
+def test_chart_fullscreen_button_present_in_static_build():
+    """Unlike `explain` (which needs a live LLM server and is skipped in a static
+    build), the fullscreen viewer is pure client-side, so the button still ships
+    in an export."""
+    ctx = RenderContext(queries={}, params={}, current_path="/", static_build=True)
+    html = render_components('<LineChart data={s} x="m" y="r" explain />', ctx)
+    assert "dashdown-chart-expand-btn" in html
+    assert "dashdown-explain-btn" not in html  # explain gated off in static build
+
+
+def test_chart_fullscreen_and_explain_coexist(ctx):
+    """With `explain` set, both corner affordances render on the card."""
+    html = render_components('<LineChart data={s} x="m" y="r" explain />', ctx)
+    assert "dashdown-chart-expand-btn" in html
+    assert "dashdown-explain-btn" in html
+
+
 def test_bar_multi_metric_y_passes_through(ctx):
     """`y="revenue,profit"` ships verbatim so chart.js builds one series per metric."""
     html = render_components(

@@ -135,6 +135,19 @@ def test_table_search_opt_out(ctx):
     assert "search_placeholder" not in cfg
 
 
+def test_table_fullscreen_default_on(ctx):
+    """Fullscreen is on by default — the key is omitted, so the JS default
+    (`fullscreen !== false`) keeps the ⛶ button showing."""
+    cfg = _config(render_components('<Table data={rows} />', ctx))
+    assert "fullscreen" not in cfg
+
+
+def test_table_fullscreen_opt_out(ctx):
+    """`fullscreen=false` emits the explicit flag the JS toolbar checks."""
+    cfg = _config(render_components('<Table data={rows} fullscreen=false />', ctx))
+    assert cfg["fullscreen"] is False
+
+
 def test_table_page_size_override(ctx):
     out = render_components('<Table data={rows} page-size=25 />', ctx)
     cfg = _config(out)

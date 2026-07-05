@@ -151,6 +151,18 @@ class Table(Component):
             )
         export_filename = attr_str(attrs, "export_filename") or attr_str(attrs, "filename")
 
+        # Fullscreen viewer affordance (⛶) in the card header — on by default;
+        # `fullscreen=false` opts out. It opens a modal to see the table larger
+        # (client-side, see static/components/fullscreen.js). Only `False` is
+        # emitted into config; the JS default (`fullscreen !== false`) keeps it
+        # on when the key is absent.
+        fullscreen_enabled = True
+        if "fullscreen" in attrs:
+            fv = attrs.get("fullscreen")
+            fullscreen_enabled = not (
+                fv is False or (isinstance(fv, str) and fv.lower() == "false")
+            )
+
         # Heatmap cells: shade numeric cells by value magnitude (spreadsheet-style
         # conditional formatting). `heatmap` (bare) / `heatmap="all"` shades every
         # numeric column; `heatmap="amount,profit"` shades just those. The per-column
@@ -217,6 +229,8 @@ class Table(Component):
             config["export"] = True
             if export_filename:
                 config["export_filename"] = export_filename
+        if not fullscreen_enabled:
+            config["fullscreen"] = False
         if heatmap_cols:
             config["heatmap"] = heatmap_cols  # True (all numeric) or a column list
             config["heatmap_scheme"] = heatmap_scheme

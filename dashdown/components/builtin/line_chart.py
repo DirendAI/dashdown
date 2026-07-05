@@ -24,6 +24,23 @@ from dashdown.render.attrs import DataRef
 # Common chart HTML generator
 # All charts use async loading and show skeleton while loading
 
+# The ⛶ fullscreen button injected on every chart card, beside the `explain`
+# sparkle. Pure client-side (static/components/fullscreen.js): it reuses the
+# chart's already-cached query result to show the chart — or the same data as a
+# table — larger in a modal. A distinct class from `.dashdown-explain-btn`
+# so ask.js's initAllExplains() never mistakes it for a commentary toggle.
+# Unlike `explain`, it is *not* gated on the static build: it needs no live
+# server (fetchQueryData reads the baked JSON in exports/embeds).
+_EXPAND_BTN_HTML = (
+    '<button type="button" class="dashdown-chart-expand-btn" '
+    'aria-label="View fullscreen" title="View fullscreen">'
+    '<svg fill="none" stroke="currentColor" stroke-width="2" '
+    'viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" '
+    'stroke-linejoin="round" d="M8 3H4a1 1 0 00-1 1v4m0 8v4a1 1 0 001 1h4m8 0h4a1 '
+    '1 0 001-1v-4m0-8V4a1 1 0 00-1-1h-4"/></svg></button>'
+)
+
+
 def _chart_placeholder(
     chart_type: str,
     attrs: dict[str, Any],
@@ -122,15 +139,17 @@ def _chart_card(
     if explain_html:
         # The fixed height moves onto an inner region so the card itself can
         # grow when the commentary footer opens; the plot keeps its exact size.
+        # Both corner affordances (⛶ + ✨) sit as direct children of the card.
         inner = (
             f'<div class="dashdown-chart-region" style="height:{height}px">'
             f"{skeleton_body}"
             f"</div>"
+            f"{_EXPAND_BTN_HTML}"
             f"{explain_html}"
         )
         style = f"width:100%;{span}"
     else:
-        inner = skeleton_body
+        inner = f"{skeleton_body}{_EXPAND_BTN_HTML}"
         style = f"width:100%;height:{height}px;{span}"
 
     return (

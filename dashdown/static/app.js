@@ -23,6 +23,7 @@ import { initEmbedFrame } from "./components/embed_frame.js";
 import { initEmbedUI } from "./components/embed_ui.js";
 import { initAllMermaid } from "./components/mermaid.js";
 import { initAllCopyCode } from "./components/copy_code.js";
+import { initFullscreen } from "./components/fullscreen.js";
 import { initAllSiteSearches } from "./components/site_search.js";
 import { initPrint, initPdfButton } from "./components/print.js";
 import { initLegacy } from "./legacy.js";
@@ -220,6 +221,12 @@ function init() {
   // so init independently of the async-component path for prose-only docs pages.
   // Self-gates when the page has no code blocks.
   initAllCopyCode();
+
+  // Fullscreen viewer: one delegated listener for every chart ⛶ button and
+  // table ⛶ button. Independent of the async-component gate — it opens a modal
+  // on demand and reuses the cached query data, so it wires up regardless of
+  // when charts/tables initialize (and is a no-op until a button is clicked).
+  initFullscreen();
 
   // Site search is plain DOM (no Alpine, no data API), so init it independently
   // of the async-component path — a prose-only docs page must still get search.
