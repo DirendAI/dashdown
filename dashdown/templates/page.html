@@ -294,7 +294,7 @@
          + print via CSS, like the breadcrumbs. #}
       {% if built_at %}
       <footer class="dashdown-build-stamp max-w-7xl mx-auto">
-        Generated <time datetime="{{ built_at }}" data-dashdown-build-time>{{ built_at_display }}</time>
+        Generated <time datetime="{{ built_at }}" data-dashdown-build-time>{{ built_at_display }}</time>{% if built_duration_display %} · built in {{ built_duration_display }}{% endif %}
       </footer>
       {% endif %}
 
