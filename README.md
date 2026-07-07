@@ -26,17 +26,17 @@
 Write a `.md` file with some SQL and a few component tags. Dashdown serves it as a
 live, interactive dashboard — no JavaScript to write, no frontend toolchain.
 
-```markdown
-:::query name=monthly_sales connector=main
+````markdown
+```sql monthly_sales connector=main
 SELECT month, SUM(amount) AS revenue
 FROM sales GROUP BY month ORDER BY month
-:::
+```
 
 # Sales
 
 <Counter data={monthly_sales} column="revenue" label="Revenue" format="currency" />
 <LineChart data={monthly_sales} x="month" y="revenue" title="Monthly Revenue" />
-```
+````
 
 That's a complete dashboard page — a KPI card and a chart, backed by a real query.
 Point the CLI at the folder and it's live in your browser.
