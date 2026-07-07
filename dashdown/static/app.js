@@ -20,6 +20,7 @@ import { initAllPivots } from "./components/pivot.js";
 import { initAllChoroplethTimes } from "./components/choropleth_time.js";
 import { initAllChoroplethFacets } from "./components/choropleth_facets.js";
 import { initAllBivariateMaps } from "./components/bivariate_map.js";
+import { initAllBubbleMaps } from "./components/bubble_map.js";
 import { initAllAsks, initAllExplains } from "./components/ask.js";
 import { initPageHeader, initBuildStamp } from "./components/page_header.js";
 import { initEmbedFrame } from "./components/embed_frame.js";
@@ -99,6 +100,7 @@ function initComponents() {
   initAllChoroplethTimes();
   initAllChoroplethFacets();
   initAllBivariateMaps();
+  initAllBubbleMaps();
 
   // Process ask (LLM commentary) components
   initAllAsks();
