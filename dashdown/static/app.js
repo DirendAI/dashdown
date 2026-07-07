@@ -17,6 +17,7 @@ import { initAllTabs } from "./components/tabs.js";
 import { initAllValues } from "./components/value.js";
 import { initAllCounters } from "./components/counter.js";
 import { initAllPivots } from "./components/pivot.js";
+import { initAllChoroplethTimes } from "./components/choropleth_time.js";
 import { initAllAsks, initAllExplains } from "./components/ask.js";
 import { initPageHeader, initBuildStamp } from "./components/page_header.js";
 import { initEmbedFrame } from "./components/embed_frame.js";
@@ -91,6 +92,9 @@ function initComponents() {
 
   // Process pivot tables
   initAllPivots();
+
+  // Process the SVG geo maps (choropleths, bubble, dot-density)
+  initAllChoroplethTimes();
 
   // Process ask (LLM commentary) components
   initAllAsks();
