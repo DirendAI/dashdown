@@ -24,6 +24,12 @@ for the shared attributes, then the per-type page:
 - [GraphChart](/components/charts/graph-chart) · [SunburstChart](/components/charts/sunburst-chart) · [TreeChart](/components/charts/tree-chart) · [ParallelChart](/components/charts/parallel-chart)
 - [Chart auto](/components/charts/auto-chart)
 
+## Maps
+
+- [Maps](/components/maps) — five SVG geo components joining on ISO country
+  codes: ChoroplethTime (animated), ChoroplethFacets (small multiples),
+  BivariateMap, BubbleMap, DotDensityMap. All offline and static-export safe.
+
 ## Data display
 
 - [Table](/components/table) — sortable, filterable grid with CSV export.
