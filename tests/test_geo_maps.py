@@ -60,6 +60,14 @@ def test_map_renders_async_placeholder(ctx, tag, expected_type):
     assert "skeleton" in html
 
 
+@pytest.mark.parametrize("tag,expected_type", GEO_TAGS)
+def test_map_card_has_fullscreen_button(ctx, tag, expected_type):
+    # Chart parity: every map card carries the ⛶ that opens the fullscreen
+    # modal (fullscreen.js re-draws the map via the _geo.js renderer registry).
+    html = render_components(VALID[tag], ctx)
+    assert "dashdown-chart-expand-btn" in html
+
+
 @pytest.mark.parametrize("tag", [t for t, _ in GEO_TAGS])
 def test_map_requires_data(ctx, tag):
     # Missing data → component error card, not a crash.

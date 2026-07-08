@@ -12,6 +12,7 @@ import {
   centroid,
   createMapSvg,
   createTooltip,
+  enableMapZoom,
   escapeHtml,
   featurePath,
   fmtValue,
@@ -21,6 +22,7 @@ import {
   normalizeId,
   project,
   queryDefs,
+  registerMapRenderer,
   resolveScheme,
   showMapEmpty,
   showMapError,
@@ -80,6 +82,7 @@ function draw(el, world, records, config) {
 
   const svg = createMapSvg();
   shell.region.appendChild(svg);
+  enableMapZoom(svg, shell.region);
   const tooltip = createTooltip(shell.region);
 
   // Muted basemap under the symbols.
@@ -88,6 +91,7 @@ function draw(el, world, records, config) {
       svgEl("path", {
         d: featurePath(feature.geometry),
         class: "dashdown-map-country is-basemap",
+        "vector-effect": "non-scaling-stroke",
       })
     );
   });
@@ -95,7 +99,8 @@ function draw(el, world, records, config) {
   svg.appendChild(bubbleLayer);
 
   const legendHost = document.createElement("div");
-  shell.footer.appendChild(legendHost);
+  legendHost.className = "dashdown-map-overlay-legend";
+  shell.region.appendChild(legendHost);
 
   function update(metricIndex) {
     const metric = metrics[metricIndex];
@@ -125,6 +130,7 @@ function draw(el, world, records, config) {
         cy: cy.toFixed(1),
         r: Math.max(1, radius(v)).toFixed(2),
         class: "dashdown-map-bubble",
+        "vector-effect": "non-scaling-stroke",
       });
       circle.style.fill = bubbleColor;
       circle.addEventListener("mousemove", (e) => {
@@ -154,12 +160,16 @@ function draw(el, world, records, config) {
 function sizeLegend(max, radius, metric, color) {
   const wrap = document.createElement("div");
   wrap.className = "dashdown-map-legend";
+  // One shared scale (largest circle tops out at the swatch size) so the two
+  // reference circles keep their true size ratio — scaling each swatch to fit
+  // its own box would render them visually identical.
+  const scale = Math.min(1, 16 / Math.max(1, radius(max)));
   [max, max / 4].forEach((v) => {
-    const r = Math.max(2, radius(v));
+    const r = Math.max(2, radius(v) * scale);
     const size = Math.ceil(r * 2 + 2);
     const svg = svgEl("svg", {
-      width: Math.min(size, 34),
-      height: Math.min(size, 34),
+      width: size,
+      height: size,
       viewBox: `0 0 ${size} ${size}`,
       class: "dashdown-map-legend-swatch",
     });
@@ -177,6 +187,9 @@ function sizeLegend(max, radius, metric, color) {
   });
   return wrap;
 }
+
+// Fullscreen: the modal re-draws this map type via the shared registry.
+registerMapRenderer("bubble-map", draw);
 
 /**
  * Initialize all BubbleMap components on the page

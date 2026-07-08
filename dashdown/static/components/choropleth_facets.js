@@ -21,6 +21,7 @@ import {
   mapShell,
   normalizeId,
   queryDefs,
+  registerMapRenderer,
   resolveScheme,
   showMapEmpty,
   showMapError,
@@ -55,7 +56,9 @@ export function initChoroplethFacets(el) {
 }
 
 function draw(el, world, records, config) {
-  const shell = mapShell(el, config);
+  // Flow header/footer, not overlays: the region is a dense facet grid with
+  // no spare corners for floating chrome.
+  const shell = mapShell(el, config, { chrome: "header" });
   if (!records.length) {
     showMapEmpty(shell.region, config.empty_message);
     return;
@@ -149,6 +152,11 @@ function draw(el, world, records, config) {
   }
   shell.footer.appendChild(legend);
 }
+
+// Fullscreen: the modal re-draws the facet grid via the shared registry. The
+// panels deliberately stay un-zoomable small multiples — fullscreen IS the
+// "see them bigger" affordance here.
+registerMapRenderer("choropleth-facets", draw);
 
 /**
  * Initialize all ChoroplethFacets components on the page

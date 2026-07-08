@@ -25,6 +25,7 @@ from dashdown.components.builtin._util import (
     new_id,
     safe_json,
 )
+from dashdown.components.builtin.line_chart import _EXPAND_BTN_HTML
 from dashdown.render.attrs import DataRef
 
 
@@ -81,6 +82,13 @@ def _map_html(
 
     ``fixed_height=False`` (ChoroplethFacets) lets the card grow with its
     facet grid instead of pinning the region height.
+
+    Every card also carries the charts' ⛶ fullscreen button
+    (``line_chart._EXPAND_BTN_HTML`` — the same cross-module reuse as
+    ComboChart's ``_chart_card``): fullscreen.js re-draws the map into its
+    modal via the renderer registry in ``static/components/_geo.js``. It sits
+    outside ``.card-body``, so the JS map shell (which rebuilds the body on
+    every data render) never clobbers it.
     """
     data_val = attrs.get("data")
     if isinstance(data_val, DataRef):
@@ -128,5 +136,6 @@ def _map_html(
         f'data-component-id="{cid}" '
         f'data-query-name="{esc(name)}">'
         f'<div class="card-body p-4 h-full">{skeleton}</div>'
+        f"{_EXPAND_BTN_HTML}"
         f"</div>"
     )

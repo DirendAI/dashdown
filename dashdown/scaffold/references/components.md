@@ -2146,15 +2146,74 @@ dot-density map. They share one design:
   (This complements [MapChart](/components/charts/map-chart), which joins by
   country *name* and renders via ECharts.)
 - **Self-drawn SVG, fully offline** — no mapping library, no CDN, an
-  equirectangular projection with antimeridian handling.
+  equirectangular projection (standard parallels ±35°, windowed to the
+  geometry's 84°N–56°S extent so there are no empty polar bands) with
+  antimeridian handling.
 - **Static-export safe.** Every frame ships in the one query result, and the
   year scrubber / metric toggles are the component's own controls (not page
   filters) — so `dashdown build` exports stay fully interactive.
 - **Deterministic.** DotDensityMap seeds its dot placement per country+metric,
   so the same data draws the identical map on every load and in exports.
+- **Chrome overlays the map.** The title (top-left), legend (bottom-left) and
+  metric toggle (bottom-right) float over the map on translucent washes, so
+  the geometry gets the whole card. Only the ChoroplethTime timeline is a
+  footer row, and ChoroplethFacets keeps a flow header/footer — a facet grid
+  has no spare corners.
 
 The demos below query a demo dataset of decade-level world indicators
 (`data/world_indicators.csv`).
+
+## Data shape
+
+One result shape feeds every map: **one row per country (and per year, for the
+time-aware maps), one numeric column per metric**. The demo dataset is already
+in that shape, so its query is just:
+
+```sql
+SELECT iso, country, year, population, gdp_per_capita, life_expectancy
+FROM world_indicators
+ORDER BY year, country
+```
+
+Getting a fact table there is a `GROUP BY` country and year with one aggregate
+per metric — plus, usually, a join to translate whatever country key your data
+carries (alpha-2 codes like `US`, names) into ISO numeric:
+
+```sql
+SELECT c.iso_numeric                        AS iso,
+       EXTRACT(year FROM o.created_at)      AS year,
+       SUM(o.amount)                        AS revenue,
+       COUNT(DISTINCT o.customer_id)        AS customers
+FROM orders o
+JOIN country_codes c ON c.alpha2 = o.country_code
+GROUP BY 1, 2
+```
+
+`<ChoroplethTime data={sales_by_country} id="iso" year="year"
+metrics="revenue|Revenue|$,customers|Customers|customers" />` then works as-is
+— and the same result drives the other maps (`year_value=` picks a snapshot;
+BivariateMap reads two of the columns as `x`/`y`).
+
+- **Sparse is fine.** A country missing from a year (or a `NULL` value) renders
+  in the no-data wash; year gaps are fine too — each distinct year is one
+  scrubber stop or facet, so decade-level data plays as five frames.
+- **Keep it aggregated.** Every frame ships in the one query result (that's
+  what keeps exports interactive), so return countries × years rows, not raw
+  events.
+- **Don't log-transform in SQL.** Use `scale="log"` instead, so tooltips and
+  legends keep the real values.
+
+## Zoom, pan & fullscreen
+
+Every map card has the charts' hover-revealed ⛶ button, opening it in a
+fullscreen modal with a **Map / Table** switcher (the table shows the same
+query result). On the map itself — inline or fullscreen — **Ctrl + scroll**
+(⌘ on macOS) or a trackpad pinch zooms around the pointer, dragging pans once
+zoomed, double-click zooms in, and a **Reset view** pill (bottom-center, where
+the zoom hint flashes) restores the full extent. Plain scrolling is
+deliberately left to the page, so a map never traps the wheel.
+(ChoroplethFacets panels stay un-zoomable small multiples — fullscreen is the
+"see them bigger" affordance there.)
 
 ## Shared attributes
 
@@ -2163,7 +2222,7 @@ Every map takes `data={query}` plus:
 | Attribute | Purpose |
 | --------- | ------- |
 | `id` | Column holding the ISO 3166-1 numeric country code (default `iso`). |
-| `title` | Card title. |
+| `title` | Card title (overlaid on the map's top-left). |
 | `scheme` | Named color ramp: `blues`, `greens`, `oranges`, `purples`, `reds`, `viridis` (BivariateMap instead takes `blue-purple`, `green-blue`, `red-blue`). |
 | `color` | Base color to derive a ramp from (defaults to `branding.palette`). |
 | `scale` | Value→color mapping: `linear` (default), `log`, `quantile`. |
@@ -2208,8 +2267,8 @@ distinct year); `columns=` sets the grid width.
 
 Two metrics on one map: each country's `x` and `y` values are classed into
 terciles and colored from a 3×3 bivariate palette, with the classic square
-legend. With a `year=` column, `year_value=` picks the snapshot (default:
-latest year).
+legend overlaid in the map's bottom-left corner. With a `year=` column,
+`year_value=` picks the snapshot (default: latest year).
 
 ```markdown
 <BivariateMap data={world_indicators} id="iso" year="year" year_value="2020"

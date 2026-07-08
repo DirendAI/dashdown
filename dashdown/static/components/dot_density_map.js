@@ -12,6 +12,7 @@ import { mountFilterBadge } from "./filter_badge.js";
 import {
   createMapSvg,
   createTooltip,
+  enableMapZoom,
   escapeHtml,
   featurePath,
   fmtValue,
@@ -23,6 +24,7 @@ import {
   normalizeId,
   project,
   queryDefs,
+  registerMapRenderer,
   resolveScheme,
   samplePoints,
   showMapEmpty,
@@ -93,6 +95,7 @@ function draw(el, world, records, config) {
 
   const svg = createMapSvg();
   shell.region.appendChild(svg);
+  enableMapZoom(svg, shell.region);
   const tooltip = createTooltip(shell.region);
 
   const state = { metric: 0 };
@@ -101,6 +104,7 @@ function draw(el, world, records, config) {
     const path = svgEl("path", {
       d: featurePath(feature.geometry),
       class: "dashdown-map-country is-basemap",
+      "vector-effect": "non-scaling-stroke",
     });
     path.addEventListener("mousemove", (e) => {
       const metric = metrics[state.metric];
@@ -125,7 +129,8 @@ function draw(el, world, records, config) {
   svg.appendChild(dotLayer);
 
   const legendHost = document.createElement("div");
-  shell.footer.appendChild(legendHost);
+  legendHost.className = "dashdown-map-overlay-legend";
+  shell.region.appendChild(legendHost);
 
   // Dots per metric are deterministic, so cache the built layer per metric and
   // just swap on toggle.
@@ -204,6 +209,9 @@ function draw(el, world, records, config) {
   if (toggle) shell.controls.appendChild(toggle);
   update(0);
 }
+
+// Fullscreen: the modal re-draws this map type via the shared registry.
+registerMapRenderer("dot-density-map", draw);
 
 /**
  * Initialize all DotDensityMap components on the page

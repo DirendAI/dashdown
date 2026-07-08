@@ -14,6 +14,7 @@ import {
   colorAt,
   createMapSvg,
   createTooltip,
+  enableMapZoom,
   escapeHtml,
   featurePath,
   fmtValue,
@@ -24,6 +25,7 @@ import {
   metricToggle,
   normalizeId,
   queryDefs,
+  registerMapRenderer,
   resolveScheme,
   showMapEmpty,
   showMapError,
@@ -103,12 +105,14 @@ function draw(el, world, records, config) {
 
   const svg = createMapSvg();
   shell.region.appendChild(svg);
+  enableMapZoom(svg, shell.region);
   const tooltip = createTooltip(shell.region);
 
   const nodes = world.features.map((feature) => {
     const path = svgEl("path", {
       d: featurePath(feature.geometry),
       class: "dashdown-map-country",
+      "vector-effect": "non-scaling-stroke",
     });
     svg.appendChild(path);
     path.addEventListener("mousemove", (e) => {
@@ -128,9 +132,11 @@ function draw(el, world, records, config) {
     return { path, feature };
   });
 
-  // Footer: gradient legend + play/scrub timeline.
+  // Legend overlays the map; the timeline is the one row-like control that
+  // stays a footer (a scrub slider over the map would fight pan/zoom).
   const legendHost = document.createElement("div");
-  shell.footer.appendChild(legendHost);
+  legendHost.className = "dashdown-map-overlay-legend";
+  shell.region.appendChild(legendHost);
 
   const timeline = document.createElement("div");
   timeline.className = "dashdown-map-timeline";
@@ -225,6 +231,9 @@ function draw(el, world, records, config) {
   updateLegend();
   update();
 }
+
+// Fullscreen: the modal re-draws this map type via the shared registry.
+registerMapRenderer("choropleth-time", draw);
 
 /**
  * Initialize all ChoroplethTime components on the page

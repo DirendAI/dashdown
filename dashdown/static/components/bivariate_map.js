@@ -12,6 +12,7 @@ import {
   BIVARIATE_SCHEMES,
   createMapSvg,
   createTooltip,
+  enableMapZoom,
   escapeHtml,
   featurePath,
   fmtValue,
@@ -19,6 +20,7 @@ import {
   mapShell,
   normalizeId,
   queryDefs,
+  registerMapRenderer,
   showMapEmpty,
   showMapError,
   sliceYear,
@@ -90,12 +92,14 @@ function draw(el, world, records, config) {
 
   const svg = createMapSvg();
   shell.region.appendChild(svg);
+  enableMapZoom(svg, shell.region);
   const tooltip = createTooltip(shell.region);
 
   world.features.forEach((feature) => {
     const path = svgEl("path", {
       d: featurePath(feature.geometry),
       class: "dashdown-map-country",
+      "vector-effect": "non-scaling-stroke",
     });
     const row = feature._dashdownId !== null ? byId.get(feature._dashdownId) : null;
     const x = row ? Number(row[config.x]) : NaN;
@@ -121,7 +125,9 @@ function draw(el, world, records, config) {
     svg.appendChild(path);
   });
 
-  shell.footer.appendChild(bivariateLegend(palette, config));
+  // Overlaid on the map's bottom-left (empty ocean in the world view) instead
+  // of a footer row, so the matrix costs the map no height.
+  shell.region.appendChild(bivariateLegend(palette, config));
 }
 
 /** The 3×3 square legend: high-y rows on top, axis labels along each edge. */
@@ -153,6 +159,9 @@ function bivariateLegend(palette, config) {
   wrap.append(yLabel, cols);
   return wrap;
 }
+
+// Fullscreen: the modal re-draws this map type via the shared registry.
+registerMapRenderer("bivariate-map", draw);
 
 /**
  * Initialize all BivariateMap components on the page

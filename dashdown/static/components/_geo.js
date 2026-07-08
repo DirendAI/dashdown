@@ -15,14 +15,23 @@ import { readBrandingConfig } from "../core.js";
 
 // --- projection --------------------------------------------------------------
 
-// Equirectangular plate carrée into a fixed 2:1 viewBox. Every component draws
-// into these coordinates and lets SVG scale to the card.
+// Equirectangular into a fixed viewBox, windowed to the bundled world
+// geometry's extent (84°N–56°S — it carries no Antarctica) so the frame holds
+// no empty polar bands, with standard parallels ±35°: the viewBox aspect bakes
+// in cos 35° ≈ 0.82 of horizontal compression, so mid-latitude countries —
+// where most land sits — keep near-true proportions instead of the plate-
+// carrée E-W stretch. Still one linear map shared by every component (zoom
+// stays pure viewBox math, dot sampling and relative ring areas stay valid).
+// A custom `geojson=` draws in this same frame; content outside the window
+// clips.
 export const MAP_W = 960;
-export const MAP_H = 480;
+export const MAP_H = 456; // MAP_W · latSpan / (360° · cos 35°)
+const LAT_TOP = 84;
+const LAT_SPAN = 140; // 84°N … 56°S
 
 /** Project [lon, lat] (degrees) to viewBox [x, y]. */
 export function project(lon, lat) {
-  return [((lon + 180) / 360) * MAP_W, ((90 - lat) / 180) * MAP_H];
+  return [((lon + 180) / 360) * MAP_W, ((LAT_TOP - lat) / LAT_SPAN) * MAP_H];
 }
 
 // --- GeoJSON geometry --------------------------------------------------------
@@ -545,6 +554,200 @@ export function gradientLegend(stops, minLabel, maxLabel) {
   return wrap;
 }
 
+/**
+ * viewBox pan/zoom for a map SVG. ⌘/Ctrl + scroll — or a trackpad pinch, which
+ * browsers deliver as a ctrlKey wheel — zooms around the pointer; dragging pans
+ * once zoomed; double-click zooms in; a "Reset view" pill (shown only while
+ * zoomed, in the same bottom-center slot the zoom hint flashes in — the two
+ * never show together) resets. A plain wheel is deliberately left to the page
+ * (it just flashes a hint), so a map never traps the scroll. On touch, two fingers pinch-zoom and
+ * one finger pans once zoomed — at rest it keeps scrolling the page
+ * (`touch-action` flips with the zoom state). Zooming mutates only the
+ * viewBox, so hover joins, tooltips and the data layers keep working
+ * untouched; pair with `vector-effect="non-scaling-stroke"` on shapes so
+ * hairline borders stay hairline.
+ */
+export function enableMapZoom(svg, region) {
+  const MAX_ZOOM = 16;
+  const RATIO = MAP_H / MAP_W;
+  const vb = { x: 0, y: 0, w: MAP_W, h: MAP_H };
+
+  // Positioning context for the reset pill + hint (idempotent with createTooltip).
+  region.style.position = "relative";
+
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.className = "dashdown-map-reset";
+  resetBtn.setAttribute("aria-label", "Reset map view");
+  resetBtn.innerHTML =
+    '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" ' +
+    'aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" ' +
+    'd="M4 10a8 8 0 0114.9-3M20 14a8 8 0 01-14.9 3M4 3v4h4M20 21v-4h-4"/></svg>' +
+    "<span>Reset view</span>";
+  resetBtn.hidden = true;
+  region.appendChild(resetBtn);
+
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+  const hint = document.createElement("div");
+  hint.className = "dashdown-map-zoom-hint";
+  hint.textContent = `Use ${isMac ? "⌘" : "Ctrl"} + scroll to zoom`;
+  region.appendChild(hint);
+  let hintTimer = 0;
+  function flashHint() {
+    hint.classList.add("is-visible");
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => hint.classList.remove("is-visible"), 1200);
+  }
+
+  const zoomed = () => vb.w < MAP_W - 1e-6;
+
+  function apply() {
+    svg.setAttribute(
+      "viewBox",
+      `${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`
+    );
+    const z = zoomed();
+    resetBtn.hidden = !z;
+    // The reset pill takes over the hint's bottom-center slot while zoomed.
+    if (z) {
+      clearTimeout(hintTimer);
+      hint.classList.remove("is-visible");
+    }
+    svg.classList.toggle("is-zoomed", z);
+    // At rest one finger scrolls the page (but a two-finger pinch still reaches
+    // us as pointer events); once zoomed, gestures belong to the map.
+    svg.style.touchAction = z ? "none" : "pan-x pan-y";
+  }
+
+  function clampAndApply() {
+    vb.w = Math.max(MAP_W / MAX_ZOOM, Math.min(MAP_W, vb.w));
+    vb.h = vb.w * RATIO;
+    vb.x = Math.max(0, Math.min(MAP_W - vb.w, vb.x));
+    vb.y = Math.max(0, Math.min(MAP_H - vb.h, vb.y));
+    apply();
+  }
+
+  /** Screen px per viewBox unit under preserveAspectRatio "meet". */
+  function scaleOf(rect) {
+    return Math.min(rect.width / vb.w, rect.height / vb.h);
+  }
+
+  /** Client coords → viewBox coords (accounting for the "meet" letterbox). */
+  function toMap(clientX, clientY) {
+    const rect = svg.getBoundingClientRect();
+    const k = scaleOf(rect);
+    return [
+      vb.x + (clientX - rect.left - (rect.width - vb.w * k) / 2) / k,
+      vb.y + (clientY - rect.top - (rect.height - vb.h * k) / 2) / k,
+    ];
+  }
+
+  /** Zoom by `factor` keeping the map point under the cursor fixed. */
+  function zoomAt(clientX, clientY, factor) {
+    const [mx, my] = toMap(clientX, clientY);
+    vb.x = mx - (mx - vb.x) / factor;
+    vb.y = my - (my - vb.y) / factor;
+    vb.w = vb.w / factor;
+    clampAndApply();
+  }
+
+  function panBy(dx, dy) {
+    const k = scaleOf(svg.getBoundingClientRect());
+    vb.x -= dx / k;
+    vb.y -= dy / k;
+    clampAndApply();
+  }
+
+  resetBtn.addEventListener("click", () => {
+    vb.x = 0;
+    vb.y = 0;
+    vb.w = MAP_W;
+    vb.h = MAP_H;
+    apply();
+  });
+
+  svg.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault(); // keep the browser's page-zoom out of it
+        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0022));
+      } else if (!zoomed()) {
+        flashHint(); // plain scroll stays with the page; zoomed → the pill owns the slot
+      }
+    },
+    { passive: false }
+  );
+
+  svg.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, 2);
+  });
+
+  // Drag pan + two-finger pinch, one pointer-events path for mouse and touch.
+  const pointers = new Map();
+  let lastPinchDist = 0;
+
+  svg.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && (e.button !== 0 || !zoomed())) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try {
+      svg.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* pointer already gone */
+    }
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      lastPinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+    }
+  });
+
+  svg.addEventListener("pointermove", (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastPinchDist > 0 && dist > 0) {
+        zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, dist / lastPinchDist);
+      }
+      lastPinchDist = dist;
+      panBy(dx / 2, dy / 2); // each finger contributes half the pan
+    } else if (zoomed()) {
+      panBy(dx, dy);
+    }
+  });
+
+  function release(e) {
+    pointers.delete(e.pointerId);
+    lastPinchDist = 0;
+  }
+  svg.addEventListener("pointerup", release);
+  svg.addEventListener("pointercancel", release);
+
+  apply();
+}
+
+// --- fullscreen renderer registry ----------------------------------------------
+
+// Each geo module registers its draw(el, world, records, config) at load so
+// fullscreen.js can re-draw any map type into its modal by config.type without
+// importing the five component modules (the geo analogue of chart.js's single
+// updateChart entry point).
+const mapRenderers = {};
+
+export function registerMapRenderer(type, draw) {
+  mapRenderers[type] = draw;
+}
+
+export function getMapRenderer(type) {
+  return mapRenderers[type] || null;
+}
+
 /** Minimal HTML escape for text spliced into tooltip/error markup. */
 export function escapeHtml(s) {
   return String(s ?? "").replace(
@@ -555,11 +758,12 @@ export function escapeHtml(s) {
 
 /**
  * Reset a map card's body into the shared shell every geo component draws
- * into: a header row (title + a slot for the component's own controls), the
- * map region, and a footer (legend / timeline). Rebuilt on every data render;
+ * into: the map region with overlaid chrome (title, controls, legends float
+ * over the map — see the region-scoped overlay CSS) and a footer for row-like
+ * chrome (the ChoroplethTime timeline). Rebuilt on every data render;
  * in-place updates (year scrub, metric toggle) mutate what's inside.
  */
-export function mapShell(el, config) {
+export function mapShell(el, config, opts = {}) {
   let body = el.querySelector(".card-body");
   if (!body) {
     body = document.createElement("div");
@@ -569,23 +773,35 @@ export function mapShell(el, config) {
   body.textContent = "";
   body.classList.add("dashdown-map-layout");
 
-  const header = document.createElement("div");
-  header.className = "dashdown-map-header";
-  if (config.title) {
-    const title = document.createElement("h3");
-    title.className = "dashdown-map-card-title";
-    title.textContent = config.title;
-    header.appendChild(title);
-  }
-  const controls = document.createElement("div");
-  controls.className = "dashdown-map-controls";
-  header.appendChild(controls);
-
   const region = document.createElement("div");
   region.className = "dashdown-map-region";
+  const controls = document.createElement("div");
+  controls.className = "dashdown-map-controls";
   const footer = document.createElement("div");
   footer.className = "dashdown-map-footer";
-  body.append(header, region, footer);
+
+  const title = document.createElement("h3");
+  title.className = "dashdown-map-card-title";
+  title.textContent = config.title || "";
+
+  // Default: chrome floats over the map — title top-left, controls (metric
+  // toggle) bottom-right — so it costs the map no height; only genuinely
+  // row-like chrome (the ChoroplethTime timeline) goes in the footer.
+  // opts.chrome === "header" keeps title/controls in a flow header above the
+  // region instead (ChoroplethFacets — its region is a facet grid with no
+  // spare corners to float over).
+  let header = null;
+  if (opts.chrome === "header") {
+    header = document.createElement("div");
+    header.className = "dashdown-map-header";
+    if (config.title) header.appendChild(title);
+    header.appendChild(controls);
+    body.append(header, region, footer);
+  } else {
+    if (config.title) region.appendChild(title);
+    region.appendChild(controls);
+    body.append(region, footer);
+  }
   return { body, header, controls, region, footer };
 }
 
