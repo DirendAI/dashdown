@@ -18,7 +18,7 @@ for the shared attributes, then the per-type page:
 
 - [LineChart](/components/charts/line-chart) · [BarChart](/components/charts/bar-chart) · [ComboChart](/components/charts/combo-chart) · [PieChart](/components/charts/pie-chart) · [ScatterChart](/components/charts/scatter-chart)
 - [FunnelChart](/components/charts/funnel-chart) · [TreemapChart](/components/charts/treemap-chart) · [CalendarHeatmap](/components/charts/calendar-heatmap)
-- [BoxPlot](/components/charts/box-plot) · [Violin](/components/charts/violin) · [MapChart](/components/charts/map-chart)
+- [BoxPlot](/components/charts/box-plot) · [Violin](/components/charts/violin) · [MapChart](/components/maps#mapchart)
 - [RadarChart](/components/charts/radar-chart) · [GaugeChart](/components/charts/gauge-chart) · [HeatmapChart](/components/charts/heatmap-chart)
 - [SankeyChart](/components/charts/sankey-chart) · [CandlestickChart](/components/charts/candlestick-chart) · [ThemeRiver](/components/charts/theme-river)
 - [GraphChart](/components/charts/graph-chart) · [SunburstChart](/components/charts/sunburst-chart) · [TreeChart](/components/charts/tree-chart) · [ParallelChart](/components/charts/parallel-chart)

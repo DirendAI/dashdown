@@ -17,6 +17,7 @@ import {
   featurePath,
   fmtValue,
   loadGeometry,
+  MAP_W,
   mapShell,
   metricToggle,
   normalizeId,
@@ -76,13 +77,15 @@ function draw(el, world, records, config) {
   }
 
   const metrics = config.metrics || [];
-  const maxRadius = config.max_radius || 40;
+  // max_radius means "size on the card": viewBox units are card-relative on
+  // the world frame, so an auto-fit custom frame scales the radius with it.
+  const maxRadius = (config.max_radius || 40) * (world.frame.w / MAP_W);
   // Bubbles read as the series color, not a ramp — take the scheme's base stop.
   const bubbleColor = resolveScheme(config)[3];
 
-  const svg = createMapSvg();
+  const svg = createMapSvg(world.frame);
   shell.region.appendChild(svg);
-  enableMapZoom(svg, shell.region);
+  enableMapZoom(svg, shell.region, world.frame);
   const tooltip = createTooltip(shell.region);
 
   // Muted basemap under the symbols.
@@ -160,10 +163,12 @@ function draw(el, world, records, config) {
 function sizeLegend(max, radius, metric, color) {
   const wrap = document.createElement("div");
   wrap.className = "dashdown-map-legend";
-  // One shared scale (largest circle tops out at the swatch size) so the two
+  // One shared scale (largest circle normalized to the swatch size) so the two
   // reference circles keep their true size ratio — scaling each swatch to fit
-  // its own box would render them visually identical.
-  const scale = Math.min(1, 16 / Math.max(1, radius(max)));
+  // its own box would render them visually identical. Normalizing (not just
+  // capping) keeps the legend legible when the map radius is card-relative
+  // small on an auto-fit custom frame.
+  const scale = 16 / Math.max(1, radius(max));
   [max, max / 4].forEach((v) => {
     const r = Math.max(2, radius(v) * scale);
     const size = Math.ceil(r * 2 + 2);

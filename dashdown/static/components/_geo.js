@@ -22,8 +22,10 @@ import { readBrandingConfig } from "../core.js";
 // where most land sits — keep near-true proportions instead of the plate-
 // carrée E-W stretch. Still one linear map shared by every component (zoom
 // stays pure viewBox math, dot sampling and relative ring areas stay valid).
-// A custom `geojson=` draws in this same frame; content outside the window
-// clips.
+// A custom `geojson=` projects through the same map but draws in its own
+// auto-fit frame (`loadGeometry`'s `frame` — the geometry's projected bounds),
+// so a regional map fills the card instead of floating tiny at its world
+// position.
 export const MAP_W = 960;
 export const MAP_H = 456; // MAP_W · latSpan / (360° · cos 35°)
 const LAT_TOP = 84;
@@ -236,6 +238,43 @@ export function featurePath(geometry) {
 const WORLD_URL = new URL("../vendor/world.json", import.meta.url).href;
 const geoCache = {};
 
+/**
+ * The frame a geometry draws in: the bundled world keeps the exact projection
+ * window (pixel-stable across releases); a custom `geojson=` auto-fits to its
+ * projected bounds plus a small margin, so a regional map fills the card.
+ * Consumed by createMapSvg (viewBox) and enableMapZoom (home box / clamps);
+ * bubble and dot radii scale by `frame.w / MAP_W` to stay card-relative.
+ */
+function geometryFrame(features, isWorld) {
+  const full = { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  if (isWorld) return full;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  features.forEach((f) => {
+    polygonsOf(f.geometry).forEach((rings) => {
+      rings.forEach((ring) => {
+        ring.forEach(([lon, lat]) => {
+          const [x, y] = project(lon, lat);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        });
+      });
+    });
+  });
+  if (!isFinite(minX) || maxX - minX < 1e-6 || maxY - minY < 1e-6) return full;
+  const pad = 0.03 * Math.max(maxX - minX, maxY - minY);
+  return {
+    x: minX - pad,
+    y: minY - pad,
+    w: maxX - minX + 2 * pad,
+    h: maxY - minY + 2 * pad,
+  };
+}
+
 /** Canonical join key: "004", 4 and "4" all mean Afghanistan. */
 export function normalizeId(value) {
   if (value === null || value === undefined) return null;
@@ -282,7 +321,7 @@ export function loadGeometry(config = {}) {
         features.forEach((f) => {
           if (f._dashdownId !== null) byId[f._dashdownId] = f;
         });
-        return { features, byId };
+        return { features, byId, frame: geometryFrame(features, url === WORLD_URL) };
       })
       .catch((err) => {
         delete geoCache[key]; // allow a retry on the next render
@@ -493,10 +532,15 @@ export function fmtValue(v, unit) {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** An `<svg>` sized to the shared viewBox, scaling to its container. */
-export function createMapSvg() {
+/** An `<svg>` sized to the geometry's frame (default: the full world window),
+ * scaling to its container. */
+export function createMapSvg(frame) {
+  const f = frame || { x: 0, y: 0, w: MAP_W, h: MAP_H };
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${MAP_W} ${MAP_H}`);
+  svg.setAttribute(
+    "viewBox",
+    `${f.x.toFixed(2)} ${f.y.toFixed(2)} ${f.w.toFixed(2)} ${f.h.toFixed(2)}`
+  );
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   svg.classList.add("dashdown-map-svg");
   return svg;
@@ -567,13 +611,17 @@ export function gradientLegend(stops, minLabel, maxLabel) {
  * untouched; pair with `vector-effect="non-scaling-stroke"` on shapes so
  * hairline borders stay hairline.
  */
-export function enableMapZoom(svg, region) {
-  const MAX_ZOOM = 16;
-  const RATIO = MAP_H / MAP_W;
-  const vb = { x: 0, y: 0, w: MAP_W, h: MAP_H };
-
-  // Positioning context for the reset pill + hint (idempotent with createTooltip).
-  region.style.position = "relative";
+/**
+ * The zoom chrome every map surface shares: the bottom-center "Reset view"
+ * pill plus the "use ⌘/Ctrl + scroll" hint that flashes when a plain wheel
+ * passes over. They occupy one slot — `setZoomed(true)` shows the pill and
+ * silences the hint. Used by enableMapZoom for the SVG geo maps and by
+ * chart.js for MapChart's ECharts roam, so all six maps read as one control
+ * scheme.
+ */
+export function mapZoomChrome(host) {
+  // Positioning context for the pill + hint (idempotent with createTooltip).
+  host.style.position = "relative";
 
   const resetBtn = document.createElement("button");
   resetBtn.type = "button";
@@ -585,21 +633,43 @@ export function enableMapZoom(svg, region) {
     'd="M4 10a8 8 0 0114.9-3M20 14a8 8 0 01-14.9 3M4 3v4h4M20 21v-4h-4"/></svg>' +
     "<span>Reset view</span>";
   resetBtn.hidden = true;
-  region.appendChild(resetBtn);
+  host.appendChild(resetBtn);
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
   const hint = document.createElement("div");
   hint.className = "dashdown-map-zoom-hint";
   hint.textContent = `Use ${isMac ? "⌘" : "Ctrl"} + scroll to zoom`;
-  region.appendChild(hint);
+  host.appendChild(hint);
   let hintTimer = 0;
-  function flashHint() {
-    hint.classList.add("is-visible");
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => hint.classList.remove("is-visible"), 1200);
-  }
 
-  const zoomed = () => vb.w < MAP_W - 1e-6;
+  return {
+    resetBtn,
+    flashHint() {
+      hint.classList.add("is-visible");
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(() => hint.classList.remove("is-visible"), 1200);
+    },
+    setZoomed(z) {
+      resetBtn.hidden = !z;
+      // The pill takes over the hint's bottom-center slot while zoomed.
+      if (z) {
+        clearTimeout(hintTimer);
+        hint.classList.remove("is-visible");
+      }
+    },
+  };
+}
+
+export function enableMapZoom(svg, region, frame) {
+  const MAX_ZOOM = 16;
+  // The geometry's frame is "home": the reset target and the pan/zoom bounds.
+  const home = frame || { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  const RATIO = home.h / home.w;
+  const vb = { ...home };
+
+  const chrome = mapZoomChrome(region);
+
+  const zoomed = () => vb.w < home.w - 1e-6;
 
   function apply() {
     svg.setAttribute(
@@ -607,12 +677,7 @@ export function enableMapZoom(svg, region) {
       `${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`
     );
     const z = zoomed();
-    resetBtn.hidden = !z;
-    // The reset pill takes over the hint's bottom-center slot while zoomed.
-    if (z) {
-      clearTimeout(hintTimer);
-      hint.classList.remove("is-visible");
-    }
+    chrome.setZoomed(z);
     svg.classList.toggle("is-zoomed", z);
     // At rest one finger scrolls the page (but a two-finger pinch still reaches
     // us as pointer events); once zoomed, gestures belong to the map.
@@ -620,10 +685,10 @@ export function enableMapZoom(svg, region) {
   }
 
   function clampAndApply() {
-    vb.w = Math.max(MAP_W / MAX_ZOOM, Math.min(MAP_W, vb.w));
+    vb.w = Math.max(home.w / MAX_ZOOM, Math.min(home.w, vb.w));
     vb.h = vb.w * RATIO;
-    vb.x = Math.max(0, Math.min(MAP_W - vb.w, vb.x));
-    vb.y = Math.max(0, Math.min(MAP_H - vb.h, vb.y));
+    vb.x = Math.max(home.x, Math.min(home.x + home.w - vb.w, vb.x));
+    vb.y = Math.max(home.y, Math.min(home.y + home.h - vb.h, vb.y));
     apply();
   }
 
@@ -658,11 +723,11 @@ export function enableMapZoom(svg, region) {
     clampAndApply();
   }
 
-  resetBtn.addEventListener("click", () => {
-    vb.x = 0;
-    vb.y = 0;
-    vb.w = MAP_W;
-    vb.h = MAP_H;
+  chrome.resetBtn.addEventListener("click", () => {
+    vb.x = home.x;
+    vb.y = home.y;
+    vb.w = home.w;
+    vb.h = home.h;
     apply();
   });
 
@@ -673,7 +738,7 @@ export function enableMapZoom(svg, region) {
         e.preventDefault(); // keep the browser's page-zoom out of it
         zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0022));
       } else if (!zoomed()) {
-        flashHint(); // plain scroll stays with the page; zoomed → the pill owns the slot
+        chrome.flashHint(); // plain scroll stays with the page; zoomed → the pill owns the slot
       }
     },
     { passive: false }

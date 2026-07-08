@@ -1,7 +1,7 @@
 ---
 title: PivotTable
 sidebar_label: PivotTable
-sidebar_position: 3
+sidebar_position: 4
 icon: "\U0001F500"
 ---
 

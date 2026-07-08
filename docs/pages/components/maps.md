@@ -1,25 +1,76 @@
 ---
 title: Maps
 sidebar_label: Maps
-sidebar_position: 17
+sidebar_position: 2
 icon: "\U0001F5FA"
 ---
 
 # Maps
 
-Five SVG geo components for world data: an animated choropleth, small-multiple
-choropleths, a bivariate choropleth, a proportional-symbol map, and a
-dot-density map. They share one design:
+Every map component on one page: the ECharts-based [MapChart](#mapchart)
+choropleth first — the quickest way to put values on a world map — then five
+self-drawn SVG geo maps: an animated choropleth, small-multiple choropleths, a
+bivariate choropleth, a proportional-symbol map, and a dot-density map.
+
+## MapChart
+
+An ECharts choropleth that joins by country **name** instead of ISO code —
+handy when a dataset carries names and no codes. It's a regular chart (shared
+chart attributes, canvas-rendered), not one of the SVG geo maps below, but it
+follows the same conventions: overlaid title and legend, **Ctrl/⌘ + scroll**
+to zoom (plain scrolling stays with the page), and a **Reset view** pill once
+zoomed. `location` names the region column, `value` the metric; the built-in
+`world` map ships offline, and `geojson=` takes a custom map here too.
+
+```markdown
+<MapChart data={downloads_by_country} location="country" value="downloads"
+          map="world" title="Downloads by country" />
+```
+
+<MapChart data={downloads_by_country} location="country" value="downloads" map="world" title="Downloads by country" />
+
+Like every chart, MapChart also takes [semantic metric refs](/semantic-layer)
+instead of `data={query}` — `by` is the region dimension (its values must match
+the GeoJSON names) and `metric` shades each region; `map`/`geojson` stay
+literal:
+
+```markdown
+<MapChart metric={sales.revenue} by={sales.country} map="world" />
+```
+
+### MapChart attributes
+
+| Attribute | Purpose |
+| --------- | ------- |
+| `data` | **Required.** The query to plot (`data={query}`). |
+| `location` | **Required.** Region-name column (must match the GeoJSON; alias for `x`). |
+| `value` | **Required.** Metric that shades each region (alias for `y`). |
+| `map` | Built-in map name (default `world`). |
+| `geojson` | URL/path to a custom GeoJSON for non-world maps (resolved from `assets/`). |
+| `title` | Chart title. |
+| `color` | Single color or comma-separated palette for the scale. |
+| `height` | Pixel height (default `300`). |
+| `col-span` | Columns to span inside a `<Grid>`. |
+| `format` · `currency` · `decimals` · `locale` | Tooltip value formatting. |
+| `empty_message` | Text shown when the query returns no rows. |
+
+`location`/`value` are aliases for `x`/`y`; `map`/`geojson` are
+MapChart-specific. The rest are the shared chart attributes — see
+[Charts](/components/charts).
+
+## Geo maps
+
+The five SVG geo maps share one design:
 
 - **Countries join on ISO 3166-1 numeric codes** (`id=` names the code column,
   default `iso`) against the bundled world geometry — the join key analytics
   datasets actually carry. Values like `840`, `"840"` and `"076"` all match.
-  (This complements [MapChart](/components/charts/map-chart), which joins by
-  country *name* and renders via ECharts.)
+  ([MapChart](#mapchart) instead joins by country *name*.)
 - **Self-drawn SVG, fully offline** — no mapping library, no CDN, an
-  equirectangular projection (standard parallels ±35°, windowed to the
-  geometry's 84°N–56°S extent so there are no empty polar bands) with
-  antimeridian handling.
+  equirectangular projection with standard parallels ±35° and antimeridian
+  handling. The frame auto-fits the loaded geometry's extent, so the world
+  shows no empty polar bands and a [custom region](#custom-regions) fills the
+  card.
 - **Static-export safe.** Every frame ships in the one query result, and the
   year scrubber / metric toggles are the component's own controls (not page
   filters) — so `dashdown build` exports stay fully interactive.
@@ -181,10 +232,23 @@ seeded per country+metric, so the pattern is identical on every load.
 
 ## Custom regions
 
-Like MapChart, the maps accept a custom basemap: point `geojson=` at a GeoJSON
-file (e.g. under your project's `assets/`) and name the feature property that
-carries your join key with `id_field=`. The bundled world geometry is Natural
-Earth 110m (public domain), enriched with ISO numeric codes.
+The maps accept a custom basemap: point `geojson=` at a GeoJSON file (e.g.
+under your project's `assets/`) and name the feature property that carries
+your join key with `id_field=`. The frame **auto-fits** the geometry's extent,
+so a regional map fills the card, and pan/zoom/reset stay bounded to it;
+bubble and dot sizes stay card-relative. The bundled world geometry is Natural
+Earth 110m (public domain), enriched with ISO numeric codes — this demo's
+`europe.json` is a subset of it, so the default `id_field="iso"` join works
+unchanged:
+
+```markdown
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020"
+    geojson="/assets/europe.json"
+    metrics="population|Population|people"
+    title="Population, 2020 — Europe" />
+```
+
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" geojson="/assets/europe.json" metrics="population|Population|people" title="Population, 2020 — Europe" />
 
 ## Per-component attributes
 

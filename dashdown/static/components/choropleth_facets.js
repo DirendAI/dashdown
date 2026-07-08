@@ -105,7 +105,7 @@ function draw(el, world, records, config) {
   years.forEach((year) => {
     const cell = document.createElement("div");
     cell.className = "dashdown-map-facet";
-    const svg = createMapSvg();
+    const svg = createMapSvg(world.frame);
     const values = frames.get(year);
     world.features.forEach((feature) => {
       const path = svgEl("path", {

@@ -18,6 +18,7 @@ import {
   fmtValue,
   hashSeed,
   loadGeometry,
+  MAP_W,
   mapShell,
   metricToggle,
   mulberry32,
@@ -89,13 +90,15 @@ function draw(el, world, records, config) {
   }
 
   const metrics = config.metrics || [];
-  const dotRadius = config.dot_radius || 1.2;
+  // dot_radius means "size on the card" — card-relative like BubbleMap's
+  // max_radius, so an auto-fit custom frame scales the dots with it.
+  const dotRadius = (config.dot_radius || 1.2) * (world.frame.w / MAP_W);
   const maxDots = config.max_dots || 20000;
   const dotColor = resolveScheme(config)[3];
 
-  const svg = createMapSvg();
+  const svg = createMapSvg(world.frame);
   shell.region.appendChild(svg);
-  enableMapZoom(svg, shell.region);
+  enableMapZoom(svg, shell.region, world.frame);
   const tooltip = createTooltip(shell.region);
 
   const state = { metric: 0 };

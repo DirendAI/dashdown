@@ -237,9 +237,15 @@ export function currentEChartsTheme() {
  * @returns {string | null} null if the token can't be resolved.
  */
 export function resolvePrimaryColor() {
+  return resolveCssColor("oklch(var(--p) / 1)");
+}
+
+/** Resolve any CSS color expression (vars, oklch, …) to an sRGB string zrender
+ * can use — same probe-and-paint trick as resolvePrimaryColor. */
+export function resolveCssColor(cssColor) {
   try {
     const probe = document.createElement("span");
-    probe.style.color = "oklch(var(--p) / 1)";
+    probe.style.color = cssColor;
     probe.style.display = "none";
     document.body.appendChild(probe);
     const computed = getComputedStyle(probe).color;
@@ -257,6 +263,18 @@ export function resolvePrimaryColor() {
   } catch (err) {
     return null;
   }
+}
+
+/**
+ * The translucent card wash behind overlaid map chrome. The SVG geo maps get
+ * it from CSS (`oklch(var(--b1) / 0.72)`); MapChart draws its title/legend on
+ * canvas, so it needs the same wash as a resolved rgba.
+ * @returns {string | null}
+ */
+export function currentSurfaceWash() {
+  const c = resolveCssColor("oklch(var(--b1) / 1)");
+  const m = c && c.match(/(\d+),\s*(\d+),\s*(\d+)/);
+  return m ? `rgba(${m[1]}, ${m[2]}, ${m[3]}, 0.72)` : null;
 }
 
 /**

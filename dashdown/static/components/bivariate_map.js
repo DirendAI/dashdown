@@ -90,9 +90,9 @@ function draw(el, world, records, config) {
   const palette =
     BIVARIATE_SCHEMES[config.scheme] || BIVARIATE_SCHEMES["blue-purple"];
 
-  const svg = createMapSvg();
+  const svg = createMapSvg(world.frame);
   shell.region.appendChild(svg);
-  enableMapZoom(svg, shell.region);
+  enableMapZoom(svg, shell.region, world.frame);
   const tooltip = createTooltip(shell.region);
 
   world.features.forEach((feature) => {

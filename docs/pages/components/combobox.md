@@ -1,7 +1,7 @@
 ---
 title: Combobox
 sidebar_label: Combobox
-sidebar_position: 15
+sidebar_position: 16
 icon: "\U0001F50E"
 ---
 

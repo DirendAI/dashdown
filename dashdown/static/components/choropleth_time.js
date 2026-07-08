@@ -103,9 +103,9 @@ function draw(el, world, records, config) {
 
   const state = { metric: 0, year: years.length - 1 };
 
-  const svg = createMapSvg();
+  const svg = createMapSvg(world.frame);
   shell.region.appendChild(svg);
-  enableMapZoom(svg, shell.region);
+  enableMapZoom(svg, shell.region, world.frame);
   const tooltip = createTooltip(shell.region);
 
   const nodes = world.features.map((feature) => {

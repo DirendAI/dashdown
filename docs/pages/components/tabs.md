@@ -1,7 +1,7 @@
 ---
 title: Tabs
 sidebar_label: Tabs
-sidebar_position: 7
+sidebar_position: 8
 icon: "\U0001F5C2"
 ---
 
