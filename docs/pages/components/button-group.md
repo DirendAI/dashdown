@@ -1,7 +1,7 @@
 ---
 title: ButtonGroup
 sidebar_label: ButtonGroup
-sidebar_position: 14
+sidebar_position: 15
 icon: "\U0001F39B"
 ---
 

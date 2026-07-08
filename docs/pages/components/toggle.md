@@ -1,7 +1,7 @@
 ---
 title: Toggle
 sidebar_label: Toggle
-sidebar_position: 11
+sidebar_position: 12
 icon: "\U0001F518"
 ---
 

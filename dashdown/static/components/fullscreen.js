@@ -21,6 +21,7 @@ import { fetchQueryData, recordsOf, esc } from "../core.js";
 import { currentEChartsTheme, onThemeChange } from "./echarts_theme.js";
 import { updateChart } from "./chart.js";
 import { renderTableInto } from "./table.js";
+import { getMapRenderer, loadGeometry } from "./_geo.js";
 
 // Live filter snapshot, mirroring export.js — the modal opens against the same
 // (queryName, {}, filters) key the card fetched, so fetchQueryData is a cache
@@ -37,7 +38,7 @@ function safeParse(json) {
   }
 }
 
-const VIEW_LABELS = { chart: "Chart", table: "Table" };
+const VIEW_LABELS = { chart: "Chart", map: "Map", table: "Table" };
 
 const CLOSE_ICON =
   '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" ' +
@@ -56,8 +57,8 @@ const CLOSE_ICON =
  * @param {Object} opts
  * @param {string} opts.queryName   query to (re)fetch — cached, so free
  * @param {string} [opts.title]     shown in the modal header
- * @param {Object|null} opts.chartConfig  the chart's data-config (null for a table)
- * @param {string[]} opts.views     subset of ["chart","table"]
+ * @param {Object|null} opts.chartConfig  the chart/map's data-config (null for a table)
+ * @param {string[]} opts.views     subset of ["chart","map","table"]
  * @param {string} opts.defaultView the initially-active view
  */
 export function openFullscreenView(opts) {
@@ -152,6 +153,38 @@ export function openFullscreenView(opts) {
     });
   }
 
+  // --- Map-view lifecycle -----------------------------------------------------
+  // The geo draw()s are one-shot DOM builders; the only disposable resource is
+  // ChoroplethTime's animation interval, parked on the host element.
+  let mapHost = null;
+
+  function disposeMap() {
+    if (mapHost && mapHost._dashdownMapTimer) {
+      clearInterval(mapHost._dashdownMapTimer);
+      mapHost._dashdownMapTimer = null;
+    }
+    mapHost = null;
+  }
+
+  function renderMap(records) {
+    // `dashdown-map` scopes the shared map-shell layout CSS; the geo draw()
+    // renders its normal card body into this host, just modal-sized.
+    body.innerHTML = '<div class="dashdown-map dashdown-fs-map"></div>';
+    const host = body.querySelector(".dashdown-fs-map");
+    mapHost = host;
+    const draw = getMapRenderer(chartConfig.type);
+    loadGeometry(chartConfig)
+      .then((world) => {
+        // The modal chrome already shows the title — don't repeat it in the card.
+        draw(host, world, records, { ...chartConfig, title: "" });
+      })
+      .catch((err) => {
+        body.innerHTML = `<div class="alert alert-error">${esc(
+          (err && err.message) || "Failed to load map"
+        )}</div>`;
+      });
+  }
+
   function renderTable(records) {
     body.innerHTML = '<div class="dashdown-fs-table"></div>';
     const host = body.querySelector(".dashdown-fs-table");
@@ -168,10 +201,11 @@ export function openFullscreenView(opts) {
     });
   }
 
-  const RENDERERS = { chart: renderChart, table: renderTable };
+  const RENDERERS = { chart: renderChart, map: renderMap, table: renderTable };
 
   function showView(view, records) {
-    disposeChart(); // tear down a prior chart view before swapping content
+    disposeChart(); // tear down a prior chart/map view before swapping content
+    disposeMap();
     dialog
       .querySelectorAll(".dashdown-fs-tab")
       .forEach((t) => {
@@ -211,6 +245,7 @@ export function openFullscreenView(opts) {
   });
   dialog.addEventListener("close", () => {
     disposeChart();
+    disposeMap();
     dialog.remove();
   });
 
@@ -238,6 +273,19 @@ function openChartFullscreen(hostEl) {
   });
 }
 
+function openMapFullscreen(hostEl) {
+  const config = safeParse(hostEl.dataset.config) || {};
+  const queryName = config.query_name || hostEl.dataset.queryName;
+  if (!queryName) return;
+  openFullscreenView({
+    queryName,
+    title: config.title || "",
+    chartConfig: config,
+    views: ["map", "table"],
+    defaultView: "map",
+  });
+}
+
 function openTableFullscreen(hostEl) {
   const config = hostEl._tableConfig || safeParse(hostEl.dataset.config) || {};
   const queryName = config.query_name || hostEl.dataset.queryName;
@@ -262,8 +310,12 @@ export function initFullscreen() {
   document.addEventListener("click", (e) => {
     const chartBtn = e.target.closest(".dashdown-chart-expand-btn");
     if (chartBtn) {
-      const host = chartBtn.closest('[data-async-component="chart"]');
-      if (host) openChartFullscreen(host);
+      // The same ⛶ sits on charts and the SVG geo maps — dispatch on the
+      // host's async-component type (a map iff a geo module registered it).
+      const host = chartBtn.closest("[data-async-component]");
+      if (!host) return;
+      if (getMapRenderer(host.dataset.asyncComponent)) openMapFullscreen(host);
+      else if (host.dataset.asyncComponent === "chart") openChartFullscreen(host);
       return;
     }
     const tableBtn = e.target.closest(".dashdown-table-fullscreen");

@@ -1,7 +1,7 @@
 ---
 title: Grid
 sidebar_label: Grid
-sidebar_position: 6
+sidebar_position: 7
 icon: "\U0001F9F1"
 ---
 

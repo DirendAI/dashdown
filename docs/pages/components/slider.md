@@ -1,7 +1,7 @@
 ---
 title: Slider
 sidebar_label: Slider
-sidebar_position: 16
+sidebar_position: 17
 icon: "\U0001F39A"
 ---
 

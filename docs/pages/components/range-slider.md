@@ -1,7 +1,7 @@
 ---
 title: RangeSlider
 sidebar_label: RangeSlider
-sidebar_position: 13
+sidebar_position: 14
 icon: "\U0001F39A"
 ---
 

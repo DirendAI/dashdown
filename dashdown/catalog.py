@@ -59,6 +59,12 @@ _HELPER_ATTRS = {
     # role attrs (surfaced where the render method reads them), but it always reads
     # `grain` itself (via ref_or_literal), so every caller accepts a `grain=`.
     "resolve_semantic_query": {"grain"},
+    # The shared placeholder for the SVG geo maps (components/builtin/_map_base.py):
+    # data/title plus the common basemap + color attrs every map accepts.
+    "_map_html": {
+        "data", "title", "scheme", "color", "scale", "map", "geojson",
+        "id_field", "empty_message", "height", "col-span", "span",
+    },
 }
 
 #: ``resolve_semantic`` parameter -> default attr key it reads. Each is

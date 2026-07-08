@@ -1,7 +1,7 @@
 ---
 title: Table
 sidebar_label: Table
-sidebar_position: 2
+sidebar_position: 3
 icon: "\U0001F4CB"
 ---
 

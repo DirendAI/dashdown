@@ -30,7 +30,7 @@ example; the common attributes are here.
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
-[Violin](/components/charts/violin)), [MapChart](/components/charts/map-chart),
+[Violin](/components/charts/violin)), [MapChart](/components/maps#mapchart),
 [HeatmapChart](/components/charts/heatmap-chart) (a `value` column),
 [SankeyChart](/components/charts/sankey-chart) /
 [GraphChart](/components/charts/graph-chart) (`source`/`target`/`value`),
@@ -92,7 +92,7 @@ legend. The same `series=` / multi-metric grammar works on
 | [TreemapChart](/components/charts/treemap-chart) | Nested proportions |
 | [CalendarHeatmap](/components/charts/calendar-heatmap) | Daily values over a year |
 | [BoxPlot](/components/charts/box-plot) / [Violin](/components/charts/violin) | Distributions |
-| [MapChart](/components/charts/map-chart) | Values by geography |
+| [MapChart](/components/maps#mapchart) | Values by geography |
 | [RadarChart](/components/charts/radar-chart) | Comparing many metrics at once |
 | [GaugeChart](/components/charts/gauge-chart) | A single KPI against a target |
 | [HeatmapChart](/components/charts/heatmap-chart) | Intensity across a category grid |

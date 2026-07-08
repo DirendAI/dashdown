@@ -9,9 +9,11 @@ import { mountFilterBadge } from "./filter_badge.js";
 import {
   currentEChartsTheme,
   currentDefaultPalette,
+  currentSurfaceWash,
   currentTextColors,
   onThemeChange,
 } from "./echarts_theme.js";
+import { mapZoomChrome } from "./_geo.js";
 
 /**
  * Registry of all chart instances
@@ -993,9 +995,20 @@ function buildChartOptionBase(config, records) {
     const min = values.length ? Math.min(...values) : 0;
     let max = values.length ? Math.max(...values) : 1;
     if (max <= min) max = min + 1;
+    // Title and legend sit on the same translucent card wash the SVG geo maps
+    // give their overlaid chrome, so the six map types read as one family.
+    const wash = currentSurfaceWash();
     return {
       title: title
-        ? { text: title, left: "left", textStyle: { fontSize: 14 } }
+        ? {
+            text: title,
+            left: 6,
+            top: 6,
+            padding: [4, 8],
+            backgroundColor: wash || "transparent",
+            borderRadius: 8,
+            textStyle: { fontSize: 14, fontWeight: 600 },
+          }
         : undefined,
       tooltip: {
         trigger: "item",
@@ -1004,7 +1017,17 @@ function buildChartOptionBase(config, records) {
             ? esc(p.name)
             : `${esc(p.name)}: ${fmtFn ? fmtFn(p.value) : p.value}`,
       },
-      visualMap: { min, max, calculable: true, left: 10, bottom: 10 },
+      visualMap: {
+        min,
+        max,
+        calculable: true,
+        orient: "horizontal", // bottom-left ramp, like the geo maps' legend
+        left: 6,
+        bottom: 6,
+        padding: [6, 8],
+        backgroundColor: wash || "transparent",
+        borderRadius: 8,
+      },
       series: [
         {
           type: "map",
@@ -1884,6 +1907,56 @@ function ensureMapRegistered(config) {
 }
 
 /**
+ * Tame MapChart's ECharts roam to the geo maps' control scheme (enableMapZoom
+ * parity): a plain wheel stays with the page (the shared hint flashes),
+ * ⌘/Ctrl + scroll zooms, and the bottom-center "Reset view" pill restores the
+ * full extent. The wheel is intercepted in the capture phase so zrender never
+ * sees an unmodified scroll. Wired once per host element — updateChart calls
+ * it on every map render, and it covers the fullscreen modal too (fullscreen
+ * sets `_echarts_instance` on its own host); reads the instance live so a
+ * theme-change re-init keeps working.
+ */
+function wireMapRoamGuard(el) {
+  if (el._mapZoomChrome) return;
+  const inst = el._echarts_instance;
+  if (!inst) return;
+  const container = inst.getDom();
+  const chrome = mapZoomChrome(container);
+  el._mapZoomChrome = chrome;
+
+  const zoomed = () => {
+    const live = el._echarts_instance;
+    if (!live) return false;
+    const s = ((live.getOption() || {}).series || [])[0] || {};
+    const z = s.zoom == null ? 1 : Number(s.zoom);
+    return Math.abs(z - 1) > 1e-6 || Array.isArray(s.center);
+  };
+  // Roam state lives in the ECharts option — re-read it after the interaction
+  // the browser is still dispatching (hence the rAF).
+  const sync = () => requestAnimationFrame(() => chrome.setZoomed(zoomed()));
+
+  container.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        sync(); // zrender zooms; reflect the new state
+      } else {
+        e.stopPropagation(); // plain scroll stays with the page
+        if (!zoomed()) chrome.flashHint();
+      }
+    },
+    { capture: true, passive: true }
+  );
+  ["mouseup", "touchend"].forEach((t) => container.addEventListener(t, sync));
+
+  chrome.resetBtn.addEventListener("click", () => {
+    const live = el._echarts_instance;
+    if (live) live.dispatchAction({ type: "restore" });
+    sync();
+  });
+}
+
+/**
  * Update chart with new records
  * @param {HTMLElement} el - Chart element
  * @param {Array<Object>} records - Array of record objects
@@ -1911,6 +1984,7 @@ export function updateChart(el, records, config) {
   }
 
   if (config.type === "map") {
+    wireMapRoamGuard(el);
     ensureMapRegistered(config)
       .then(() =>
         echartsInstance.setOption(forPrint(buildChartOption(config, records)), true)

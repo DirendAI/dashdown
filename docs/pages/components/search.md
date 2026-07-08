@@ -1,7 +1,7 @@
 ---
 title: Search (filter)
 sidebar_label: Search
-sidebar_position: 9
+sidebar_position: 10
 icon: "\U0001F50D"
 ---
 

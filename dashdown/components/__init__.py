@@ -27,6 +27,11 @@ from dashdown.components.builtin import combobox  # noqa: F401
 from dashdown.components.builtin import calendar_heatmap  # noqa: F401
 from dashdown.components.builtin import box_plot  # noqa: F401
 from dashdown.components.builtin import map_chart  # noqa: F401
+from dashdown.components.builtin import choropleth_time  # noqa: F401
+from dashdown.components.builtin import choropleth_facets  # noqa: F401
+from dashdown.components.builtin import bivariate_map  # noqa: F401
+from dashdown.components.builtin import bubble_map  # noqa: F401
+from dashdown.components.builtin import dot_density_map  # noqa: F401
 from dashdown.components.builtin import auto_chart  # noqa: F401
 from dashdown.components.builtin import radar_chart  # noqa: F401
 from dashdown.components.builtin import gauge_chart  # noqa: F401
