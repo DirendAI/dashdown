@@ -71,6 +71,7 @@ example; the common attributes are here.
 | `format`, `currency`, `decimals`, `locale`, `date_format` | Value-axis & tooltip number/date formatting — see [Formatting](/formatting). |
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
 | `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question, `cache_ttl=` tunes the answer cache — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
+| `annotations`  | `false` keeps an explained chart **commentary-only** — the AI never proposes (or draws) [marks on the plot](/ai/ask#annotations-on-the-chart). Default `true`. |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
@@ -1218,7 +1219,8 @@ zoomed. `location` names the region column, `value` the metric; the built-in
 The `explain` attribute works here like on any chart — and the [AI
 commentary](/ai/ask#annotations-on-the-chart) can highlight regions on the
 map, each one validated against the locations the query actually returned.
-(The SVG geo maps below are commentary-only for now.)
+(The SVG geo maps below take `explain` too — see
+[AI commentary on geo maps](#ai-commentary-on-geo-maps).)
 
 Like every chart, MapChart also takes [semantic metric refs](/semantic-layer)
 instead of `data={query}` — `by` is the region dimension (its values must match
@@ -1328,6 +1330,29 @@ deliberately left to the page, so a map never traps the wheel.
 (ChoroplethFacets panels stay un-zoomable small multiples — fullscreen is the
 "see them bigger" affordance there.)
 
+## AI commentary on geo maps
+
+Every geo map takes the charts' `explain` attribute (needs an
+[`llm:` block](/ai/ask#configuration)): a hover-revealed ✨ button that
+generates commentary on demand into a footer under the map. On **BubbleMap**
+and **DotDensityMap** the commentary can also [mark the map
+itself](/ai/ask#annotations-on-the-chart): a cited country gets a dashed
+**halo ring** with a leader-line label, referenced from the text by numbered
+chips (hover a chip to bold its halo). Every proposal is validated
+server-side against the join ids in the active year slice — a country the
+frame doesn't draw can't earn a halo — and a halo scoped to one metric shows
+only while that metric is toggled active. The choropleths
+(ChoroplethTime/ChoroplethFacets/BivariateMap) stay commentary-only: facets,
+animation frames, and two-metric encodings give one static mark nothing
+stable to point at. `annotations=false` keeps any map commentary-only;
+`explain="…"` and `cache_ttl=` work exactly as on charts.
+
+```markdown
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020"
+    metrics="population|Population|people" max_radius=35
+    title="Population, 2020" explain />
+```
+
 ## Shared attributes
 
 Every map takes `data={query}` plus:
@@ -1344,6 +1369,9 @@ Every map takes `data={query}` plus:
 | `height` | Pixel height (default `420`). |
 | `col-span` | Columns to span inside a `<Grid>`. |
 | `empty_message` | Text shown when the query returns no rows. |
+| `explain` | AI commentary footer, ✨ on hover (`explain="…"` pins your own question) — see [above](#ai-commentary-on-geo-maps). |
+| `annotations` | `false` keeps an explained BubbleMap/DotDensityMap commentary-only (no halo marks). |
+| `cache_ttl` / `max_rows` | Explain answer-cache TTL and row cap, as on charts. |
 
 ## ChoroplethTime
 
@@ -1401,10 +1429,10 @@ value, over a muted basemap. `max_radius=` caps the largest circle; several
 ```markdown
 <BubbleMap data={world_indicators} id="iso" year="year" year_value="2020"
     metrics="population|Population|people" max_radius=35
-    title="Population, 2020" />
+    title="Population, 2020" explain />
 ```
 
-<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people" max_radius=35 title="Population, 2020" />
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people" max_radius=35 title="Population, 2020" explain />
 
 ## DotDensityMap
 

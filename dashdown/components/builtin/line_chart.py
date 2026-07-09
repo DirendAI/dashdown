@@ -106,15 +106,20 @@ def _chart_placeholder(
 
     # The resolved shape snapshot the `explain` affordance pins to its AskDef —
     # None for chart types without an annotation vocabulary (their explain
-    # stays commentary-only with an unchanged ask id).
-    chart_context = build_chart_context(
-        chart_type,
-        x=x,
-        y=y,
-        series_by=series_by,
-        horizontal=bool(config.get("horizontal")),
-        stacked=bool(config.get("stacked")),
-    )
+    # stays commentary-only with an unchanged ask id), and under
+    # `annotations=false` (the per-chart opt-out: commentary without marks).
+    # Dropping the context IS the id change the opt-out needs: the prompt
+    # reverts to plain commentary, and the plain id matches it.
+    chart_context = None
+    if attr_bool(attrs, "annotations", True):
+        chart_context = build_chart_context(
+            chart_type,
+            x=x,
+            y=y,
+            series_by=series_by,
+            horizontal=bool(config.get("horizontal")),
+            stacked=bool(config.get("stacked")),
+        )
 
     return _chart_card(
         attrs, ctx, chart_type=chart_type, cid=cid, name=name,

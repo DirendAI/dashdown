@@ -186,10 +186,13 @@ On line, bar, scatter, and combo charts, explain doesn't just write — it can
 on the peak, a highlighted bar. Pie and funnel charts get a called-out slice
 or stage (a dashed outline, with the annotation's label as a leader-line
 callout on pies), and `<MapChart>` gets a highlighted region with its label
-drawn on the map. Each mark is cited from the commentary by a small numbered
-chip (hover or focus a chip to bold its mark; the chip's tooltip carries the
-label). The marks appear when the commentary opens and clear when you close
-the footer.
+drawn on the map. On the SVG geo maps [`<BubbleMap>` and
+`<DotDensityMap>`](/components/maps) the mark is a dashed **halo ring** with a
+leader-line label on the cited country. Each mark is cited from the commentary
+by a small numbered chip (hover or focus a chip to bold its mark; the chip's
+tooltip carries the label). The marks appear when the commentary opens and
+clear when you close the footer. `annotations=false` on any chart keeps the
+commentary but never asks for (or draws) marks.
 
 Restraint is enforced, not just prompted: the model may propose at most a
 handful of annotations (an empty set is a perfectly good answer for an
@@ -203,9 +206,11 @@ Chart types with no mark a validated annotation could safely target keep
 **commentary-only** explain — by decision, not omission: radar, gauge, sankey,
 graph, sunburst, tree, parallel, theme river, calendar heatmap, box plot,
 violin, treemap, candlestick, and heatmap, plus faceted pies (`series=` small
-multiples) and the SVG geo maps (`<BubbleMap>`/`<DotDensityMap>`). Charts
-bound to a [`live` streaming query](/realtime) are also commentary-only —
-their data changes under the marks every poll interval.
+multiples) and the choropleth geo maps
+(`<ChoroplethTime>`/`<ChoroplethFacets>`/`<BivariateMap>` — facets, animation
+frames, and two-metric encodings give one static mark nothing stable to point
+at). Charts bound to a [`live` streaming query](/realtime) are also
+commentary-only — their data changes under the marks every poll interval.
 
 #### See it in action
 
@@ -244,6 +249,13 @@ highlight a country that isn't in the data:
 ```
 
 <MapChart data={downloads_by_country} location="country" value="downloads" title="Downloads by country" height=380 explain />
+
+The SVG geo maps work the same way with a **halo ring**: on a
+[`<BubbleMap>` or `<DotDensityMap>`](/components/maps) the model cites
+countries by the same join id the data carries, each proposal is validated
+against the ids in the active year slice (a country with nothing drawn can't
+earn a halo), and a halo the model scoped to one metric shows only while that
+metric is toggled active.
 
 `max_rows=` on the chart tunes how many rows the model sees (annotated
 explains default to 200 — more than `<Ask>`'s 50 — so proposals ground in the

@@ -12,6 +12,7 @@ import {
   centroid,
   createMapSvg,
   createTooltip,
+  drawGeoAnnotations,
   enableMapZoom,
   escapeHtml,
   featurePath,
@@ -39,6 +40,7 @@ import {
 export function initBubbleMap(el) {
   const config = JSON.parse(el.dataset.config);
   const queryName = config.query_name;
+  let last = null; // last-drawn {world, records} for annotation repaints
 
   function render(filters = {}) {
     if (!queryUsesFilters(queryName, filters, queryDefs())) return;
@@ -46,7 +48,8 @@ export function initBubbleMap(el) {
     Promise.all([loadGeometry(config), fetchQueryData(queryName, {}, filters)])
       .then(([world, data]) => {
         hideLoading(el);
-        draw(el, world, recordsOf(data), config);
+        last = { world, records: recordsOf(data) };
+        draw(el, last.world, last.records, config);
       })
       .catch((err) => {
         hideLoading(el);
@@ -54,12 +57,27 @@ export function initBubbleMap(el) {
       });
   }
 
+  // The explain-annotation contract every chart card speaks (annotations.js):
+  // ask.js mutates el._chartConfig.annotations and repaints through
+  // el._chartInstance. Marks are their own SVG layer, so apply/clear/
+  // emphasize redraws just that layer (draw() stashes el._annoRepaint) —
+  // never the whole map (a chip hover must not re-run draw()).
+  el._chartConfig = config;
+  el._chartInstance = {
+    render,
+    repaint() {
+      if (el._annoRepaint) el._annoRepaint();
+      else if (last) draw(el, last.world, last.records, config);
+    },
+  };
+
   subscribeFilters(render);
   mountFilterBadge(el, queryName);
 }
 
 function draw(el, world, records, config) {
   const shell = mapShell(el, config);
+  el._annoRepaint = null; // reset; assigned once the layers exist below
   if (!records.length) {
     showMapEmpty(shell.region, config.empty_message);
     return;
@@ -100,14 +118,38 @@ function draw(el, world, records, config) {
   });
   const bubbleLayer = svgEl("g", { class: "dashdown-map-bubbles" });
   svg.appendChild(bubbleLayer);
+  // The explain-annotation halos sit above the bubbles they ring (redrawn per
+  // metric — a halo the server scoped to a metric shows only while active).
+  const annoLayer = svgEl("g", { class: "dashdown-map-annotations" });
+  svg.appendChild(annoLayer);
 
   const legendHost = document.createElement("div");
   legendHost.className = "dashdown-map-overlay-legend";
   shell.region.appendChild(legendHost);
 
+  // Bubble radius per feature id for the active metric, so a halo rings the
+  // bubble instead of hiding under it.
+  let radiusById = new Map();
+
+  function drawAnnotations() {
+    const metric = metrics[config._metricIndex || 0] || metrics[0];
+    drawGeoAnnotations(annoLayer, world, config, {
+      radiusFor: (id) => radiusById.get(id) || 0,
+      activeMetric: metric && metric.column,
+      hasDatum: (id) => byId.has(id),
+    });
+  }
+  // Light repaint for the explain helpers (apply/clear/emphasize marks):
+  // only the annotation layer redraws, never the whole map.
+  el._annoRepaint = drawAnnotations;
+
   function update(metricIndex) {
+    // Remembered on the config so an annotation apply/clear that falls back
+    // to a full draw() — and a chip hover mid-toggle — keeps the metric.
+    config._metricIndex = metricIndex;
     const metric = metrics[metricIndex];
     bubbleLayer.textContent = "";
+    radiusById = new Map();
 
     // Anchor + value per country present in both the data and the geometry.
     const entries = [];
@@ -120,7 +162,10 @@ function draw(el, world, records, config) {
       if (!anchor) return;
       entries.push({ feature, v, anchor });
     });
-    if (!entries.length) return;
+    if (!entries.length) {
+      drawAnnotations();
+      return;
+    }
 
     const max = Math.max(...entries.map((e) => e.v));
     const radius = (v) => maxRadius * Math.sqrt(v / max);
@@ -128,11 +173,14 @@ function draw(el, world, records, config) {
     entries.sort((a, b) => b.v - a.v);
     entries.forEach(({ feature, v, anchor }) => {
       const [cx, cy] = project(anchor[0], anchor[1]);
+      const r = Math.max(1, radius(v));
+      radiusById.set(feature._dashdownId, r);
       const circle = svgEl("circle", {
         cx: cx.toFixed(1),
         cy: cy.toFixed(1),
-        r: Math.max(1, radius(v)).toFixed(2),
+        r: r.toFixed(2),
         class: "dashdown-map-bubble",
+        "data-id": feature._dashdownId,
         "vector-effect": "non-scaling-stroke",
       });
       circle.style.fill = bubbleColor;
@@ -149,14 +197,16 @@ function draw(el, world, records, config) {
       circle.addEventListener("mouseleave", tooltip.hide);
       bubbleLayer.appendChild(circle);
     });
+    drawAnnotations();
 
     legendHost.textContent = "";
     legendHost.appendChild(sizeLegend(max, radius, metric, bubbleColor));
   }
 
-  const toggle = metricToggle(metrics, update);
+  const initial = Math.min(config._metricIndex || 0, metrics.length - 1);
+  const toggle = metricToggle(metrics, update, initial);
   if (toggle) shell.controls.appendChild(toggle);
-  update(0);
+  update(initial);
 }
 
 /** Two reference circles (max and quarter-of-max) with their values. */

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from dashdown.chart_annotations import build_chart_context
 from dashdown.components.base import RenderContext
 from dashdown.components.builtin._util import (
+    attr_bool,
     attr_int,
     attr_str,
     esc,
@@ -25,7 +27,7 @@ from dashdown.components.builtin._util import (
     new_id,
     safe_json,
 )
-from dashdown.components.builtin.line_chart import _EXPAND_BTN_HTML
+from dashdown.components.builtin.line_chart import _EXPAND_BTN_HTML, _explain_affordance
 from dashdown.render.attrs import DataRef
 
 
@@ -89,6 +91,15 @@ def _map_html(
     modal via the renderer registry in ``static/components/_geo.js``. It sits
     outside ``.card-body``, so the JS map shell (which rebuilds the body on
     every data render) never clobbers it.
+
+    ``explain`` works here too (``line_chart._explain_affordance`` — same
+    cross-module reuse): the ✨ button + commentary footer are direct card
+    children for the same rebuild-safety reason. Chart annotations ride the
+    resolved geo shape: the annotation vocabulary
+    (``chart_annotations.ANNOTATION_VOCAB``) grants ``geo_item`` halos to the
+    bubble/dot maps only — the choropleths register a commentary-only ask
+    (their context resolves to ``None``). ``annotations=false`` opts a map
+    back down to commentary-only.
     """
     data_val = attrs.get("data")
     if isinstance(data_val, DataRef):
@@ -127,6 +138,46 @@ def _map_html(
             f'style="height:{height}px"></div>'
         )
 
+    # The resolved geo shape the `explain` affordance pins to its AskDef:
+    # x is the join-id column, y the toggleable metric columns, and the year
+    # slice rides `extra` (the validator grounds candidates in the frame the
+    # viewer sees). None for map types without an annotation vocabulary —
+    # their explain stays commentary-only — and under `annotations=false`.
+    chart_context = None
+    if attr_bool(attrs, "annotations", True):
+        metric_cols = [
+            m["column"] for m in (full.get("metrics") or []) if m.get("column")
+        ]
+        extra: list[tuple[str, str]] = []
+        if full.get("year"):
+            extra.append(("year", str(full["year"])))
+            if full.get("year_value"):
+                extra.append(("year_value", str(full["year_value"])))
+        chart_context = build_chart_context(
+            map_type,
+            x=str(full.get("id") or "") or None,
+            y=",".join(metric_cols) or None,
+            extra=tuple(extra),
+        )
+
+    explain_html = _explain_affordance(
+        map_type, attrs, ctx, cid=cid, name=name, chart_context=chart_context
+    )
+    body = f'<div class="card-body p-4 h-full">{skeleton}</div>'
+    if explain_html and fixed_height:
+        # Chart parity (_chart_card): the fixed height moves onto an inner
+        # region so the card can grow when the commentary footer opens.
+        inner = (
+            f'<div class="dashdown-chart-region" style="height:{height}px">'
+            f"{body}"
+            f"</div>"
+            f"{_EXPAND_BTN_HTML}"
+            f"{explain_html}"
+        )
+        style = f"width:100%;{span}"
+    else:
+        inner = f"{body}{_EXPAND_BTN_HTML}{explain_html}"
+
     return (
         f'<div class="dashdown-map card bg-base-100 border border-base-300" '
         f'id="{cid}" '
@@ -135,7 +186,6 @@ def _map_html(
         f'data-config="{config_json}" '
         f'data-component-id="{cid}" '
         f'data-query-name="{esc(name)}">'
-        f'<div class="card-body p-4 h-full">{skeleton}</div>'
-        f"{_EXPAND_BTN_HTML}"
+        f"{inner}"
         f"</div>"
     )

@@ -12,6 +12,7 @@ import { mountFilterBadge } from "./filter_badge.js";
 import {
   createMapSvg,
   createTooltip,
+  drawGeoAnnotations,
   enableMapZoom,
   escapeHtml,
   featurePath,
@@ -42,6 +43,7 @@ import {
 export function initDotDensityMap(el) {
   const config = JSON.parse(el.dataset.config);
   const queryName = config.query_name;
+  let last = null; // last-drawn {world, records} for annotation repaints
 
   function render(filters = {}) {
     if (!queryUsesFilters(queryName, filters, queryDefs())) return;
@@ -49,13 +51,29 @@ export function initDotDensityMap(el) {
     Promise.all([loadGeometry(config), fetchQueryData(queryName, {}, filters)])
       .then(([world, data]) => {
         hideLoading(el);
-        draw(el, world, recordsOf(data), config);
+        last = { world, records: recordsOf(data) };
+        draw(el, last.world, last.records, config);
       })
       .catch((err) => {
         hideLoading(el);
         showMapError(el, err);
       });
   }
+
+  // The explain-annotation contract every chart card speaks (annotations.js):
+  // ask.js mutates el._chartConfig.annotations and repaints through
+  // el._chartInstance. Marks are their own SVG layer, so apply/clear/
+  // emphasize redraws just that layer (draw() stashes el._annoRepaint) —
+  // never the whole map (a full draw() would re-sample thousands of dots on
+  // every chip hover).
+  el._chartConfig = config;
+  el._chartInstance = {
+    render,
+    repaint() {
+      if (el._annoRepaint) el._annoRepaint();
+      else if (last) draw(el, last.world, last.records, config);
+    },
+  };
 
   subscribeFilters(render);
   mountFilterBadge(el, queryName);
@@ -73,6 +91,7 @@ function niceQuantity(x) {
 
 function draw(el, world, records, config) {
   const shell = mapShell(el, config);
+  el._annoRepaint = null; // reset; assigned once the layers exist below
   if (!records.length) {
     showMapEmpty(shell.region, config.empty_message);
     return;
@@ -130,6 +149,21 @@ function draw(el, world, records, config) {
   // The dot layer must not swallow hovers meant for the countries underneath.
   dotLayer.setAttribute("pointer-events", "none");
   svg.appendChild(dotLayer);
+  // The explain-annotation halos sit above the dots (redrawn per metric — a
+  // halo the server scoped to a metric shows only while active).
+  const annoLayer = svgEl("g", { class: "dashdown-map-annotations" });
+  svg.appendChild(annoLayer);
+
+  function drawAnnotations() {
+    const metric = metrics[state.metric] || metrics[0];
+    drawGeoAnnotations(annoLayer, world, config, {
+      activeMetric: metric && metric.column,
+      hasDatum: (id) => byId.has(id),
+    });
+  }
+  // Light repaint for the explain helpers (apply/clear/emphasize marks):
+  // only the annotation layer redraws, never the dot sampling.
+  el._annoRepaint = drawAnnotations;
 
   const legendHost = document.createElement("div");
   legendHost.className = "dashdown-map-overlay-legend";
@@ -162,6 +196,9 @@ function draw(el, world, records, config) {
     entries.forEach(({ feature, v, id }) => {
       const count = Math.round(v / perDot);
       if (count <= 0) return;
+      // One <g data-id> per country so a country's dots stay addressable
+      // (the explain-annotation layer and any future per-feature styling).
+      const countryGroup = svgEl("g", { "data-id": id });
       // Seeded per country + metric: dot placement is stable across loads,
       // filters, exports — and independent of data row order.
       const rng = mulberry32(hashSeed(`${id}|${metric.column}`));
@@ -174,20 +211,25 @@ function draw(el, world, records, config) {
           class: "dashdown-map-dot",
         });
         dot.style.fill = dotColor;
-        group.appendChild(dot);
+        countryGroup.appendChild(dot);
       });
+      group.appendChild(countryGroup);
     });
     return { group, perDot };
   }
 
   function update(metricIndex) {
     state.metric = metricIndex;
+    // Remembered on the config so an annotation apply/clear that falls back
+    // to a full draw() — and a chip hover mid-toggle — keeps the metric.
+    config._metricIndex = metricIndex;
     if (!layerCache.has(metricIndex)) {
       layerCache.set(metricIndex, buildLayer(metricIndex));
     }
     const { group, perDot } = layerCache.get(metricIndex);
     dotLayer.textContent = "";
     dotLayer.appendChild(group);
+    drawAnnotations();
 
     const metric = metrics[metricIndex];
     legendHost.textContent = "";
@@ -208,9 +250,10 @@ function draw(el, world, records, config) {
     legendHost.appendChild(legend);
   }
 
-  const toggle = metricToggle(metrics, update);
+  const initial = Math.min(config._metricIndex || 0, metrics.length - 1);
+  const toggle = metricToggle(metrics, update, initial);
   if (toggle) shell.controls.appendChild(toggle);
-  update(0);
+  update(initial);
 }
 
 // Fullscreen: the modal re-draws this map type via the shared registry.

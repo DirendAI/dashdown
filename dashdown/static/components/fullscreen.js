@@ -274,7 +274,10 @@ function openChartFullscreen(hostEl) {
 }
 
 function openMapFullscreen(hostEl) {
-  const config = safeParse(hostEl.dataset.config) || {};
+  // Prefer the live config object (the geo modules stash it, like initChart):
+  // it carries runtime state the dataset snapshot lacks — open-explain
+  // annotations, the active metric toggle — so the modal matches the card.
+  const config = hostEl._chartConfig || safeParse(hostEl.dataset.config) || {};
   const queryName = config.query_name || hostEl.dataset.queryName;
   if (!queryName) return;
   openFullscreenView({
