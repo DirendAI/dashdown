@@ -118,8 +118,10 @@ Project-wide defaults for number, currency and date display (`locale`, `currency
 ## `llm`
 
 The LLM gateway used by [`<Ask />`](/ai/ask). Provider-only — `provider`
-(`mistral` · `anthropic` · `openai` · `openrouter`), `api_key`, `model` — so
-consumer knobs like `max_rows` stay on the component.
+(`mistral` · `anthropic` · `openai` · `openrouter` · `ollama`), `api_key`,
+`base_url`, `model` — so consumer knobs like `max_rows` stay on the component.
+`ollama` runs models locally (no `api_key`); `base_url` targets a non-default or
+self-hosted OpenAI-compatible endpoint.
 
 → **[AI → Ask](/ai/ask)** for providers, extras and usage.
 

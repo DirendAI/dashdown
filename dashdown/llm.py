@@ -7,14 +7,20 @@ Configured under an ``llm:`` block in ``dashdown.yaml``:
       api_key: ${MISTRAL_API_KEY}    # ${VAR} reads from the environment
       model: mistral-small-latest    # optional (this is the mistral default)
 
-Supported providers: ``mistral``, ``anthropic`` (Claude), ``openai``, and
-``openrouter`` (OpenRouter's OpenAI-compatible gateway). Each has a sensible
-default model except ``openrouter`` — which routes to many upstream models, so
-``llm.model`` is required there (a fully-qualified slug like
-``anthropic/claude-3.5-sonnet``). The default model is configurable for all:
-the framework picks the most capable model, but a high-volume project will
-usually want to pin a cheaper/faster one via ``llm.model`` (every cache-miss
-is billed).
+Supported providers: ``mistral``, ``anthropic`` (Claude), ``openai``,
+``openrouter`` (OpenRouter's OpenAI-compatible gateway), and ``ollama`` (a
+local Ollama server's OpenAI-compatible endpoint). Each has a sensible default
+model except ``openrouter`` and ``ollama`` — which route to many upstream /
+locally-pulled models, so ``llm.model`` is required there (a fully-qualified
+slug like ``anthropic/claude-3.5-sonnet`` for openrouter, a pulled model like
+``llama3.1`` for ollama). The default model is configurable for all: the
+framework picks the most capable model, but a high-volume project will usually
+want to pin a cheaper/faster one via ``llm.model`` (every cache-miss is billed).
+
+``ollama`` runs models on your own machine, so it needs **no** ``api_key`` and
+is billed only in local compute. Point ``llm.base_url`` at a non-default host
+(``http://localhost:11434/v1`` otherwise); ``base_url`` also lets ``openai`` /
+``openrouter`` target any other OpenAI-compatible gateway.
 
 No ``llm:`` block (the default) leaves the feature off; ``<Ask />`` blocks
 then report that no provider is configured instead of failing the page. A
@@ -27,9 +33,9 @@ defaults below — mirroring how ``cache_ttl`` works on ``:::query`` blocks —
 not global config.
 
 Provider SDKs are optional extras mirroring the connector packaging
-(``pip install 'dashdown-md[mistral|anthropic|openai|openrouter]'``); the import
-happens lazily on first use and a missing dependency raises a friendly install
-hint.
+(``pip install 'dashdown-md[mistral|anthropic|openai|openrouter|ollama]'``); the
+import happens lazily on first use and a missing dependency raises a friendly
+install hint. (``ollama`` reuses the ``openai`` SDK against the local endpoint.)
 
 This module also owns the ask-prompt registry. ``<Ask />`` placeholders carry
 only an opaque id; the public ``/_dashdown/api/ask/{id}`` endpoint resolves it
@@ -100,6 +106,11 @@ class LLMConfig:
     provider: str = "none"
     model: str | None = None
     api_key: str = ""
+    # Overrides the adapter's ``BASE_URL`` for OpenAI-compatible providers
+    # (``ollama`` runs on ``localhost`` by default; ``openai`` / ``openrouter``
+    # can point at any compatible gateway). Ignored by providers with their own
+    # SDK endpoint (``mistral`` / ``anthropic``).
+    base_url: str | None = None
     error: str | None = None
 
     @property
@@ -145,8 +156,12 @@ def parse_llm_config(raw: dict | None) -> LLMConfig:
         )
 
     api_key = _resolve_secret(raw.get("api_key", ""))
-    if not api_key:
+    if not api_key and _PROVIDERS[provider].REQUIRES_API_KEY:
         raise ValueError(f"llm.provider {provider!r} requires an api_key")
+
+    base_url = raw.get("base_url")
+    if base_url is not None and (not isinstance(base_url, str) or not base_url.strip()):
+        raise ValueError("llm.base_url must be a non-empty string")
 
     model = raw.get("model")
     if model is not None and (not isinstance(model, str) or not model.strip()):
@@ -170,6 +185,7 @@ def parse_llm_config(raw: dict | None) -> LLMConfig:
         provider=provider,
         model=model.strip() if isinstance(model, str) else None,
         api_key=api_key,
+        base_url=base_url.strip() if isinstance(base_url, str) else None,
     )
 
 
@@ -183,6 +199,10 @@ class LLMAdapter(ABC):
     #: no sensible default and the user must set ``llm.model`` (enforced at
     #: config load — see ``parse_llm_config``).
     DEFAULT_MODEL: str | None = None
+
+    #: Whether ``llm.api_key`` is mandatory. ``False`` for a local provider like
+    #: Ollama, which runs on the user's own machine and authenticates nothing.
+    REQUIRES_API_KEY: bool = True
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
@@ -347,9 +367,14 @@ class OpenAIAdapter(LLMAdapter):
                     f"Install it with: pip install 'dashdown-md[{self._EXTRA}]'  "
                     f"(underlying error: {e})"
                 ) from e
-            kwargs: dict[str, Any] = {"api_key": self.config.api_key}
-            if self.BASE_URL:
-                kwargs["base_url"] = self.BASE_URL
+            # The SDK rejects an empty api_key; a keyless provider (Ollama)
+            # ignores the value, so any non-empty placeholder satisfies it.
+            kwargs: dict[str, Any] = {
+                "api_key": self.config.api_key or "ollama",
+            }
+            base_url = self.config.base_url or self.BASE_URL
+            if base_url:
+                kwargs["base_url"] = base_url
             self._client = OpenAI(**kwargs)
         return self._client
 
@@ -396,6 +421,24 @@ class OpenRouterAdapter(OpenAIAdapter):
     _EXTRA = "openrouter"
 
 
+class OllamaAdapter(OpenAIAdapter):
+    """Ollama chat completions — the OpenAI SDK pointed at a local Ollama
+    server's OpenAI-compatible endpoint (``pip install 'dashdown-md[ollama]'``).
+
+    Ollama runs models on your own machine: no ``api_key`` (``REQUIRES_API_KEY
+    = False``), and no universal default model, so ``llm.model`` is required —
+    name a model you've pulled (e.g. ``llama3.1``, ``qwen2.5``). ``BASE_URL``
+    defaults to the local daemon; override it with ``llm.base_url`` for a
+    remote/containerized Ollama.
+    """
+
+    DEFAULT_MODEL: str | None = None
+    BASE_URL = "http://localhost:11434/v1"
+    REQUIRES_API_KEY = False
+    _PROVIDER = "ollama"
+    _EXTRA = "ollama"
+
+
 #: provider name -> adapter class. Future providers slot in here; tests
 #: register fakes the same way.
 _PROVIDERS: dict[str, type[LLMAdapter]] = {
@@ -403,6 +446,7 @@ _PROVIDERS: dict[str, type[LLMAdapter]] = {
     "anthropic": AnthropicAdapter,
     "openai": OpenAIAdapter,
     "openrouter": OpenRouterAdapter,
+    "ollama": OllamaAdapter,
 }
 
 

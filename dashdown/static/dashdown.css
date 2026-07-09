@@ -440,7 +440,10 @@ body {
   color: var(--fallback-p, oklch(var(--p) / 1));
 }
 .dashdown-main h1 {
-  font-size: 1.5rem !important;
+  /* The primary title sits a clear step above h2 (1.5rem) so `#` reads as the
+     page/section head, not a sibling of `##`. Keeps the scale descending:
+     h1 1.875 → h2 1.5 → h3 1.25 → h4 1.125rem. */
+  font-size: 1.875rem !important;
   font-weight: 600 !important;
   line-height: 1.25;
   margin-bottom: 1rem !important;

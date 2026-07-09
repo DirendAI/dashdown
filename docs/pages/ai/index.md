@@ -16,7 +16,8 @@ Most dashboards stop at the chart. [`<Ask />`](/ai/ask) goes one step further: i
 sends a query's result to an LLM and renders the **natural-language read-out** right
 beside it — *"downloads are up 12% month-over-month, driven by the `pip` channel."*
 One tag turns a table into an explained insight, **cached** so repeat views don't
-re-bill, and pointed at any provider (Mistral, Claude, OpenAI, OpenRouter).
+re-bill, and pointed at any provider (Mistral, Claude, OpenAI, OpenRouter, or a
+local Ollama model — data stays on your machine).
 
 ```markdown
 <Ask data={downloads_by_month} ask="Summarize the download trend in two sentences." />
