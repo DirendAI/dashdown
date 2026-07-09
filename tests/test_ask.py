@@ -1892,6 +1892,31 @@ class TestChartAnnotationValidation:
         )
         assert out == []
 
+    def test_pie_item_ignores_stray_series(self):
+        # A pie draws one series; a `series` the model tacked on is ignored, not
+        # a reason to drop the whole mark (the client ignores it there too).
+        out = validate_annotations(
+            [{"type": "item", "x": "South", "series": "North", "label": "Big"}],
+            _BAR_RESULT,
+            _PIE_CTX,
+        )
+        assert [a["x"] for a in out] == ["South"]
+        assert "series" not in out[0]
+
+    def test_bar_item_keeps_valid_series_and_drops_bogus(self):
+        # Bar is multi-series-capable, so the carve-out above must NOT loosen it:
+        # a real series is preserved, a nonexistent one still drops the mark.
+        out = validate_annotations(
+            [{"type": "item", "x": "North", "series": "total", "label": "Peak"}],
+            _BAR_RESULT,
+            _BAR_CTX,
+        )
+        assert out[0]["series"] == "total"
+        out = validate_annotations(
+            [{"type": "item", "x": "North", "series": "ghost"}], _BAR_RESULT, _BAR_CTX
+        )
+        assert out == []
+
     def test_funnel_item_stage_must_exist(self):
         out = validate_annotations(
             [
@@ -2081,6 +2106,7 @@ class TestAnnotationInstructions:
         text = annotation_instructions(_BAR_CTX, _BAR_RESULT)
         assert '"type": "item"' in text  # bar has item…
         assert '"type": "point"' not in text  # …but not point
+        assert '"series": "<series>" (optional)' in text  # bar item keeps series
         assert "at most 3 annotations" in text
         assert "empty list is the right answer" in text
         assert "X categories: North, South, West" in text
@@ -2115,6 +2141,8 @@ class TestAnnotationInstructions:
         assert '"type": "extremum"' not in text
         assert '"type": "axis_line"' not in text
         assert "X categories: North, South, West" in text
+        # A pie draws one series, so its item shape omits the `series` field.
+        assert '"series"' not in text
 
     def test_map_speaks_locations_and_lists_geo_item(self):
         text = annotation_instructions(_MAP_CTX, _MAP_RESULT)

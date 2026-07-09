@@ -306,14 +306,21 @@ _TYPE_SHAPES = {
     ),
     "item": (
         '{"type": "item", "x": "<category>", "series": "<series>" (optional), '
-        '"label": "<short label>"} — highlights that category\'s bar, slice, '
-        "or stage"
+        '"label": "<short label>"} — highlights that category\'s bar'
     ),
     "geo_item": (
         '{"type": "geo_item", "name": "<location>", "label": "<short label>"} '
         "— highlights that region on the map"
     ),
 }
+
+#: Pie/funnel reuse the ``item`` type but draw a single series, so their prompt
+#: shape omits the ``series`` field (a stray one is ignored server-side, but
+#: advertising it just invites the model to waste a slot).
+_ITEM_SHAPE_PART_OF_WHOLE = (
+    '{"type": "item", "x": "<category>", "label": "<short label>"} '
+    "— highlights that slice or stage"
+)
 
 
 def _shape_summary(ctx: ChartContext) -> str:
@@ -383,7 +390,12 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
         lines.append(f"Series names: {', '.join(shown_series)}")
 
     lines.append("Allowed annotation types (JSON objects):")
-    lines.extend(f"- {_TYPE_SHAPES[t]}" for t in allowed)
+    for t in allowed:
+        shape = _TYPE_SHAPES[t]
+        # Pie/funnel have one series — don't advertise the `series` field there.
+        if t == "item" and ctx.chart_type in ("pie", "funnel"):
+            shape = _ITEM_SHAPE_PART_OF_WHOLE
+        lines.append(f"- {shape}")
     lines.append(
         "Propose at most 3 annotations, only where a mark genuinely helps a "
         "viewer; an empty list is the right answer for an unremarkable chart. "
@@ -624,11 +636,15 @@ def validate_annotations(
             if x_text not in categories:
                 continue
             out["x"] = x_text
-            series, ok = _clean_series(candidate, valid_series)
-            if not ok:
-                continue
-            if series:
-                out["series"] = series
+            # `series` addresses one of several series; a pie/funnel has just
+            # one, so ignore a series the model tacked on there rather than
+            # dropping the whole mark over it (the client ignores it too).
+            if ctx.chart_type not in ("pie", "funnel"):
+                series, ok = _clean_series(candidate, valid_series)
+                if not ok:
+                    continue
+                if series:
+                    out["series"] = series
 
         elif a_type == "geo_item":
             # The prompt teaches `name`; accept `id` as a fallback spelling

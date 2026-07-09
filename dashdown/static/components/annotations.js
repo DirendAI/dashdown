@@ -343,8 +343,13 @@ function applyDatumAnnotations(option, config) {
       item.labelLine = { show: true };
     } else if (config.type === "map") {
       // Label the region even without an annotation label — the region name
-      // is the callout then.
-      item.label = label || { show: true, color: colors.heading, fontSize: 11 };
+      // is the callout then (and still bolds on chip focus).
+      item.label = label || {
+        show: true,
+        color: colors.heading,
+        fontSize: 11,
+        fontWeight: emphasized ? "bold" : "normal",
+      };
     }
   }
 }
