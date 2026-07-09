@@ -161,10 +161,13 @@ attribute (and one-hour default) `<Ask>` takes:
 
 On line, bar, scatter, and combo charts, explain doesn't just write — it can
 **mark the chart itself**: a dashed threshold line, a shaded range band, a dot
-on the peak, a highlighted bar. Each mark is cited from the commentary by a
-small numbered chip (hover or focus a chip to bold its mark; the chip's
-tooltip carries the label). The marks appear when the commentary opens and
-clear when you close the footer.
+on the peak, a highlighted bar. Pie and funnel charts get a called-out slice
+or stage (a dashed outline, with the annotation's label as a leader-line
+callout on pies), and `<MapChart>` gets a highlighted region with its label
+drawn on the map. Each mark is cited from the commentary by a small numbered
+chip (hover or focus a chip to bold its mark; the chip's tooltip carries the
+label). The marks appear when the commentary opens and clear when you close
+the footer.
 
 Restraint is enforced, not just prompted: the model may propose at most a
 handful of annotations (an empty set is a perfectly good answer for an
@@ -172,10 +175,66 @@ unremarkable chart), and every candidate is **validated server-side against
 the full query result** — a value outside the data's actual range, a category
 that doesn't exist, or a series the chart doesn't draw is silently dropped.
 Extremes ("the maximum") are recomputed from the live data rather than trusting
-the model's coordinates, so marks stay correct as filters change. Other chart
-types (pie, gauge, sankey, maps, …) keep commentary-only explain for now, as do
-charts bound to a [`live` streaming query](/realtime) — their data changes
-under the marks every poll interval.
+the model's coordinates, so marks stay correct as filters change.
+
+Chart types with no mark a validated annotation could safely target keep
+**commentary-only** explain — by decision, not omission: radar, gauge, sankey,
+graph, sunburst, tree, parallel, theme river, calendar heatmap, box plot,
+violin, treemap, candlestick, and heatmap, plus faceted pies (`series=` small
+multiples) and the SVG geo maps (`<BubbleMap>`/`<DotDensityMap>`). Charts
+bound to a [`live` streaming query](/realtime) are also commentary-only —
+their data changes under the marks every poll interval.
+
+#### See it in action
+
+The charts below are live — hover one and click its ✨ sparkle. The commentary
+types in with numbered chips, and any marks the model proposed (and the server
+validated) paint onto the plot. Each run may mark different things, or nothing
+at all — restraint is the point:
+
+```markdown
+<LineChart data={monthly_downloads} x="month" y="downloads" title="Monthly downloads"
+           explain="What is the trend, and which months stand out?" />
+```
+
+<LineChart data={monthly_downloads} x="month" y="downloads" title="Monthly downloads" explain="What is the trend, and which months stand out?" />
+
+On part-of-whole charts the mark is a called-out slice or stage — a dashed
+outline, with the annotation's label as a leader-line callout on pies:
+
+```sql downloads_by_channel
+SELECT channel, SUM(downloads) AS downloads
+FROM downloads GROUP BY channel ORDER BY downloads DESC
+```
+
+```sql funnel_stages
+SELECT stage_from AS stage, SUM(users) AS users
+FROM user_flow GROUP BY stage_from
+UNION ALL
+SELECT 'Paid' AS stage, SUM(users) AS users FROM user_flow WHERE stage_to = 'Paid'
+ORDER BY users DESC
+```
+
+```markdown
+<PieChart data={downloads_by_channel} x="channel" y="downloads" title="Downloads by channel" explain />
+<FunnelChart data={funnel_stages} x="stage" y="users" title="Visitor funnel" explain />
+```
+
+<Grid cols=2>
+<PieChart data={downloads_by_channel} x="channel" y="downloads" title="Downloads by channel" explain />
+<FunnelChart data={funnel_stages} x="stage" y="users" title="Visitor funnel" explain />
+</Grid>
+
+And on a `<MapChart>` the model can point at regions — each proposal is
+validated against the locations the query actually returned, so it can never
+highlight a country that isn't in the data:
+
+```markdown
+<MapChart data={downloads_by_country} location="country" value="downloads"
+          title="Downloads by country" explain />
+```
+
+<MapChart data={downloads_by_country} location="country" value="downloads" title="Downloads by country" height=380 explain />
 
 `max_rows=` on the chart tunes how many rows the model sees (annotated
 explains default to 200 — more than `<Ask>`'s 50 — so proposals ground in the
