@@ -5,7 +5,8 @@
 // this module translates them into ECharts markLine/markPoint/markArea and
 // hangs them onto the chart's EXISTING series — never a new series, which
 // would break faceted-pie index patching, the palette-by-index gradient pass,
-// and the legend.
+// and the legend. Pie/funnel/map annotations are per-datum style overrides on
+// the existing series data instead (applyDatumAnnotations) — same principle.
 //
 // The translator runs inside buildChartOption (the single updateChart funnel),
 // so annotations automatically survive filter refetches, live WS pushes, theme
@@ -24,7 +25,22 @@ import { currentTextColors } from "./echarts_theme.js";
 
 // Chart types with a translator branch — must stay in sync with the server's
 // ANNOTATION_VOCAB (chart_annotations.py). Anything else no-ops.
-const SUPPORTED_TYPES = new Set(["line", "bar", "scatter", "combo"]);
+const SUPPORTED_TYPES = new Set([
+  "line",
+  "bar",
+  "scatter",
+  "combo",
+  "pie",
+  "funnel",
+  "map",
+]);
+
+// Part-of-whole / geo types: no cartesian mark grammar. Their one annotation
+// (`item` / `geo_item`) is a per-datum override on the existing series data —
+// a dashed outline plus a muted label callout — applied inside the option
+// build, so it needs no dispatchAction post-hooks and survives the
+// setOption(notMerge) funnel like every other mark.
+const DATUM_TYPES = new Set(["pie", "funnel", "map"]);
 
 // Same tolerance the server applies: a value a bit past the observed domain
 // (a target line above the max) stays; a wildly-off one is stale — drop it.
@@ -120,6 +136,15 @@ export function applyChartAnnotations(option, config, records) {
   if (!SUPPORTED_TYPES.has(config.type)) return;
   if (!Array.isArray(option.series) || !option.series.length) return;
   if (!Array.isArray(records) || !records.length) return;
+
+  if (DATUM_TYPES.has(config.type)) {
+    // Faceted pies never carry a chart_context server-side (build_chart_context
+    // returns None), so no annotations should reach here — but their series
+    // indexes are patched per facet, so skip defensively anyway.
+    if (config.type === "pie" && config.series_by) return;
+    applyDatumAnnotations(option, config);
+    return;
+  }
 
   const xCol = config.x;
   const horizontal = !!config.horizontal;
@@ -271,6 +296,68 @@ export function applyChartAnnotations(option, config, records) {
     if (marks.areas.length) mergeMark(series, "markArea", {}, marks.areas);
     if (marks.points.length) mergeMark(series, "markPoint", {}, marks.points);
   }
+}
+
+/**
+ * The pie/funnel/map translator: each `item`/`geo_item` annotation becomes a
+ * per-datum override on series 0's matching data entry — a dashed outline in
+ * the mark color, plus a label callout (pie shows the annotation label with a
+ * leader line even when slice labels are off; a map labels the region; funnel
+ * keeps its native stage label — the chip tooltip carries the annotation
+ * text). A name that no longer matches the current data (filter drift) simply
+ * doesn't decorate anything — same stale-mark posture as the cartesian path.
+ */
+function applyDatumAnnotations(option, config) {
+  const series = option.series[0];
+  if (!series || !Array.isArray(series.data)) return;
+
+  const colors = currentTextColors();
+  const emphasisId = config._annoEmphasis || null;
+  // Never let a label become an ECharts template ("{b}" etc.).
+  const cleanLabel = (s) => String(s).replace(/[{}]/g, "");
+
+  for (const a of annotationTargets(config.annotations)) {
+    const item = series.data.find(
+      (d) => d && String(d.name) === String(a.target)
+    );
+    if (!item) continue; // stale: slice/stage/region gone after a filter change
+    const emphasized = emphasisId !== null && a.id === emphasisId;
+
+    item.itemStyle = {
+      ...(item.itemStyle || {}),
+      borderType: "dashed",
+      borderColor: colors.heading,
+      borderWidth: emphasized ? 3 : 1.8,
+    };
+    const label = a.label
+      ? {
+          show: true,
+          formatter: cleanLabel(a.label),
+          color: colors.heading,
+          fontSize: 11,
+          fontWeight: emphasized ? "bold" : "normal",
+        }
+      : null;
+    if (config.type === "pie" && label) {
+      item.label = label;
+      item.labelLine = { show: true };
+    } else if (config.type === "map") {
+      // Label the region even without an annotation label — the region name
+      // is the callout then.
+      item.label = label || { show: true, color: colors.heading, fontSize: 11 };
+    }
+  }
+}
+
+/** The item/geo_item annotations with their datum name resolved, other types
+ * skipped (a newer server against an older client degrades silently). */
+function annotationTargets(annotations) {
+  const out = [];
+  for (const a of annotations) {
+    const target = a.type === "geo_item" ? a.name : a.type === "item" ? a.x : null;
+    if (target != null) out.push({ id: a.id, label: a.label, target });
+  }
+  return out;
 }
 
 /**

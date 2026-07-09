@@ -1655,6 +1655,20 @@ _COMBO_RESULT = QueryResult(
     ],
 )
 
+# Part-of-whole and geo vocabularies (Phase 3): pie/funnel carry `item`,
+# MapChart carries `geo_item`. Pie reuses the bar-shaped result (x=label).
+_PIE_CTX = ChartContext(chart_type="pie", x="region", y="total")
+_FUNNEL_CTX = ChartContext(chart_type="funnel", x="stage", y="count")
+_FUNNEL_RESULT = QueryResult(
+    columns=["stage", "count"],
+    rows=[["Visited", 1000], ["Signed up", 300], ["Paid", 40]],
+)
+_MAP_CTX = ChartContext(chart_type="map", x="country", y="sales")
+_MAP_RESULT = QueryResult(
+    columns=["country", "sales"],
+    rows=[["Germany", 120], ["France", 90], ["Japan", 60]],
+)
+
 
 class TestChartAnnotationValidation:
     def test_axis_line_y_within_domain_survives(self):
@@ -1859,13 +1873,59 @@ class TestChartAnnotationValidation:
 
     def test_non_list_candidates_and_no_vocab(self):
         assert validate_annotations("nope", _LINE_RESULT, _LINE_CTX) == []
-        pie_ctx = ChartContext(chart_type="pie", x="region", y="total")
+        radar_ctx = ChartContext(chart_type="radar", x="metric", y="score")
         assert (
             validate_annotations(
-                [{"type": "item", "x": "North"}], _BAR_RESULT, pie_ctx
+                [{"type": "item", "x": "North"}], _BAR_RESULT, radar_ctx
             )
             == []
         )
+
+    def test_pie_item_slice_must_exist(self):
+        good = {"type": "item", "x": "South", "label": "Largest slice"}
+        ghost = {"type": "item", "x": "Sept", "label": "Ghost"}
+        out = validate_annotations([good, ghost], _BAR_RESULT, _PIE_CTX)
+        assert [a["x"] for a in out] == ["South"]
+        # Pie carries only `item` — cartesian marks don't validate on it.
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 150}], _BAR_RESULT, _PIE_CTX
+        )
+        assert out == []
+
+    def test_funnel_item_stage_must_exist(self):
+        out = validate_annotations(
+            [
+                {"type": "item", "x": "Signed up", "label": "Biggest drop"},
+                {"type": "item", "x": "Churned", "label": "Ghost"},
+            ],
+            _FUNNEL_RESULT,
+            _FUNNEL_CTX,
+        )
+        assert [a["x"] for a in out] == ["Signed up"]
+
+    def test_geo_item_location_must_exist(self):
+        good = {"type": "geo_item", "name": "Germany", "label": "Top market"}
+        ghost = {"type": "geo_item", "name": "Atlantis", "label": "Ghost"}
+        out = validate_annotations([good, ghost], _MAP_RESULT, _MAP_CTX)
+        assert len(out) == 1
+        assert out[0]["name"] == "Germany"
+        assert set(out[0]) == {"id", "type", "label", "name", "_ref"}
+        # A map carries only `geo_item`.
+        out = validate_annotations(
+            [{"type": "item", "x": "Germany"}], _MAP_RESULT, _MAP_CTX
+        )
+        assert out == []
+
+    def test_geo_item_accepts_id_spelling(self):
+        # The prompt teaches `name`; `id` is tolerated as a fallback (the
+        # Phase-4 SVG geo maps formalize normalized feature ids).
+        out = validate_annotations(
+            [{"type": "geo_item", "id": "France", "label": "Runner-up"}],
+            _MAP_RESULT,
+            _MAP_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["name"] == "France"
 
     def test_date_categories_match_prompt_normalization(self):
         # Cells render into the prompt via isoformat; a candidate quoting that
@@ -2049,6 +2109,23 @@ class TestAnnotationInstructions:
         assert '"type": "point"' not in text
         assert '"type": "extremum"' in text
 
+    def test_pie_lists_item_only(self):
+        text = annotation_instructions(_PIE_CTX, _BAR_RESULT)
+        assert '"type": "item"' in text
+        assert '"type": "extremum"' not in text
+        assert '"type": "axis_line"' not in text
+        assert "X categories: North, South, West" in text
+
+    def test_map_speaks_locations_and_lists_geo_item(self):
+        text = annotation_instructions(_MAP_CTX, _MAP_RESULT)
+        assert '"type": "geo_item"' in text
+        assert '"type": "item"' not in text
+        # The grounding lines speak geography, not axes.
+        assert "Location names: Germany, France, Japan" in text
+        assert "location column 'country'" in text
+        assert "Values range from 60 to 120" in text
+        assert "X categories" not in text
+
 
 # --------------------------------------------------------------------------- #
 # Combo dual-axis: value marks scope to the left axis; free point is out
@@ -2130,7 +2207,7 @@ class TestChartContextAskIds:
         assert get_ask_def(d.id).chart_context == ctx
 
     def test_build_chart_context_only_for_vocabulary_types(self):
-        assert build_chart_context("pie", x="region", y="total") is None
+        assert build_chart_context("radar", x="metric", y="score") is None
         assert build_chart_context("gauge") is None
         ctx = build_chart_context("bar", x="region", y="total", horizontal=True)
         assert ctx == ChartContext(
@@ -2139,6 +2216,15 @@ class TestChartContextAskIds:
         # Every vocabulary type builds a context (the two tables stay in sync).
         for chart_type in ANNOTATION_VOCAB:
             assert build_chart_context(chart_type, x="x", y="y") is not None
+
+    def test_faceted_pie_has_no_context(self):
+        # A pie with `series=` renders small multiples — the client patches
+        # series indexes per facet, so an `item` mark can't address one pie.
+        assert build_chart_context("pie", x="region", y="total") is not None
+        assert (
+            build_chart_context("pie", x="region", y="total", series_by="quarter")
+            is None
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -2172,11 +2258,43 @@ class TestChartExplainContext:
         assert ask.chart_context.series_by == "channel"
 
     def test_unvocabularied_chart_stays_commentary_only(self):
-        source = EXPLAIN_PAGE.replace("<BarChart", "<PieChart")
+        source = EXPLAIN_PAGE.replace("<BarChart", "<TreemapChart")
         ask = render_page(source, connectors={}).ask_defs[0]
         assert ask.chart_context is None
         # …and keeps the plain-<Ask /> row cap (its id must not move).
         assert ask.max_rows == DEFAULT_MAX_ROWS
+
+    def test_pie_and_funnel_explain_carry_context(self):
+        for tag, chart_type in (("PieChart", "pie"), ("FunnelChart", "funnel")):
+            source = EXPLAIN_PAGE.replace("<BarChart", f"<{tag}")
+            ask = render_page(source, connectors={}).ask_defs[0]
+            assert ask.chart_context == ChartContext(
+                chart_type=chart_type, x="region", y="total"
+            )
+            assert ask.max_rows == DEFAULT_EXPLAIN_MAX_ROWS
+
+    def test_faceted_pie_explain_stays_commentary_only(self):
+        source = EXPLAIN_PAGE.replace("<BarChart", "<PieChart").replace(
+            " explain", ' series="channel" explain'
+        )
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context is None
+        assert ask.max_rows == DEFAULT_MAX_ROWS
+
+    def test_map_explain_context_uses_location_value_aliases(self):
+        source = """# T
+
+:::query name=by_country connector=main
+SELECT country, SUM(amount) AS sales FROM sales GROUP BY country
+:::
+
+<MapChart data={by_country} location="country" value="sales" explain />
+"""
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context == ChartContext(
+            chart_type="map", x="country", y="sales"
+        )
+        assert ask.max_rows == DEFAULT_EXPLAIN_MAX_ROWS
 
     def test_live_query_chart_is_commentary_only(self):
         # Decided: a chart on a `live` query gets no chart_context — the data

@@ -24,10 +24,15 @@ zoomed. `location` names the region column, `value` the metric; the built-in
 
 ```markdown
 <MapChart data={downloads_by_country} location="country" value="downloads"
-          map="world" title="Downloads by country" />
+          map="world" title="Downloads by country" explain />
 ```
 
-<MapChart data={downloads_by_country} location="country" value="downloads" map="world" title="Downloads by country" />
+<MapChart data={downloads_by_country} location="country" value="downloads" map="world" title="Downloads by country" explain />
+
+The `explain` attribute works here like on any chart — and the [AI
+commentary](/ai/ask#annotations-on-the-chart) can highlight regions on the
+map, each one validated against the locations the query actually returned.
+(The SVG geo maps below are commentary-only for now.)
 
 Like every chart, MapChart also takes [semantic metric refs](/semantic-layer)
 instead of `data={query}` — `by` is the region dimension (its values must match

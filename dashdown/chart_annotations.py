@@ -53,13 +53,18 @@ _MAX_PROMPT_SERIES = 20
 _MAX_LABEL_LEN = 80
 
 #: Which annotation types each chart type may carry. Chart types not listed
-#: here (pie, funnel, radar, gauge, …) have no annotation vocabulary yet:
-#: their explain prompt never asks for annotations and their asks register
-#: without a chart_context — commentary-only, exactly the pre-annotation
-#: behavior. Pie/funnel ``item`` and the map types land with their client
-#: rendering paths (backlog Phases 3–4); adding a type here without a
-#: translator branch in static/components/annotations.js would validate marks
-#: the chart can't draw.
+#: here have **no annotation vocabulary** — their explain prompt never asks
+#: for annotations and their asks register without a chart_context:
+#: commentary-only, exactly the pre-annotation behavior. That list is a
+#: decision, not a gap (see docs/pages/ai/ask.md): radar, gauge, sankey,
+#: graph, sunburst, tree, parallel, themeriver, calendar, boxplot, violin,
+#: treemap, candlestick and heatmap have no mark grammar a validated
+#: annotation could safely target. Faceted pies (``series=`` small multiples)
+#: are excluded in :func:`build_chart_context` — their client series indexes
+#: are patched per facet and a mark can't address one pie. The SVG geo maps
+#: (BubbleMap/DotDensityMap) land in backlog Phase 4. Adding a type here
+#: without a translator branch in static/components/annotations.js would
+#: validate marks the chart can't draw.
 ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     "line": frozenset({"axis_line", "range", "point", "extremum"}),
     "bar": frozenset({"axis_line", "range", "extremum", "item"}),
@@ -70,6 +75,14 @@ ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     # (see _value_axis_columns) since they draw on series 0's axis, and
     # `extremum` is per-series (ECharts recomputes it on that series' own axis).
     "combo": frozenset({"axis_line", "range", "extremum"}),
+    # Part-of-whole charts: one addressable mark — call out a slice/stage.
+    # Rendered client-side as a per-datum dashed outline (+ label callout on
+    # pie), config-driven so it survives the setOption(notMerge) funnel.
+    "pie": frozenset({"item"}),
+    "funnel": frozenset({"item"}),
+    # MapChart (ECharts choropleth): call out one region by feature name,
+    # validated against the query's location column.
+    "map": frozenset({"geo_item"}),
 }
 
 #: The [aN] ref token the model places in its commentary text.
@@ -135,6 +148,11 @@ def build_chart_context(
     else ``None`` (the ask registers as plain commentary and keeps the exact
     pre-annotation id)."""
     if chart_type not in ANNOTATION_VOCAB:
+        return None
+    # A pie with `series=` renders faceted small multiples: the client patches
+    # series indexes/centers per facet, so an `item` mark can't address one
+    # pie. Those explains stay commentary-only.
+    if chart_type == "pie" and series_by:
         return None
     return ChartContext(
         chart_type=chart_type,
@@ -288,18 +306,29 @@ _TYPE_SHAPES = {
     ),
     "item": (
         '{"type": "item", "x": "<category>", "series": "<series>" (optional), '
-        '"label": "<short label>"} — highlights one category\'s bar'
+        '"label": "<short label>"} — highlights that category\'s bar, slice, '
+        "or stage"
+    ),
+    "geo_item": (
+        '{"type": "geo_item", "name": "<location>", "label": "<short label>"} '
+        "— highlights that region on the map"
     ),
 }
 
 
 def _shape_summary(ctx: ChartContext) -> str:
+    # A map's x/y are semantically location/value — name them that way so the
+    # model reasons about regions, not axes.
+    is_map = ctx.chart_type == "map"
     bits = [f"a {ctx.chart_type} chart"]
     if ctx.x:
-        bits.append(f"x column '{ctx.x}'")
+        bits.append(f"{'location' if is_map else 'x'} column '{ctx.x}'")
     ys = ctx.y_columns
     if ys:
-        label = "y columns" if len(ys) > 1 else "y column"
+        if is_map:
+            label = "value column"
+        else:
+            label = "y columns" if len(ys) > 1 else "y column"
         bits.append(f"{label} {', '.join(repr(c) for c in ys)}")
     if ctx.series_by:
         bits.append(f"split into one series per '{ctx.series_by}' value")
@@ -337,7 +366,8 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
             suffix = (
                 f" (first {len(shown)} of {len(cats)})" if len(cats) > len(shown) else ""
             )
-            lines.append(f"X categories{suffix}: {', '.join(shown)}")
+            cats_label = "Location names" if ctx.chart_type == "map" else "X categories"
+            lines.append(f"{cats_label}{suffix}: {', '.join(shown)}")
     y_idx = [
         i
         for i in (_column_index(result, c) for c in _value_axis_columns(ctx))
@@ -345,7 +375,8 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     ]
     y_domain = _numeric_domain(result, y_idx) if y_idx else None
     if y_domain is not None:
-        lines.append(f"Y values range from {y_domain[0]:g} to {y_domain[1]:g}.")
+        val_label = "Values" if ctx.chart_type == "map" else "Y values"
+        lines.append(f"{val_label} range from {y_domain[0]:g} to {y_domain[1]:g}.")
     series = sorted(_series_names(result, ctx))
     if len(series) > 1:
         shown_series = series[:_MAX_PROMPT_SERIES]
@@ -359,6 +390,18 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
         "Values must come from the data above — never invent numbers or "
         "categories."
     )
+    # The worked example must use a type from THIS chart's vocabulary — an
+    # off-vocabulary example teaches the model a shape validation will drop.
+    if "extremum" in allowed:
+        example = '[{"type": "extremum", "kind": "max", "label": "June peak"}]'
+    elif "item" in allowed:
+        example = '[{"type": "item", "x": "June", "label": "Standout"}]'
+    elif "geo_item" in allowed:
+        example = '[{"type": "geo_item", "name": "Germany", "label": "Top market"}]'
+    else:
+        example = (
+            '[{"type": "axis_line", "axis": "y", "value": 100, "label": "Target"}]'
+        )
     lines.append(
         "Reference each annotation from your commentary with [a1], [a2], … in "
         "array order, placed immediately after the phrase it supports "
@@ -366,7 +409,7 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
         "exactly one fenced code block labeled `annotations` containing the "
         "JSON array (or [] for none):\n"
         "```annotations\n"
-        '[{"type": "extremum", "kind": "max", "label": "June peak"}]\n'
+        f"{example}\n"
         "```"
     )
     return "\n".join(lines)
@@ -586,6 +629,18 @@ def validate_annotations(
                 continue
             if series:
                 out["series"] = series
+
+        elif a_type == "geo_item":
+            # The prompt teaches `name`; accept `id` as a fallback spelling
+            # (the Phase-4 SVG geo maps will formalize normalized feature
+            # ids). Either way it must name a location the query returned.
+            raw = candidate.get("name")
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                raw = candidate.get("id")
+            name_text = cell_text(raw).strip() if raw is not None else ""
+            if not name_text or name_text not in categories:
+                continue
+            out["name"] = name_text
 
         survivors.append(out)
 
