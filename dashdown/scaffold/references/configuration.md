@@ -62,6 +62,7 @@ sidebar:                       # → Sidebar
   collapsed: false             # first-visit state; reader's choice is remembered
   toggle: true                 # show the desktop collapse button
   show_single_page: false      # show the nav even on a one-page project
+  hidden: false                # never render the nav (blog/article-style sites)
 
 layout:                        # → Layout
   width: l                     # default content width: s | m | l
@@ -165,6 +166,7 @@ sidebar:
   collapsed: false         # nav shown on first visit; true → start collapsed
   toggle: true             # show the desktop "hide sidebar" button
   show_single_page: false  # one-page project hides the nav; true → keep it
+  hidden: false            # true → never render the nav at all
 ```
 
 | Key                | Default | Purpose                                                              |
@@ -172,12 +174,13 @@ sidebar:
 | `collapsed`        | `false` | First-visit state on desktop. Only a *seed* — once a reader toggles the sidebar, that choice is saved per browser and wins over this. |
 | `toggle`           | `true`  | Show the desktop collapse button in the header. `false` pins the sidebar to whatever `collapsed` says (no control). |
 | `show_single_page` | `false` | A project with a single navigable page has nothing to navigate to, so the nav **and** both menu buttons are hidden. Set `true` to keep the nav anyway. |
+| `hidden`           | `false` | Never render the nav or its menu buttons, however many pages exist (overrides `show_single_page`). For blog/article-style sites that navigate through in-page links — pairs well with [`layout: {width: s, header: false}`](#layout). |
 
 :::note
-This is **desktop** behavior. The mobile slide-in menu (the ☰ button) is
-unaffected by `collapsed`/`toggle`; it's only hidden when the nav is empty
-(single page, no `show_single_page`). Dynamic `[slug]` pages don't count toward
-the page total — they're already left out of the nav.
+`collapsed`/`toggle` are **desktop** behavior. The mobile slide-in menu (the ☰
+button) is unaffected by them; it's only removed when the nav is gone entirely
+(`hidden: true`, or a single page without `show_single_page`). Dynamic `[slug]`
+pages don't count toward the page total — they're already left out of the nav.
 :::
 
 ## `layout`

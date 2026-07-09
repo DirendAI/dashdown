@@ -57,25 +57,35 @@ def test_parse_sidebar_config_defaults():
     assert d.collapsed is False
     assert d.toggle is True
     assert d.show_single_page is False
+    assert d.hidden is False
 
 
 def test_parse_sidebar_config_values():
     cfg = parse_sidebar_config(
-        {"collapsed": True, "toggle": False, "show_single_page": True}
+        {"collapsed": True, "toggle": False, "show_single_page": True, "hidden": True}
     )
     assert cfg.collapsed is True
     assert cfg.toggle is False
     assert cfg.show_single_page is True
+    assert cfg.hidden is True
 
     # Partial block: only the given key changes, the others keep their defaults.
     partial = parse_sidebar_config({"collapsed": True})
     assert partial.toggle is True
     assert partial.show_single_page is False
+    assert partial.hidden is False
 
 
 def test_parse_sidebar_config_malformed_fails_at_startup():
     # Same fail-at-startup policy as auth:/search:.
-    for bad in ([], "nope", {"collapsed": "yes"}, {"toggle": 1}, {"show_single_page": 0}):
+    for bad in (
+        [],
+        "nope",
+        {"collapsed": "yes"},
+        {"toggle": 1},
+        {"show_single_page": 0},
+        {"hidden": "true"},
+    ):
         with pytest.raises(ValueError):
             parse_sidebar_config(bad)
 
@@ -162,3 +172,43 @@ def test_navigable_page_count_excludes_dynamic_slug(tmp_project):
     assert load_project(proj).navigable_page_count() == 1
     # Still single-page → nav hidden.
     assert "dashdown-sidebar-toggle" not in TestClient(create_app(proj)).get("/").text
+
+
+# --------------------------------------------------------------------------- #
+# sidebar.hidden — drop the nav outright (blog/article-style chrome)
+# --------------------------------------------------------------------------- #
+def test_hidden_removes_nav_on_multipage(tmp_project):
+    """`sidebar.hidden: true` omits the nav and both menu buttons even when
+    there are pages to navigate — the blog-style chrome-less case."""
+    proj = _make_project(tmp_project)  # two pages
+    _write_yaml(proj, "sidebar:\n  hidden: true\n")
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-sidebar " not in html
+    assert "dashdown-sidebar-toggle" not in html
+    assert "dashdown-mobile-menu-btn" not in html
+
+
+def test_hidden_overrides_show_single_page(tmp_project):
+    """`hidden` wins over `show_single_page` — an explicit "never" beats an
+    explicit "always"."""
+    proj = _make_single_page_project(tmp_project)
+    _write_yaml(proj, "sidebar:\n  hidden: true\n  show_single_page: true\n")
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-sidebar " not in html
+    assert "dashdown-sidebar-toggle" not in html
+    assert "dashdown-mobile-menu-btn" not in html
+
+
+def test_hidden_applies_to_static_build(tmp_project):
+    """The same decision flows through `dashdown build` — the static-hosting
+    path a chrome-less blog relies on."""
+    from dashdown.build import build_site
+
+    proj = _make_project(tmp_project)  # two pages
+    _write_yaml(proj, "sidebar:\n  hidden: true\n")
+    out = proj / ".dist"  # the CLI's default out dir; allowed by the guard
+    build_site(proj, out)
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert "dashdown-sidebar " not in html
+    assert "dashdown-sidebar-toggle" not in html
+    assert "dashdown-mobile-menu-btn" not in html
