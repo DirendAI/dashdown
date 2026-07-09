@@ -56,22 +56,42 @@ _MAX_LABEL_LEN = 80
 #: here have **no annotation vocabulary** — their explain prompt never asks
 #: for annotations and their asks register without a chart_context:
 #: commentary-only, exactly the pre-annotation behavior. That list is a
-#: decision, not a gap (see docs/pages/ai/ask.md): radar, gauge, sankey,
-#: graph, sunburst, tree, parallel, themeriver, calendar, boxplot, violin,
-#: treemap, candlestick and heatmap have no mark grammar a validated
-#: annotation could safely target. Faceted pies (``series=`` small multiples)
-#: are excluded in :func:`build_chart_context` — their client series indexes
-#: are patched per facet and a mark can't address one pie. The other SVG geo
-#: maps (ChoroplethTime/ChoroplethFacets/BivariateMap) stay commentary-only:
-#: their per-year facets / animation frames / two-metric encoding give one
-#: static halo nothing stable to point at. Adding a type here without a
-#: translator branch in static/components/annotations.js (cartesian/ECharts)
-#: or the _geo.js annotation layer (SVG maps) would validate marks the chart
-#: can't draw.
+#: decision, not a gap (see docs/pages/ai/ask.md): radar, gauge, parallel and
+#: themeriver have no ECharts mark support on their series types; sankey and
+#: graph could outline a node, but the commentary naming it carries the same
+#: information; sunburst, tree and treemap address nodes ambiguously (the same
+#: name can recur across hierarchy levels). Faceted pies (``series=`` small
+#: multiples) are excluded in :func:`build_chart_context` — their client
+#: series indexes are patched per facet and a mark can't address one pie. The
+#: other SVG geo maps (ChoroplethTime/ChoroplethFacets/BivariateMap) stay
+#: commentary-only: their per-year facets / animation frames / two-metric
+#: encoding give one static halo nothing stable to point at. Adding a type
+#: here without a translator branch in static/components/annotations.js
+#: (cartesian/ECharts) or the _geo.js annotation layer (SVG maps) would
+#: validate marks the chart can't draw.
 ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     "line": frozenset({"axis_line", "range", "point", "extremum"}),
     "bar": frozenset({"axis_line", "range", "extremum", "item"}),
     "scatter": frozenset({"axis_line", "range", "point"}),
+    # OHLC: value-axis marks ground against the open/high/low/close columns
+    # (carried on `extra`; `y` is None). `extremum` = highest high / lowest
+    # low (client sets markPoint valueDim); `item` marks one session.
+    "candlestick": frozenset({"axis_line", "range", "extremum", "item"}),
+    # Matrix heatmap: `x`/`y` are BOTH category columns, the magnitude lives
+    # in the `value` column (on `extra`). `item` addresses a cell (x AND y),
+    # `extremum` the hottest/coldest cell — both drawn as a per-datum dashed
+    # cell outline; extremum is resolved client-side from the live records.
+    "heatmap": frozenset({"item", "extremum"}),
+    # Distributions: a threshold line / band across the boxes is the natural
+    # mark; `item` outlines one category's box. No `extremum` — the box
+    # already draws its extremes. Violin's client x axis is a synthetic
+    # numeric index axis, so it takes value-axis (y) marks only — axis="x"
+    # candidates are dropped in validation.
+    "boxplot": frozenset({"axis_line", "range", "item"}),
+    "violin": frozenset({"axis_line", "range"}),
+    # Calendar heatmap: `item` outlines one day cell, `extremum` the busiest/
+    # quietest day (resolved client-side, same per-datum outline).
+    "calendar": frozenset({"item", "extremum"}),
     # Combo carries two y-axes at different scales, so a free-coordinate `point`
     # (an explicit x+y the model picks) can't be grounded against one domain —
     # it's excluded. `axis_line`/`range` validate against the LEFT axis only
@@ -99,6 +119,23 @@ ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
 #: the normalized join id (``_dashdownId`` client-side).
 _GEO_TYPES = frozenset({"map", "bubble-map", "dot-density-map"})
 _SVG_GEO_TYPES = frozenset({"bubble-map", "dot-density-map"})
+
+#: Chart types that draw a single addressable series: a stray ``series`` field
+#: the model tacked onto an item/extremum there is ignored rather than fatal
+#: (the client ignores it too), matching the original pie/funnel posture.
+_SINGLE_SERIES_TYPES = frozenset(
+    {"pie", "funnel", "candlestick", "heatmap", "boxplot", "calendar"}
+)
+
+#: Config keys beyond x/y/series that shape the model's grounding and the
+#: validator's domains. ``_chart_placeholder`` lifts these from the chart
+#: config into ``ChartContext.extra`` — joining the ask id, so a changed
+#: value column busts the answer cache (correctly). Types not listed thread
+#: no extra keys, keeping their existing ask ids byte-identical.
+CONTEXT_EXTRA_KEYS: dict[str, tuple[str, ...]] = {
+    "candlestick": ("open", "high", "low", "close"),
+    "heatmap": ("value",),
+}
 
 #: The [aN] ref token the model places in its commentary text.
 _REF_TOKEN_RE = re.compile(r"\[(a\d+)\]")
@@ -331,8 +368,19 @@ def _value_axis_columns(ctx: ChartContext) -> list[str]:
     right-axis magnitude (a different scale) against them would place the mark
     against the wrong ruler. ``extremum`` is unaffected — it carries no
     coordinate and ECharts recomputes it per series, on that series' own axis.
-    Every other chart type uses all its y columns.
+
+    A **candlestick**'s prices live in the open/high/low/close columns (``y``
+    is None) and a matrix **heatmap**'s magnitude in its ``value`` column
+    (``y`` is the row *category* column) — both carried on ``extra``. Every
+    other chart type uses all its y columns.
     """
+    extra = dict(ctx.extra)
+    if ctx.chart_type == "candlestick":
+        cols = [extra[k] for k in ("open", "high", "low", "close") if extra.get(k)]
+        return cols or ctx.y_columns
+    if ctx.chart_type == "heatmap":
+        value = extra.get("value")
+        return [value] if value else []
     cols = ctx.y_columns
     if ctx.chart_type != "combo":
         return cols
@@ -385,6 +433,56 @@ _TYPE_SHAPES = {
 _ITEM_SHAPE_PART_OF_WHOLE = (
     '{"type": "item", "x": "<category>", "label": "<short label>"} '
     "— highlights that slice or stage"
+)
+
+#: Single-series chart types where ``item``/``extremum`` mean something more
+#: specific than "highlights that category's bar" — teach the model each
+#: type's own reading (and omit the ``series`` field, as for pie/funnel).
+_ITEM_SHAPES_BY_CHART = {
+    "pie": _ITEM_SHAPE_PART_OF_WHOLE,
+    "funnel": _ITEM_SHAPE_PART_OF_WHOLE,
+    "candlestick": (
+        '{"type": "item", "x": "<date/category>", "label": "<short label>"} '
+        "— marks that session"
+    ),
+    "heatmap": (
+        '{"type": "item", "x": "<x category>", "y": "<y category>", '
+        '"label": "<short label>"} — outlines that cell'
+    ),
+    "boxplot": (
+        '{"type": "item", "x": "<category>", "label": "<short label>"} '
+        "— outlines that category's box"
+    ),
+    "calendar": (
+        '{"type": "item", "x": "<date from the data>", '
+        '"label": "<short label>"} — outlines that day'
+    ),
+}
+_EXTREMUM_SHAPES_BY_CHART = {
+    "candlestick": (
+        '{"type": "extremum", "kind": "max" or "min", "label": "<short label>"} '
+        "— marks the session with the highest high (max) or lowest low (min)"
+    ),
+    "heatmap": (
+        '{"type": "extremum", "kind": "max" or "min", "label": "<short label>"} '
+        "— outlines the highest/lowest cell"
+    ),
+    "calendar": (
+        '{"type": "extremum", "kind": "max" or "min", "label": "<short label>"} '
+        "— outlines the highest/lowest day"
+    ),
+}
+
+#: Violin's client x axis is a synthetic numeric index axis — only value-axis
+#: (y) marks can draw there, so its prompt never offers axis "x" (validation
+#: drops such candidates anyway).
+_AXIS_LINE_SHAPE_Y_ONLY = (
+    '{"type": "axis_line", "axis": "y", "value": <number>, '
+    '"label": "<short label>"} — a dashed horizontal reference line at that value'
+)
+_RANGE_SHAPE_Y_ONLY = (
+    '{"type": "range", "axis": "y", "from": <number>, "to": <number>, '
+    '"label": "<short label>"} — a shaded horizontal band between two values'
 )
 
 #: The SVG geo maps join on an id column (ISO codes, not names) — teach the
@@ -463,6 +561,19 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
             else:
                 cats_label = "X categories"
             lines.append(f"{cats_label}{suffix}: {', '.join(shown)}")
+    # A matrix heatmap addresses cells by BOTH category axes — list the y
+    # categories too, or the model can't ground an `item`'s `y` field.
+    if ctx.chart_type == "heatmap":
+        y_cat_idx = _column_index(result, ctx.y)
+        if y_cat_idx is not None:
+            y_cats = _x_categories(result, y_cat_idx)
+            shown_y = y_cats[:_MAX_PROMPT_CATEGORIES]
+            suffix = (
+                f" (first {len(shown_y)} of {len(y_cats)})"
+                if len(y_cats) > len(shown_y)
+                else ""
+            )
+            lines.append(f"Y categories{suffix}: {', '.join(shown_y)}")
     y_idx = [
         i
         for i in (_column_index(result, c) for c in _value_axis_columns(ctx))
@@ -470,7 +581,14 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     ]
     y_domain = _numeric_domain(result, y_idx) if y_idx else None
     if y_domain is not None:
-        val_label = "Values" if is_geo else "Y values"
+        if is_geo:
+            val_label = "Values"
+        elif ctx.chart_type in ("heatmap", "calendar"):
+            val_label = "Cell values"
+        elif ctx.chart_type == "candlestick":
+            val_label = "Prices"
+        else:
+            val_label = "Y values"
         lines.append(f"{val_label} range from {y_domain[0]:g} to {y_domain[1]:g}.")
     series = sorted(_series_names(result, ctx))
     if len(series) > 1:
@@ -483,9 +601,18 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     lines.append("Allowed annotation types (JSON objects):")
     for t in allowed:
         shape = _TYPE_SHAPES[t]
-        # Pie/funnel have one series — don't advertise the `series` field there.
-        if t == "item" and ctx.chart_type in ("pie", "funnel"):
-            shape = _ITEM_SHAPE_PART_OF_WHOLE
+        # Single-series chart types get their own item/extremum reading (and
+        # don't advertise the `series` field).
+        if t == "item":
+            shape = _ITEM_SHAPES_BY_CHART.get(ctx.chart_type, shape)
+        if t == "extremum":
+            shape = _EXTREMUM_SHAPES_BY_CHART.get(ctx.chart_type, shape)
+        # Violin draws on a synthetic numeric x axis — value-axis marks only.
+        if ctx.chart_type == "violin":
+            if t == "axis_line":
+                shape = _AXIS_LINE_SHAPE_Y_ONLY
+            elif t == "range":
+                shape = _RANGE_SHAPE_Y_ONLY
         # The SVG geo maps join on ids, not names.
         if t == "geo_item" and ctx.chart_type in _SVG_GEO_TYPES:
             shape = (
@@ -638,6 +765,13 @@ def validate_annotations(
     categories = (
         set(_x_categories(result, x_idx)) if (x_idx is not None and not x_numeric) else set()
     )
+    # A matrix heatmap addresses cells by BOTH category axes: its `item`
+    # carries a `y` validated against the row-category column.
+    y_categories: set[str] = set()
+    if ctx.chart_type == "heatmap":
+        y_cat_idx = _column_index(result, ctx.y)
+        if y_cat_idx is not None:
+            y_categories = set(_x_categories(result, y_cat_idx))
     # Normalized-id → row map for the SVG geo maps: geo_item candidates match
     # through the same normalization the client applies (_dashdownId), and the
     # matched row backs the has-a-positive-value check (a location with no
@@ -683,6 +817,10 @@ def validate_annotations(
             axis = candidate.get("axis")
             if axis not in ("x", "y"):
                 continue
+            # Violin's client x axis is a synthetic numeric index axis — a
+            # category mark has nothing to land on there.
+            if axis == "x" and ctx.chart_type == "violin":
+                continue
             value = candidate.get("value")
             if axis == "x" and not x_numeric:
                 text = cell_text(value).strip()
@@ -699,6 +837,8 @@ def validate_annotations(
         elif a_type == "range":
             axis = candidate.get("axis")
             if axis not in ("x", "y"):
+                continue
+            if axis == "x" and ctx.chart_type == "violin":
                 continue
             if axis == "x" and not x_numeric:
                 lo_text = cell_text(candidate.get("from")).strip()
@@ -743,21 +883,31 @@ def validate_annotations(
             if kind not in ("max", "min") or y_domain is None:
                 continue
             out["kind"] = kind
-            series, ok = _clean_series(candidate, valid_series)
-            if not ok:
-                continue
-            if series:
-                out["series"] = series
+            # Single-series charts (candlestick, heatmap, calendar): a stray
+            # `series` is ignored, not fatal — same posture as pie/funnel item.
+            if ctx.chart_type not in _SINGLE_SERIES_TYPES:
+                series, ok = _clean_series(candidate, valid_series)
+                if not ok:
+                    continue
+                if series:
+                    out["series"] = series
 
         elif a_type == "item":
             x_text = cell_text(candidate.get("x")).strip()
             if x_text not in categories:
                 continue
             out["x"] = x_text
-            # `series` addresses one of several series; a pie/funnel has just
+            # A heatmap cell is addressed by BOTH category axes.
+            if ctx.chart_type == "heatmap":
+                y_text = cell_text(candidate.get("y")).strip()
+                if y_text not in y_categories:
+                    continue
+                out["y"] = y_text
+            # `series` addresses one of several series; single-series charts
+            # (pie, funnel, candlestick, heatmap, boxplot, calendar) have just
             # one, so ignore a series the model tacked on there rather than
             # dropping the whole mark over it (the client ignores it too).
-            if ctx.chart_type not in ("pie", "funnel"):
+            if ctx.chart_type not in _SINGLE_SERIES_TYPES:
                 series, ok = _clean_series(candidate, valid_series)
                 if not ok:
                     continue

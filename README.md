@@ -95,6 +95,11 @@ server hot-reloads as you save.
   over a WebSocket. Works against any connector (it polls).
 - **LLM commentary** — `<Ask data={q} ask="What stands out?" />` renders a
   model's answer next to the chart (Mistral, Claude, OpenAI, or OpenRouter).
+- **AI chart explanations** — add `explain` to any chart for on-demand ✨
+  commentary that can also **annotate the plot itself**: threshold lines,
+  range bands, marked peaks, outlined cells, haloed map locations — every mark
+  validated server-side against the actual data before it draws. Works in
+  static exports too (answers baked at build time).
 - **A semantic metric layer** — define measures once in YAML, then
   `<BarChart metric={sales.revenue} by={sales.region} />`.
 
