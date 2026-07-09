@@ -14,11 +14,11 @@ whiskers, and outliers are computed client-side from the raw rows.
 <BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" />
 ```
 
-<BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" />
+<BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" explain />
 
 A single box over every row (no `x`):
 
-<BoxPlot data={daily_metrics} y="visits" title="All daily visits" />
+<BoxPlot data={daily_metrics} y="visits" title="All daily visits" explain />
 
 :::note
 BoxPlot reads **raw rows** to compute the distribution, so it takes `data={query}`

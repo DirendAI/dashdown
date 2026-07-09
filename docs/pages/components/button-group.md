@@ -33,7 +33,7 @@ ORDER BY price DESC
 
 <ButtonGroup name="tier" label="Tier" options="High,Mid,Budget" />
 
-<BarChart data={devices_by_tier} x="device" y="price" title="Devices by tier" />
+<BarChart data={devices_by_tier} x="device" y="price" title="Devices by tier" explain />
 
 Click a segment — the chart re-queries. Click **All** to drop the filter again
 (selecting a segment doesn't toggle off, so "All" is how you clear it).

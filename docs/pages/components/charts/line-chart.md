@@ -13,19 +13,19 @@ Trends over a continuous or time axis. Add `series` to draw one line per group.
            title="Downloads by channel" format="number" />
 ```
 
-<LineChart data={by_channel} x="month" y="downloads" series="channel" title="Downloads by channel" />
+<LineChart data={by_channel} x="month" y="downloads" series="channel" title="Downloads by channel" explain />
 
 Without `series` you get a single line:
 
-<LineChart data={downloads_by_month} x="month" y="downloads" title="Total downloads" />
+<LineChart data={downloads_by_month} x="month" y="downloads" title="Total downloads" explain />
 
 Add `stacked` (with a `series`) for a stacked-area chart:
 
-<LineChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by channel (stacked)" />
+<LineChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by channel (stacked)" explain />
 
 Or pass a comma-separated `y` for one line per metric column (no `series` needed):
 
-<LineChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads per channel (multi-metric)" />
+<LineChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads per channel (multi-metric)" explain />
 
 ## From the semantic layer
 

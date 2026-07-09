@@ -15,7 +15,7 @@ the lines by group.
 <ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" />
 ```
 
-<ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" />
+<ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" explain />
 
 ## From the semantic layer
 

@@ -14,7 +14,7 @@ axes** and `value` is the per-cell magnitude column.
 <HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" />
 ```
 
-<HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" />
+<HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" explain />
 
 ## From the semantic layer
 

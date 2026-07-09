@@ -15,7 +15,7 @@ their total incident weight. Drag to rearrange; scroll to zoom.
 <GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" />
 ```
 
-<GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" />
+<GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" explain />
 
 ## From the semantic layer
 

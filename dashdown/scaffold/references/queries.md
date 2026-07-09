@@ -35,7 +35,7 @@ is referenced from any page by that name — this page's chart uses it:
 <LineChart data={downloads_by_month} x="month" y="downloads" />
 ```
 
-<LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads (shared query)" />
+<LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads (shared query)" explain />
 
 Per-query options (`connector`, `cache_ttl`, `live`, …) go in the file's YAML
 frontmatter; omit `connector` to use the project's [default

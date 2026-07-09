@@ -11,7 +11,7 @@ the URL, so a filtered view is shareable and bookmarkable.
 
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 
-<LineChart data={filtered} x="month" y="downloads" title="Downloads (filtered)" />
+<LineChart data={filtered} x="month" y="downloads" title="Downloads (filtered)" explain />
 
 Pick a channel above — the chart re-queries. The `'${channel}' = ''` guard makes
 "no selection" mean "all".

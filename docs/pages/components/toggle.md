@@ -28,7 +28,7 @@ ORDER BY date
 
 <Toggle name="busy" label="Busy days only" />
 
-<LineChart data={daily_traffic} x="date" y="visits" title="Daily visits" />
+<LineChart data={daily_traffic} x="date" y="visits" title="Daily visits" explain />
 
 Flip the switch — when **off** it stores `""`, so the `'${busy}' = ''` guard
 passes and every day shows; when **on** it stores `"true"`, the guard fails, and
@@ -70,7 +70,7 @@ ORDER BY date
 
 <Toggle name="weekend" label="Weekends only" on_value="Yes" off_value="No" />
 
-<LineChart data={daily_weekend} x="date" y="visits" title="Visits (weekend vs weekday)" />
+<LineChart data={daily_weekend} x="date" y="visits" title="Visits (weekend vs weekday)" explain />
 
 Here **checked** sends `weekend = 'Yes'` (weekend days) and **unchecked** sends
 `'No'` (weekdays) — there's no "show all" state, so both directions narrow the

@@ -12,11 +12,11 @@ Correlation between two numeric columns — one point per row.
 <ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" />
 ```
 
-<ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" />
+<ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" explain />
 
 Add `series=` to colour points by a category — here device specs grouped by tier:
 
-<ScatterChart data={device_specs} x="price" y="speed" series="tier" title="Price vs speed, by tier" />
+<ScatterChart data={device_specs} x="price" y="speed" series="tier" title="Price vs speed, by tier" explain />
 
 ## From the semantic layer
 

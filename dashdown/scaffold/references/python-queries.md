@@ -47,7 +47,7 @@ Reference it by name — no different from a SQL query:
 The chart below is driven by exactly that query — the last point is the appended
 moving-average forecast:
 
-<LineChart data={downloads_forecast} x="month" y="downloads" title="Downloads (with forecast)" />
+<LineChart data={downloads_forecast} x="month" y="downloads" title="Downloads (with forecast)" explain />
 
 ## The contract
 

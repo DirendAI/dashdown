@@ -27,8 +27,8 @@ Lay widgets out in equal-width columns. Wrap any components in `<Grid>`; set
 A child can span more than one column with `col-span=`:
 
 <Grid cols=3>
-  <LineChart data={downloads_by_month} x="month" y="downloads" col-span=2 title="Trend (spans 2 cols)" />
-  <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" />
+  <LineChart data={downloads_by_month} x="month" y="downloads" col-span=2 title="Trend (spans 2 cols)" explain />
+  <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" explain />
 </Grid>
 
 | Attribute        | Purpose                                          |

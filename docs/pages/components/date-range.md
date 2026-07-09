@@ -29,7 +29,7 @@ ORDER BY date
 
 <DateRange name="period" label="Period" start_param="from" end_param="to" presets="last_7_days,last_30_days,custom" />
 
-<LineChart data={daily_in_range} x="date" y="visits" title="Visits in range" />
+<LineChart data={daily_in_range} x="date" y="visits" title="Visits in range" explain />
 
 `default=` seeds a preset on first load (URL params still win):
 

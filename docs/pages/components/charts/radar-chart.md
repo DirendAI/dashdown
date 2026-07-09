@@ -15,7 +15,7 @@ seen for that indicator.
 <RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" />
 ```
 
-<RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" />
+<RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" explain />
 
 Omit `series` for a single polygon:
 
@@ -23,7 +23,7 @@ Omit `series` for a single polygon:
 SELECT metric, score FROM feature_scores WHERE product = 'Dashdown'
 ```
 
-<RadarChart data={dashdown_scores} x="metric" y="score" title="Dashdown scores" />
+<RadarChart data={dashdown_scores} x="metric" y="score" title="Dashdown scores" explain />
 
 ## From the semantic layer
 

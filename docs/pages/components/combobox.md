@@ -40,7 +40,7 @@ SELECT country FROM by_country
 
 <Combobox name="country" data={countries} column="country" label="Country" placeholder="Search countries…" />
 
-<BarChart data={country_rows} x="country" y="downloads" title="Downloads by country" />
+<BarChart data={country_rows} x="country" y="downloads" title="Downloads by country" explain />
 
 Start typing — the panel lists matching values fetched from the server; pick one
 and the chart re-queries. The **×** clears the selection.
@@ -73,7 +73,7 @@ ORDER BY downloads DESC
 
 <Combobox name="countries" data={countries} column="country" label="Countries" multi placeholder="Add a country…" />
 
-<BarChart data={country_multi} x="country" y="downloads" title="Downloads (selected countries)" />
+<BarChart data={country_multi} x="country" y="downloads" title="Downloads (selected countries)" explain />
 
 Picks show as removable chips before the search box; the panel marks chosen rows
 with a ✓ and stays open so you can add several. **Backspace** on an empty input

@@ -33,7 +33,7 @@ ORDER BY rating DESC
 
 <Slider name="min_rating" min={0} max={5} step={0.1} default={4} label="Min rating" />
 
-<BarChart data={devices_rated} x="device" y="rating" title="Devices at or above the rating" />
+<BarChart data={devices_rated} x="device" y="rating" title="Devices at or above the rating" explain />
 
 Drag the handle — the chart re-queries. The readout above the track shows the
 live value, formatted with the same `format=`/`currency=` options the other
