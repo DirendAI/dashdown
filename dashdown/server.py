@@ -1086,13 +1086,10 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # Mobile slide-in is unaffected.
             sidebar_collapsed=proj.config.sidebar.collapsed,
             sidebar_toggle=proj.config.sidebar.toggle,
-            # A single-page project has nothing to navigate to, so the nav and its
-            # menu buttons are omitted entirely — unless `show_single_page` forces
-            # them on.
-            show_sidebar=(
-                proj.config.sidebar.show_single_page
-                or proj.navigable_page_count() > 1
-            ),
+            # `sidebar.hidden` drops the nav outright; otherwise a single-page
+            # project has nothing to navigate to, so the nav and its menu buttons
+            # are omitted — unless `show_single_page` forces them on.
+            show_sidebar=proj.show_sidebar(),
             # Per-page presentation: content-column width + top-header visibility.
             page_width=page_width,
             show_header=show_header,

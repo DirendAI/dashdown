@@ -356,6 +356,7 @@ class SidebarConfig:
           toggle: true              # show the desktop collapse control (true) / hide it
           show_single_page: false   # hide the nav + its buttons when the project
                                     # has only one page; true → always show it
+          hidden: false             # true → never render the nav at all
 
     ``collapsed`` sets only the *first-visit* default — a reader's later collapse
     choice is kept in ``localStorage`` and wins over this seed (same precedence as
@@ -364,12 +365,15 @@ class SidebarConfig:
     the mobile slide-in menu is unaffected. ``show_single_page`` controls the
     single-page case: by default a project with one navigable page hides the
     sidebar and both menu buttons entirely (there's nothing to navigate to);
-    ``true`` forces the nav to show even then.
+    ``true`` forces the nav to show even then. ``hidden`` removes the nav and both
+    menu buttons regardless of page count (it overrides ``show_single_page``) —
+    for blog/article-style sites that navigate through in-page links instead.
     """
 
     collapsed: bool = False
     toggle: bool = True
     show_single_page: bool = False
+    hidden: bool = False
 
 
 def parse_sidebar_config(raw: Any) -> SidebarConfig:
@@ -381,7 +385,7 @@ def parse_sidebar_config(raw: Any) -> SidebarConfig:
         raise ValueError("sidebar: must be a mapping")
 
     cfg = SidebarConfig()
-    for key in ("collapsed", "toggle", "show_single_page"):
+    for key in ("collapsed", "toggle", "show_single_page", "hidden"):
         val = raw.get(key)
         if val is not None:
             if not isinstance(val, bool):
@@ -675,6 +679,16 @@ class Project:
                 continue
             count += 1
         return count
+
+    def show_sidebar(self) -> bool:
+        """Whether the sidebar nav (and its menu buttons) should render:
+        ``sidebar.hidden`` drops it outright; otherwise a single-page project
+        omits it unless ``sidebar.show_single_page`` forces it on. The single
+        decision both the server and the static build feed to the template."""
+        sb = self.config.sidebar
+        if sb.hidden:
+            return False
+        return sb.show_single_page or self.navigable_page_count() > 1
 
     def nav_tree(self) -> list[dict[str, Any]]:
         """Build a hierarchical navigation tree from pages + frontmatter.

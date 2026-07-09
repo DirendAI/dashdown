@@ -719,11 +719,9 @@ def _emit_page(
         # reader's choice per-browser.
         sidebar_collapsed=project.config.sidebar.collapsed,
         sidebar_toggle=project.config.sidebar.toggle,
-        # Single-page project → omit the nav + menu buttons (unless forced on).
-        show_sidebar=(
-            project.config.sidebar.show_single_page
-            or project.navigable_page_count() > 1
-        ),
+        # `sidebar.hidden` drops the nav outright; otherwise a single-page
+        # project omits the nav + menu buttons (unless forced on).
+        show_sidebar=project.show_sidebar(),
         # Per-page presentation: content-column width + top-header visibility.
         page_width=page_width,
         show_header=show_header,

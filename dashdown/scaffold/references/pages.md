@@ -32,9 +32,9 @@ icon: "🏠"
 | `width`            | Content width: `s` · `m` · `l` (default `l`).     |
 | `header`           | Show the top app header (default `true`).         |
 
-Readers can collapse the sidebar on desktop, and a project with a single page
-hides the nav entirely — tune both with the
-[`sidebar:` config block](/configuration#sidebar).
+Readers can collapse the sidebar on desktop, a project with a single page
+hides the nav entirely, and `hidden: true` drops it outright on any project —
+tune all of it with the [`sidebar:` config block](/configuration#sidebar).
 
 ## Page width & header
 
@@ -53,7 +53,9 @@ dashboard width, `m` is medium, and `s` is a narrow article measure — ideal fo
 a text-heavy post that reads like a blog rather than a wall-to-wall dashboard.
 `header: false` removes the top bar entirely, which pairs well with a single-page
 site (the left nav is [already hidden](/configuration#sidebar) when there's
-nowhere to navigate).
+nowhere to navigate) — or with a multi-page, blog-style site that sets
+[`sidebar: {hidden: true}`](/configuration#sidebar) and navigates through
+in-page links instead.
 
 Both default project-wide from the [`layout:` config block](/configuration#layout);
 a page's frontmatter overrides the project default, so you can keep full-width
