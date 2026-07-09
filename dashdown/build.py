@@ -660,7 +660,7 @@ def _emit_page(
     for crumb in breadcrumbs:
         crumb["url"] = root_link(crumb["url"])
     # Per-page chrome/width: frontmatter overrides the project `layout:` defaults.
-    page_width, show_header = resolve_page_layout(
+    page_width, show_header, show_theme_toggle = resolve_page_layout(
         rendered.frontmatter, project.config.layout
     )
 
@@ -725,6 +725,9 @@ def _emit_page(
         # Per-page presentation: content-column width + top-header visibility.
         page_width=page_width,
         show_header=show_header,
+        # Subtle floating light/dark toggle for chrome-less pages (only shown when
+        # the header — which carries the normal toggle — is hidden).
+        show_theme_toggle=show_theme_toggle,
     )
 
     out_file = _output_file(app_url, ctx.out_dir)

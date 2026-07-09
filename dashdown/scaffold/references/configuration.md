@@ -193,14 +193,16 @@ page — this is the reference.)*
 
 ```yaml
 layout:
-  width: l       # default content-column width: s | m | l
-  header: true   # show the top app header (brand / search / theme toggle)
+  width: l            # default content-column width: s | m | l
+  header: true        # show the top app header (brand / search / theme toggle)
+  theme_toggle: true  # keep a floating light/dark toggle when the header is hidden
 ```
 
-| Key      | Default | Purpose                                                                   |
-| -------- | ------- | ------------------------------------------------------------------------- |
-| `width`  | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
-| `header` | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
+| Key            | Default | Purpose                                                                   |
+| -------------- | ------- | ------------------------------------------------------------------------- |
+| `width`        | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
+| `header`       | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
+| `theme_toggle` | `true`  | When the header is hidden, show a small floating sun/moon light/dark toggle (top-right) so readers of a chrome-less page keep the control. On by default; set `false` to drop it too. No effect while the header shows — its own toggle covers that. |
 
 A page's frontmatter `width:` / `header:` overrides these defaults, so a project
 can default to full-width dashboards yet mark one page as a narrow, chrome-less

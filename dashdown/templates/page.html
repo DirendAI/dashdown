@@ -138,6 +138,12 @@
       x-init="document.documentElement.setAttribute('data-theme', theme);
              $watch('theme', value => { if (window.__dashdownThemeFlash) window.__dashdownThemeFlash(); document.documentElement.setAttribute('data-theme', value); });
              $watch('sidebarCollapsed', value => { localStorage.setItem('dashdown-sidebar-collapsed', value ? '1' : '0'); document.documentElement.classList.toggle('dashdown-sidebar-collapsed', value); });">
+  {# Subtle floating light/dark toggle: shown whenever the header (which carries
+     the normal in-bar toggle) is hidden, unless `layout.theme_toggle` / the
+     page's `theme_toggle:` frontmatter opts out — never in embeds (the host pins
+     the theme via ?_theme). Computed once and reused for the button + the layout
+     marker class that reserves corner space for it. #}
+  {% set show_theme_fab = (not embed) and (show_theme_toggle | default(true)) and (not (show_header | default(true))) %}
   {# Embed mode (?_embed): the app shell — header, sidebar, breadcrumbs — is
      omitted so a page can be <iframe>'d into an external site. The page content
      and its filter bar live in body_html, so they travel intact. #}
@@ -206,7 +212,28 @@
     </div>
   </header>
   {% endif %}
-  <div class="dashdown-layout{% if not (show_header | default(true)) %} dashdown-no-header{% endif %}">
+  {# Icon visibility is CSS-driven off <html data-theme> (set pre-paint) so it
+     doesn't flash both icons before Alpine hydrates; the click still flips the
+     Alpine `theme` so it stays in sync with the store and the OS-preference
+     listener. #}
+  {% if show_theme_fab %}
+  <button class="dashdown-theme-fab"
+          type="button"
+          aria-label="Toggle light/dark theme"
+          :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+          @click="theme = theme === 'light' ? 'dark' : 'light'; localStorage.setItem('theme', theme)">
+    <!-- Sun (shown in light mode) -->
+    <svg class="dashdown-theme-fab-sun" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="5" />
+      <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+    </svg>
+    <!-- Moon (shown in dark mode) -->
+    <svg class="dashdown-theme-fab-moon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    </svg>
+  </button>
+  {% endif %}
+  <div class="dashdown-layout{% if not (show_header | default(true)) %} dashdown-no-header{% endif %}{% if show_theme_fab %} dashdown-has-theme-fab{% endif %}">
     {% if not embed and sidebar_shown %}
     <aside class="dashdown-sidebar bg-base-200 border-r border-base-300"
            :class="{ 'open': sidebarOpen }">

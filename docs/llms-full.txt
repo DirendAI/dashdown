@@ -441,6 +441,7 @@ icon: "🏠"
 | `icon`             | Emoji/glyph shown next to the nav label.          |
 | `width`            | Content width: `s` · `m` · `l` (default `l`).     |
 | `header`           | Show the top app header (default `true`).         |
+| `theme_toggle`     | With `header: false`, show a floating light/dark toggle (default `true`). |
 
 Readers can collapse the sidebar on desktop, a project with a single page
 hides the nav entirely, and `hidden: true` drops it outright on any project —
@@ -453,8 +454,9 @@ Two frontmatter keys control a page's chrome and reading width:
 ```markdown
 ---
 title: The state of sales in 2026
-width: s        # narrow, article-style column
-header: false   # drop the top app header (brand / search / theme toggle)
+width: s              # narrow, article-style column
+header: false         # drop the top app header (brand / search / theme toggle)
+theme_toggle: false   # …and drop the floating light/dark toggle too (on by default)
 ---
 ```
 
@@ -466,6 +468,11 @@ site (the left nav is [already hidden](/configuration#sidebar) when there's
 nowhere to navigate) — or with a multi-page, blog-style site that sets
 [`sidebar: {hidden: true}`](/configuration#sidebar) and navigates through
 in-page links instead.
+
+Dropping the header also drops its light/dark toggle, so a small sun/moon button
+floats in the top-right corner instead — readers keep the control on a chrome-less
+page. Set `theme_toggle: false` (here or project-wide in the
+[`layout:` config](/configuration#layout)) to drop that too.
 
 Both default project-wide from the [`layout:` config block](/configuration#layout);
 a page's frontmatter overrides the project default, so you can keep full-width
@@ -822,14 +829,16 @@ page — this is the reference.)*
 
 ```yaml
 layout:
-  width: l       # default content-column width: s | m | l
-  header: true   # show the top app header (brand / search / theme toggle)
+  width: l            # default content-column width: s | m | l
+  header: true        # show the top app header (brand / search / theme toggle)
+  theme_toggle: true  # keep a floating light/dark toggle when the header is hidden
 ```
 
-| Key      | Default | Purpose                                                                   |
-| -------- | ------- | ------------------------------------------------------------------------- |
-| `width`  | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
-| `header` | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
+| Key            | Default | Purpose                                                                   |
+| -------------- | ------- | ------------------------------------------------------------------------- |
+| `width`        | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
+| `header`       | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
+| `theme_toggle` | `true`  | When the header is hidden, show a small floating sun/moon light/dark toggle (top-right) so readers of a chrome-less page keep the control. On by default; set `false` to drop it too. No effect while the header shows — its own toggle covers that. |
 
 A page's frontmatter `width:` / `header:` overrides these defaults, so a project
 can default to full-width dashboards yet mark one page as a narrow, chrome-less

@@ -406,18 +406,26 @@ class LayoutConfig:
     """Optional ``layout:`` block — project-wide defaults for page chrome + width.
 
         layout:
-          width: l        # s | m | l — content-column width (default l, the full
-                          # dashboard width; m ≈ medium, s ≈ narrow article/blog)
-          header: true    # show the top app header (brand / search / theme). false
-                          # drops it site-wide — e.g. a single-page blog.
+          width: l          # s | m | l — content-column width (default l, the full
+                            # dashboard width; m ≈ medium, s ≈ narrow article/blog)
+          header: true      # show the top app header (brand / search / theme). false
+                            # drops it site-wide — e.g. a single-page blog.
+          theme_toggle: true   # when the header is hidden, show a subtle floating
+                               # light/dark sun/moon toggle (default on; false opts out).
 
-    Both keys are **per-page overridable** via frontmatter (a page's ``width:`` /
-    ``header:``), so a project can default to full-width dashboards yet mark one
-    page as a narrow article, or hide the header on just the landing page. A
-    malformed value fails at startup (same policy as ``sidebar:`` etc.)."""
+    All keys are **per-page overridable** via frontmatter (a page's ``width:`` /
+    ``header:`` / ``theme_toggle:``), so a project can default to full-width
+    dashboards yet mark one page as a narrow article, or hide the header on just
+    the landing page. A malformed value fails at startup (same policy as
+    ``sidebar:`` etc.)."""
 
     width: str = "l"
     header: bool = True
+    # Only meaningful when the header is hidden (the header carries its own theme
+    # toggle otherwise): render a small floating sun/moon control so a chrome-less
+    # page still lets the reader flip light/dark. On by default so hiding the
+    # header doesn't silently strip the theme control; set false to drop it too.
+    theme_toggle: bool = True
 
 
 def parse_layout_config(raw: Any) -> LayoutConfig:
@@ -439,19 +447,24 @@ def parse_layout_config(raw: Any) -> LayoutConfig:
         if not isinstance(header, bool):
             raise ValueError("layout.header must be a boolean")
         cfg.header = header
+    theme_toggle = raw.get("theme_toggle")
+    if theme_toggle is not None:
+        if not isinstance(theme_toggle, bool):
+            raise ValueError("layout.theme_toggle must be a boolean")
+        cfg.theme_toggle = theme_toggle
     return cfg
 
 
 def resolve_page_layout(
     frontmatter: dict[str, Any], layout: LayoutConfig
-) -> tuple[str, bool]:
-    """Resolve a page's effective ``(page_width, show_header)``.
+) -> tuple[str, bool, bool]:
+    """Resolve a page's effective ``(page_width, show_header, show_theme_toggle)``.
 
-    Per-page frontmatter (``width:`` / ``header:``) overrides the project-wide
-    ``layout:`` defaults. Frontmatter is handled **leniently** — an invalid
-    ``width`` or non-boolean ``header`` is ignored (falls back to the config
-    default) rather than 500-ing the page, matching how the rest of frontmatter
-    is treated."""
+    Per-page frontmatter (``width:`` / ``header:`` / ``theme_toggle:``) overrides
+    the project-wide ``layout:`` defaults. Frontmatter is handled **leniently** —
+    an invalid ``width`` or non-boolean ``header``/``theme_toggle`` is ignored
+    (falls back to the config default) rather than 500-ing the page, matching how
+    the rest of frontmatter is treated."""
     width = layout.width
     fm_width = frontmatter.get("width")
     if isinstance(fm_width, str) and fm_width in LAYOUT_WIDTHS:
@@ -462,7 +475,12 @@ def resolve_page_layout(
     if isinstance(fm_header, bool):
         show_header = fm_header
 
-    return width, show_header
+    show_theme_toggle = layout.theme_toggle
+    fm_theme_toggle = frontmatter.get("theme_toggle")
+    if isinstance(fm_theme_toggle, bool):
+        show_theme_toggle = fm_theme_toggle
+
+    return width, show_header, show_theme_toggle
 
 
 @dataclass
