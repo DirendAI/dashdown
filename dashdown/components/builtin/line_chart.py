@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from dashdown.chart_annotations import ChartContext, build_chart_context
+from dashdown.chart_annotations import (
+    CONTEXT_EXTRA_KEYS,
+    ChartContext,
+    build_chart_context,
+)
 from dashdown.components.base import Component, RenderContext, register_component
 from dashdown.components.builtin._util import (
     attr_bool,
@@ -112,6 +116,16 @@ def _chart_placeholder(
     # reverts to plain commentary, and the plain id matches it.
     chart_context = None
     if attr_bool(attrs, "annotations", True):
+        # Context-relevant shape keys beyond x/y (a candlestick's OHLC
+        # columns, a heatmap's value column) join the context — and the ask
+        # id — so grounding/validation see the right value columns and a
+        # changed column busts the answer cache. Types without an entry
+        # thread nothing, keeping their existing ask ids byte-identical.
+        context_extra = tuple(
+            (k, str(config[k]))
+            for k in CONTEXT_EXTRA_KEYS.get(chart_type, ())
+            if config.get(k)
+        )
         chart_context = build_chart_context(
             chart_type,
             x=x,
@@ -119,6 +133,7 @@ def _chart_placeholder(
             series_by=series_by,
             horizontal=bool(config.get("horizontal")),
             stacked=bool(config.get("stacked")),
+            extra=context_extra,
         )
 
     return _chart_card(

@@ -1669,6 +1669,45 @@ _MAP_RESULT = QueryResult(
     rows=[["Germany", 120], ["France", 90], ["Japan", 60]],
 )
 
+# Statistical charts (Phase 7). A candlestick grounds its value domain in the
+# OHLC columns (`y` is None; the columns ride `extra`); a matrix heatmap in
+# its `value` column (`y` is the row *category* column); distributions in the
+# raw `y` column; a calendar in its value column.
+_CANDLE_CTX = ChartContext(
+    chart_type="candlestick",
+    x="day",
+    extra=(("close", "close"), ("high", "high"), ("low", "low"), ("open", "open")),
+)
+_CANDLE_RESULT = QueryResult(
+    columns=["day", "open", "high", "low", "close"],
+    rows=[
+        ["Mon", 10, 15, 8, 12],
+        ["Tue", 12, 18, 11, 17],
+        ["Wed", 17, 20, 14, 15],
+    ],
+)
+
+_HEATMAP_CTX = ChartContext(
+    chart_type="heatmap", x="month", y="channel", extra=(("value", "downloads"),)
+)
+_HEATMAP_RESULT = QueryResult(
+    columns=["month", "channel", "downloads"],
+    rows=[["Jan", "Web", 100], ["Jan", "App", 40], ["Feb", "Web", 120]],
+)
+
+_BOX_CTX = ChartContext(chart_type="boxplot", x="category", y="amount")
+_VIOLIN_CTX = ChartContext(chart_type="violin", x="category", y="amount")
+_DIST_RESULT = QueryResult(
+    columns=["category", "amount"],
+    rows=[["A", 10], ["A", 12], ["B", 30], ["B", 5]],
+)
+
+_CAL_CTX = ChartContext(chart_type="calendar", x="day", y="count")
+_CAL_RESULT = QueryResult(
+    columns=["day", "count"],
+    rows=[[date(2026, 1, 5), 3], [date(2026, 1, 6), 9]],
+)
+
 
 class TestChartAnnotationValidation:
     def test_axis_line_y_within_domain_survives(self):
@@ -1966,6 +2005,132 @@ class TestChartAnnotationValidation:
         assert len(out) == 1
         assert out[0]["value"] == "2026-07-02"
 
+    # ----- Statistical charts (Phase 7) ----------------------------------- #
+    def test_candlestick_axis_line_grounds_on_ohlc_domain(self):
+        # `y` is None — the value domain comes from the open/high/low/close
+        # columns (8–20 here), so a price level inside it survives…
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 19, "label": "Resistance"}],
+            _CANDLE_RESULT,
+            _CANDLE_CTX,
+        )
+        assert len(out) == 1 and out[0]["value"] == 19.0
+        # …and one far outside is dropped.
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 500}],
+            _CANDLE_RESULT,
+            _CANDLE_CTX,
+        )
+        assert out == []
+
+    def test_candlestick_item_session_and_stray_series(self):
+        out = validate_annotations(
+            [
+                {"type": "item", "x": "Tue", "series": "close", "label": "Breakout"},
+                {"type": "item", "x": "Sun", "label": "Ghost"},
+            ],
+            _CANDLE_RESULT,
+            _CANDLE_CTX,
+        )
+        assert [a["x"] for a in out] == ["Tue"]
+        assert "series" not in out[0]  # single series: stray field ignored
+
+    def test_candlestick_extremum_ignores_stray_series(self):
+        out = validate_annotations(
+            [{"type": "extremum", "kind": "max", "series": "high", "label": "Top"}],
+            _CANDLE_RESULT,
+            _CANDLE_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["kind"] == "max"
+        assert "series" not in out[0]
+
+    def test_heatmap_item_addresses_a_cell_by_both_axes(self):
+        good = {"type": "item", "x": "Jan", "y": "App", "label": "Cold cell"}
+        bad_y = {"type": "item", "x": "Jan", "y": "Email"}
+        missing_y = {"type": "item", "x": "Jan"}
+        out = validate_annotations(
+            [good, bad_y, missing_y], _HEATMAP_RESULT, _HEATMAP_CTX
+        )
+        assert len(out) == 1
+        assert out[0]["x"] == "Jan" and out[0]["y"] == "App"
+
+    def test_heatmap_extremum_grounds_on_value_column(self):
+        # ctx.y is the row *category* column — the numeric domain must come
+        # from the `value` extra column, or extremum could never validate.
+        out = validate_annotations(
+            [{"type": "extremum", "kind": "max", "label": "Hottest"}],
+            _HEATMAP_RESULT,
+            _HEATMAP_CTX,
+        )
+        assert len(out) == 1
+        # No cartesian marks on a heatmap.
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 100}],
+            _HEATMAP_RESULT,
+            _HEATMAP_CTX,
+        )
+        assert out == []
+
+    def test_boxplot_marks(self):
+        out = validate_annotations(
+            [
+                {"type": "axis_line", "axis": "y", "value": 20, "label": "SLA"},
+                {"type": "item", "x": "B", "label": "Widest spread"},
+                {"type": "item", "x": "Z"},
+                {"type": "extremum", "kind": "max"},  # not in the boxplot vocab
+            ],
+            _DIST_RESULT,
+            _BOX_CTX,
+        )
+        assert [a["type"] for a in out] == ["axis_line", "item"]
+        assert out[1]["x"] == "B"
+
+    def test_boxplot_without_grouping_fails_x_marks_closed(self):
+        # `x` is optional on BoxPlot (a single box over all rows) — with no
+        # category column there is nothing an x mark could address.
+        ctx = ChartContext(chart_type="boxplot", y="amount")
+        out = validate_annotations(
+            [
+                {"type": "item", "x": "A"},
+                {"type": "axis_line", "axis": "x", "value": "A"},
+                {"type": "axis_line", "axis": "y", "value": 20, "label": "SLA"},
+            ],
+            _DIST_RESULT,
+            ctx,
+        )
+        assert [a["type"] for a in out] == ["axis_line"]
+        assert out[0]["axis"] == "y"
+
+    def test_violin_is_value_axis_only(self):
+        # The client violin draws on a synthetic numeric x axis — an x mark
+        # has nothing to land on, even when the category exists in the data.
+        out = validate_annotations(
+            [
+                {"type": "axis_line", "axis": "x", "value": "A", "label": "Nope"},
+                {"type": "range", "axis": "x", "from": "A", "to": "B"},
+                {"type": "axis_line", "axis": "y", "value": 25, "label": "Cap"},
+                {"type": "item", "x": "A"},  # not in the violin vocab
+            ],
+            _DIST_RESULT,
+            _VIOLIN_CTX,
+        )
+        assert [a["type"] for a in out] == ["axis_line"]
+        assert out[0]["axis"] == "y"
+
+    def test_calendar_item_and_extremum(self):
+        out = validate_annotations(
+            [
+                {"type": "item", "x": "2026-01-06", "label": "Busiest day"},
+                {"type": "item", "x": "2026-02-01"},
+                {"type": "extremum", "kind": "max", "label": "Peak"},
+            ],
+            _CAL_RESULT,
+            _CAL_CTX,
+        )
+        assert [a["type"] for a in out] == ["item", "extremum"]
+        assert out[0]["x"] == "2026-01-06"
+
 
 # --------------------------------------------------------------------------- #
 # Annotated answer parsing: fence split, ref chips, replay-text stripping
@@ -2153,6 +2318,38 @@ class TestAnnotationInstructions:
         assert "location column 'country'" in text
         assert "Values range from 60 to 120" in text
         assert "X categories" not in text
+
+    def test_candlestick_speaks_prices_and_sessions(self):
+        text = annotation_instructions(_CANDLE_CTX, _CANDLE_RESULT)
+        # The value domain spans the OHLC columns, labeled as prices.
+        assert "Prices range from 8 to 20" in text
+        assert "X categories: Mon, Tue, Wed" in text
+        assert "marks that session" in text
+        assert "highest high (max) or lowest low (min)" in text
+        # Single series — the item shape never advertises `series`.
+        assert '"series"' not in text
+
+    def test_heatmap_lists_both_category_axes_and_cell_values(self):
+        text = annotation_instructions(_HEATMAP_CTX, _HEATMAP_RESULT)
+        assert "X categories: Jan, Feb" in text
+        assert "Y categories: Web, App" in text
+        assert "Cell values range from 40 to 120" in text
+        assert '"y": "<y category>"' in text  # item addresses a cell
+        assert "outlines the highest/lowest cell" in text
+        assert '"type": "axis_line"' not in text
+
+    def test_violin_offers_value_axis_marks_only(self):
+        text = annotation_instructions(_VIOLIN_CTX, _DIST_RESULT)
+        assert '"axis": "y"' in text
+        assert '"axis": "x" or "y"' not in text
+        assert "Y values range from 5 to 30" in text
+
+    def test_calendar_speaks_days(self):
+        text = annotation_instructions(_CAL_CTX, _CAL_RESULT)
+        assert "outlines that day" in text
+        assert "outlines the highest/lowest day" in text
+        assert "Cell values range from 3 to 9" in text
+        assert "X categories: 2026-01-05, 2026-01-06" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -2354,6 +2551,63 @@ SELECT month, revenue, orders FROM t
             "lines": "orders",
             "right_axis": "orders",
         }
+
+    def test_candlestick_context_carries_the_ohlc_columns(self):
+        source = """# T
+
+:::query name=prices connector=main
+SELECT day, o, h, l, c FROM prices
+:::
+
+<CandlestickChart data={prices} x="day" open="o" high="h" low="l" close="c" explain />
+"""
+        ask = render_page(source, connectors={}).ask_defs[0]
+        ctx = ask.chart_context
+        assert ctx.chart_type == "candlestick"
+        assert ctx.x == "day" and ctx.y is None
+        assert dict(ctx.extra) == {"open": "o", "high": "h", "low": "l", "close": "c"}
+        assert ask.max_rows == DEFAULT_EXPLAIN_MAX_ROWS
+
+    def test_heatmap_context_value_column_joins_the_id(self):
+        source = """# T
+
+:::query name=grid connector=main
+SELECT month, channel, downloads, sessions FROM t
+:::
+
+<HeatmapChart data={grid} x="month" y="channel" value="downloads" explain />
+"""
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context.chart_type == "heatmap"
+        assert dict(ask.chart_context.extra) == {"value": "downloads"}
+        # The value column shapes grounding and validation — changing it must
+        # mint a new ask id (busting the cached answer is correct there).
+        other = render_page(
+            source.replace('value="downloads"', 'value="sessions"'), connectors={}
+        ).ask_defs[0]
+        assert other.id != ask.id
+
+    def test_boxplot_violin_and_calendar_carry_context(self):
+        for tag, chart_type in (
+            ("BoxPlot", "boxplot"),
+            ("Violin", "violin"),
+        ):
+            source = EXPLAIN_PAGE.replace(
+                '<BarChart data={by_region} x="region" y="total"',
+                f'<{tag} data={{by_region}} x="region" y="total"',
+            )
+            ask = render_page(source, connectors={}).ask_defs[0]
+            assert ask.chart_context == ChartContext(
+                chart_type=chart_type, x="region", y="total"
+            )
+        source = EXPLAIN_PAGE.replace(
+            '<BarChart data={by_region} x="region" y="total"',
+            '<CalendarHeatmap data={by_region} date="region" value="total"',
+        )
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context == ChartContext(
+            chart_type="calendar", x="region", y="total"
+        )
 
 
 # --------------------------------------------------------------------------- #

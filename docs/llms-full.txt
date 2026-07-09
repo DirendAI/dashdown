@@ -5625,14 +5625,17 @@ attribute (and one-hour default) `<Ask>` takes:
 
 ### Annotations on the chart
 
-On line, bar, scatter, and combo charts, explain doesn't just write — it can
-**mark the chart itself**: a dashed threshold line, a shaded range band, a dot
-on the peak, a highlighted bar. Pie and funnel charts get a called-out slice
-or stage (a dashed outline, with the annotation's label as a leader-line
-callout on pies), and `<MapChart>` gets a highlighted region with its label
-drawn on the map. On the SVG geo maps [`<BubbleMap>` and
-`<DotDensityMap>`](/components/maps) the mark is a dashed **halo ring** with a
-leader-line label on the cited country. Each mark is cited from the commentary
+On line, bar, scatter, combo, and candlestick charts — and on box plots and
+violins — explain doesn't just write: it can **mark the chart itself**: a
+dashed threshold line, a shaded range band, a dot on the peak, a highlighted
+bar, a marked trading session, an outlined box. Grid charts get an **outlined
+cell**: `<HeatmapChart>` on the cited row/column cell, `<CalendarHeatmap>` on
+the cited day (including "the busiest day", recomputed from the live data).
+Pie and funnel charts get a called-out slice or stage (a dashed outline, with
+the annotation's label as a leader-line callout on pies), and `<MapChart>`
+gets a highlighted region with its label drawn on the map. On the SVG geo maps
+[`<BubbleMap>` and `<DotDensityMap>`](/components/maps) the mark is a dashed
+**halo ring** with a leader-line label on the cited country. Each mark is cited from the commentary
 by a small numbered chip (hover or focus a chip to bold its mark; the chip's
 tooltip carries the label). The marks appear when the commentary opens and
 clear when you close the footer. `annotations=false` on any chart keeps the
@@ -5648,9 +5651,8 @@ the model's coordinates, so marks stay correct as filters change.
 
 Chart types with no mark a validated annotation could safely target keep
 **commentary-only** explain — by decision, not omission: radar, gauge, sankey,
-graph, sunburst, tree, parallel, theme river, calendar heatmap, box plot,
-violin, treemap, candlestick, and heatmap, plus faceted pies (`series=` small
-multiples) and the choropleth geo maps
+graph, sunburst, tree, parallel, theme river, and treemap, plus faceted pies
+(`series=` small multiples) and the choropleth geo maps
 (`<ChoroplethTime>`/`<ChoroplethFacets>`/`<BivariateMap>` — facets, animation
 frames, and two-metric encodings give one static mark nothing stable to point
 at). Charts bound to a [`live` streaming query](/realtime) are also

@@ -33,6 +33,11 @@ const SUPPORTED_TYPES = new Set([
   "pie",
   "funnel",
   "map",
+  "candlestick",
+  "boxplot",
+  "violin",
+  "heatmap",
+  "calendar",
 ]);
 
 // Part-of-whole / geo types: no cartesian mark grammar. Their one annotation
@@ -41,6 +46,13 @@ const SUPPORTED_TYPES = new Set([
 // build, so it needs no dispatchAction post-hooks and survives the
 // setOption(notMerge) funnel like every other mark.
 const DATUM_TYPES = new Set(["pie", "funnel", "map"]);
+
+// Grid charts (matrix heatmap, calendar heatmap): cells are addressed by
+// category axes / date, not by datum name, and marks render as a per-datum
+// dashed cell outline. `extremum` is resolved here (argmax/argmin over the
+// cell values) — the calendar coordinate has no markPoint support, and an
+// outlined hottest cell reads better than a pin on a heatmap anyway.
+const GRID_TYPES = new Set(["heatmap", "calendar"]);
 
 // Same tolerance the server applies: a value a bit past the observed domain
 // (a target line above the max) stays; a wildly-off one is stale — drop it.
@@ -52,13 +64,22 @@ function asNumber(v) {
   return isFinite(n) ? n : null;
 }
 
-/** The chart's value columns: config.y ("a,b" for multi-metric) or, for
- * combo, the bars+lines column lists. */
+/** The chart's value columns: config.y ("a,b" for multi-metric), the
+ * bars+lines column lists for combo, the OHLC columns for candlestick
+ * (config.y is null there), or the cell-value column for a matrix heatmap
+ * (config.y is the row *category* column). Mirrors the server's
+ * _value_axis_columns. */
 function valueColumns(config) {
   if (config.type === "combo") {
     const bars = Array.isArray(config.bars) ? config.bars : [];
     const lines = Array.isArray(config.lines) ? config.lines : [];
     return [...bars, ...lines];
+  }
+  if (config.type === "candlestick") {
+    return [config.open, config.high, config.low, config.close].filter(Boolean);
+  }
+  if (config.type === "heatmap") {
+    return config.value ? [config.value] : [];
   }
   return String(config.y || "")
     .split(",")
@@ -143,6 +164,11 @@ export function applyChartAnnotations(option, config, records) {
     // indexes are patched per facet, so skip defensively anyway.
     if (config.type === "pie" && config.series_by) return;
     applyDatumAnnotations(option, config);
+    return;
+  }
+
+  if (GRID_TYPES.has(config.type)) {
+    applyGridAnnotations(option, config);
     return;
   }
 
@@ -250,7 +276,7 @@ export function applyChartAnnotations(option, config, records) {
       const idx = seriesIndexFor(a, option);
       if (idx === -1) continue;
       if (a.kind !== "max" && a.kind !== "min") continue;
-      bucket(idx).points.push({
+      const point = {
         type: a.kind,
         symbol: "circle",
         symbolSize: emphasized ? 13 : 9,
@@ -260,17 +286,30 @@ export function applyChartAnnotations(option, config, records) {
           borderColor: labelColor,
           borderWidth: emphasized ? 2 : 1,
         },
-      });
+      };
+      // A candlestick datum is [open, close, low, high] — extremum means the
+      // highest high / lowest low, so pin ECharts' recompute to that dim.
+      if (config.type === "candlestick")
+        point.valueDim = a.kind === "max" ? "highest" : "lowest";
+      bucket(idx).points.push(point);
     } else if (a.type === "item") {
-      // A marked bar: a muted dot just above that category's value. The value
-      // is read from the current records, so the mark tracks filter changes.
+      if (config.type === "boxplot") {
+        // A boxplot category has no single point value — outline that
+        // category's box per-datum instead (index via the category axis).
+        decorateBoxDatum(option, a, emphasized);
+        continue;
+      }
+      // A marked bar/session: a muted dot just above that category's value
+      // (a candlestick session's high). The value is read from the current
+      // records, so the mark tracks filter changes.
       const idx = seriesIndexFor(a, option);
       if (idx === -1) continue;
       const x = findCategory(records, xCol, a.x);
       if (x === undefined) continue;
       const yCols = valueColumns(config);
+      const valueCol = config.type === "candlestick" ? config.high : yCols[0];
       const record = records.find((r) => String(r[xCol]) === String(a.x));
-      const y = record ? asNumber(record[yCols[0]]) : null;
+      const y = record ? asNumber(record[valueCol]) : null;
       if (y === null) continue;
       bucket(idx).points.push({
         coord: pointCoord(x, y),
@@ -352,6 +391,111 @@ function applyDatumAnnotations(option, config) {
       };
     }
   }
+}
+
+/**
+ * The grid-chart translator (matrix heatmap, calendar heatmap): `item` and
+ * `extremum` become a dashed outline on the matching cell — a per-datum
+ * itemStyle override, same principle as applyDatumAnnotations. A heatmap cell
+ * is addressed by both category axes (datum = [xi, yi, value] against
+ * option.xAxis/yAxis.data); a calendar day by its date (datum =
+ * ["YYYY-MM-DD", value], matched on the same 10-char slice the option builder
+ * uses). `extremum` is resolved here from the drawn data — the calendar
+ * coordinate has no markPoint support, and an outlined hottest cell reads
+ * better than a pin on a heatmap anyway. Stale addresses (a category/date
+ * gone after a filter change) decorate nothing, silently.
+ */
+function applyGridAnnotations(option, config) {
+  const series = option.series[0];
+  if (!series || !Array.isArray(series.data)) return;
+
+  const colors = currentTextColors();
+  const emphasisId = config._annoEmphasis || null;
+  const calendar = config.type === "calendar";
+  const valueSlot = calendar ? 1 : 2;
+  const datumValue = (d) => (Array.isArray(d) ? d : d && d.value);
+
+  const xs =
+    !calendar && option.xAxis && Array.isArray(option.xAxis.data)
+      ? option.xAxis.data
+      : [];
+  const ys =
+    !calendar && option.yAxis && Array.isArray(option.yAxis.data)
+      ? option.yAxis.data
+      : [];
+
+  const findIndex = (a) => {
+    if (a.type === "item") {
+      if (calendar) {
+        const target = String(a.x).slice(0, 10);
+        return series.data.findIndex((d) => {
+          const v = datumValue(d);
+          return v && String(v[0]) === target;
+        });
+      }
+      const xi = xs.indexOf(String(a.x));
+      const yi = ys.indexOf(String(a.y));
+      if (xi === -1 || yi === -1) return -1;
+      return series.data.findIndex((d) => {
+        const v = datumValue(d);
+        return v && v[0] === xi && v[1] === yi;
+      });
+    }
+    if (a.type === "extremum" && (a.kind === "max" || a.kind === "min")) {
+      let best = -1;
+      let bestValue = null;
+      series.data.forEach((d, i) => {
+        const v = datumValue(d);
+        const n = v ? asNumber(v[valueSlot]) : null;
+        if (n === null) return;
+        if (best === -1 || (a.kind === "max" ? n > bestValue : n < bestValue)) {
+          best = i;
+          bestValue = n;
+        }
+      });
+      return best;
+    }
+    return -1; // unknown type: newer server, older client — degrade silently
+  };
+
+  for (const a of config.annotations) {
+    const idx = findIndex(a);
+    if (idx === -1) continue;
+    const datum = series.data[idx];
+    const emphasized = emphasisId !== null && a.id === emphasisId;
+    series.data[idx] = {
+      value: datumValue(datum),
+      itemStyle: {
+        borderType: "dashed",
+        borderColor: colors.heading,
+        borderWidth: emphasized ? 3 : 1.8,
+      },
+    };
+  }
+}
+
+/**
+ * Outline one boxplot category's box: a per-datum itemStyle override on the
+ * box series (series 0 of [box, outliers]), indexed via the category axis.
+ * The label rides the chip tooltip — boxes have no leader-line grammar.
+ */
+function decorateBoxDatum(option, a, emphasized) {
+  const xs =
+    option.xAxis && Array.isArray(option.xAxis.data) ? option.xAxis.data : [];
+  const idx = xs.indexOf(String(a.x));
+  const series = option.series[0];
+  if (idx === -1 || !series || !Array.isArray(series.data)) return;
+  const datum = series.data[idx];
+  if (datum == null) return;
+  const colors = currentTextColors();
+  series.data[idx] = {
+    value: Array.isArray(datum) ? datum : datum.value,
+    itemStyle: {
+      borderType: "dashed",
+      borderColor: colors.heading,
+      borderWidth: emphasized ? 3 : 2.2,
+    },
+  };
 }
 
 /** The item/geo_item annotations with their datum name resolved, other types
