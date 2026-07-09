@@ -1173,6 +1173,36 @@ body {
     pointer-events: auto;
   }
 }
+/* --- Explain annotation ref chips ---------------------------------------- */
+/* <abbr> chips injected server-side (chart_annotations.py::inject_refs) into
+   the explain commentary — one numbered pill per chart mark. Hover/focus
+   bolds the cited mark on the chart (ask.js::wireRefChips); the native
+   title="" tooltip carries the label with zero JS. Same warning-amber the AI
+   affordances speak, via the DaisyUI var so every theme keeps its own tone. */
+.dashdown-anno-ref {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.05em;
+  height: 1.4em;
+  padding: 0 0.35em;
+  margin: 0 0.12em;
+  border-radius: 9999px;
+  font-size: 0.7em;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 0.25em;
+  cursor: help;
+  text-decoration: none; /* the abbr dotted underline reads as a typo here */
+  color: oklch(var(--wa, 75% 0.16 75) / 1);
+  background: color-mix(in oklch, oklch(var(--wa, 75% 0.16 75) / 1) 14%, transparent);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.dashdown-anno-ref:hover,
+.dashdown-anno-ref:focus-visible {
+  background: color-mix(in oklch, oklch(var(--wa, 75% 0.16 75) / 1) 28%, transparent);
+  outline: none;
+}
 /* --- Chart ⛶ fullscreen button ------------------------------------------ */
 /* On every chart, beside the `explain` sparkle, revealed on the same hover
    trigger. Neutral base-content tone (not the sparkle's AI amber) so the two

@@ -5,6 +5,7 @@
 
 import { fetchQueryData, recordsOf, queryUsesFilters, esc, readBrandingConfig, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts } from "../core.js";
 import { showLoading, hideLoading } from "../loading.js";
+import { applyChartAnnotations } from "./annotations.js";
 import { mountFilterBadge } from "./filter_badge.js";
 import {
   currentEChartsTheme,
@@ -390,10 +391,29 @@ export function initChart(el) {
           }
         }
       },
+      // Rebuild the option from the last-rendered records (stashed by
+      // updateChart) with NO data round-trip — used by the explain-annotation
+      // helpers so applying/clearing/emphasizing marks repaints the current
+      // reading instead of re-running render()'s fetch. Falls back to render()
+      // if nothing has painted yet.
+      repaint() {
+        const records = el._chartRecords;
+        if (Array.isArray(records) && records.length) {
+          updateChart(el, records, config);
+        } else {
+          const filters =
+            window.Alpine && Alpine.store ? { ...(Alpine.store("filters") || {}) } : {};
+          this.render(filters);
+        }
+      },
     };
 
     // "Filtered by" corner marker (reactive to filter state; self-gates).
     mountFilterBadge(el, queryName);
+
+    // Let the explain-annotation helpers re-render this chart without going
+    // through the store (annotations.js::rerenderChart).
+    el._chartInstance = instance;
 
     // Register instance
     chartInstances.push(instance);
@@ -501,6 +521,11 @@ export function buildChartOption(config, records) {
     }
   }
   if (option) applyAreaGradients(option);
+  // Explain-panel annotation marks (config.annotations, set by ask.js). Inside
+  // this single funnel so they survive filter refetches, live pushes, theme
+  // re-inits, and fullscreen; re-validated against the current records so a
+  // stale mark disappears instead of mispointing.
+  if (option) applyChartAnnotations(option, config, records);
   return option;
 }
 
@@ -1980,8 +2005,13 @@ export function updateChart(el, records, config) {
     }
     delete el._donutTotal;
     delete el._facetCount;
+    delete el._chartRecords;
     return;
   }
+
+  // Stash the drawn records so instance.repaint() (explain-annotation marks)
+  // can rebuild the option without a data round-trip.
+  el._chartRecords = records;
 
   if (config.type === "map") {
     wireMapRoamGuard(el);

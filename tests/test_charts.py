@@ -88,13 +88,13 @@ def test_chart_has_fullscreen_button(ctx, tag):
 
 
 def test_chart_fullscreen_button_present_in_static_build():
-    """Unlike `explain` (which needs a live LLM server and is skipped in a static
-    build), the fullscreen viewer is pure client-side, so the button still ships
-    in an export."""
+    """Both corner affordances ship in an export: fullscreen is pure
+    client-side, and `explain` reads its baked _ask/{id}.json snapshot on
+    first open (the answer + annotations are generated at build time)."""
     ctx = RenderContext(queries={}, params={}, current_path="/", static_build=True)
     html = render_components('<LineChart data={s} x="m" y="r" explain />', ctx)
     assert "dashdown-chart-expand-btn" in html
-    assert "dashdown-explain-btn" not in html  # explain gated off in static build
+    assert "dashdown-explain-btn" in html
 
 
 def test_chart_fullscreen_and_explain_coexist(ctx):

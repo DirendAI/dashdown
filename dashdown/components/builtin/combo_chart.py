@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dashdown.chart_annotations import build_chart_context
 from dashdown.components.base import Component, RenderContext, register_component
 from dashdown.components.builtin._util import (
     attr_int,
@@ -155,9 +156,24 @@ def _combo_html(attrs: dict[str, Any], ctx: RenderContext) -> str:
     config_json = esc(safe_json(config))
     height = attr_int(attrs, "height", 320) or 320
     span = grid_span_style(attrs)
+    # Combo's bespoke shape for the explain affordance: `y` carries every value
+    # column (bars + lines), and the bar/line/right-axis split rides `extra` so
+    # a re-rolled mix mints a fresh ask id — and lets the validator scope
+    # value-axis marks to the LEFT axis (chart_annotations._value_axis_columns).
+    chart_context = build_chart_context(
+        "combo",
+        x=x,
+        y=",".join(bar_cols + line_cols),
+        extra=(
+            ("bars", ",".join(bar_cols)),
+            ("lines", ",".join(line_cols)),
+            ("right_axis", ",".join(right_cols)),
+        ),
+    )
     return _chart_card(
         attrs, ctx, chart_type="combo", cid=cid, name=name,
         config_json=config_json, height=height, span=span,
+        chart_context=chart_context,
     )
 
 

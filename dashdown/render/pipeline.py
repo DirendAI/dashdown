@@ -642,6 +642,16 @@ def render_page(
     )
     query_connectors.update({s.name: s.connector for s in local_specs})
 
+    # Which query names are `live` (streaming) — threaded into the context
+    # because components render BEFORE this page's specs register into the
+    # global stream cache below, so `get_stream_interval` would only see a
+    # previous render here. Local specs take precedence over both libraries
+    # (same rule as everywhere else).
+    live_queries = {name for name, spec in library.items() if spec.live}
+    live_queries |= {name for name, spec in python_library.items() if spec.live}
+    for s in local_specs:
+        (live_queries.add if s.live else live_queries.discard)(s.name)
+
     # Create empty context - no query data on server. render_components records
     # which queries the page's components reference (DataRefs) into
     # ctx.referenced_queries, which we resolve against the library below.
@@ -656,6 +666,7 @@ def render_page(
         default_connector=default_connector or "",
         page_title=str(frontmatter.get("title") or ""),
         page_description=str(frontmatter.get("description") or ""),
+        live_queries=live_queries,
     )
     body_html = render_components(body_html, ctx)
 

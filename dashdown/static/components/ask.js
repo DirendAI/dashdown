@@ -23,6 +23,11 @@
 "use strict";
 
 import { readBuildConfig, readEmbedToken, readRouteParams, esc } from "../core.js";
+import {
+  clearChartAnnotations,
+  emphasizeChartAnnotation,
+  setChartAnnotations,
+} from "./annotations.js";
 
 const _DEBOUNCE_MS = 400;
 const _REPLAY_TICK_MS = 30; // typewriter cadence for replayed answers
@@ -67,6 +72,10 @@ export function initAsk(el, opts = {}) {
   const loadingHtml = body.innerHTML; // the blinking-cursor wait state
   const build = readBuildConfig();
   const isStatic = !!(build && build.static);
+  // A chart's explain footer sits inside the chart card it explains; the
+  // payload's chart annotations are applied to that host. Null for a plain
+  // <Ask /> card — every annotation call below then no-ops.
+  const chartHost = el.closest(".dashdown-chart");
   const paused = opts.paused || (() => false);
   let requestSeq = 0; // drop responses that a newer request has superseded
   let abortController = null; // aborts the superseded in-flight fetch/stream
@@ -188,6 +197,34 @@ export function initAsk(el, opts = {}) {
     // Regeneration needs the live endpoint; a static snapshot is fixed, so the
     // refresh affordance is revealed only on a live server.
     if (refreshBtn && !isStatic) refreshBtn.hidden = false;
+    // Chart annotations (explain payloads only): paint the marks and remember
+    // them so a close→reopen of the footer re-applies without a refetch
+    // (initExplain reads _lastAnnotations). renderDone is the single consumer
+    // of every response shape, so live JSON, cache hits, and static bakes all
+    // land here identically.
+    if (chartHost) {
+      el._lastAnnotations = Array.isArray(data.annotations) ? data.annotations : [];
+      if (el._lastAnnotations.length) {
+        setChartAnnotations(chartHost, el._lastAnnotations);
+      }
+      wireRefChips();
+    }
+  }
+
+  // Hovering/focusing a ref chip bolds the mark it cites (bolding only — no
+  // dim-the-rest layer); leaving restores. The native <abbr title> tooltip
+  // carries the label with zero JS, so this degrades gracefully.
+  function wireRefChips() {
+    body.querySelectorAll(".dashdown-anno-ref").forEach((chip) => {
+      const id = chip.dataset.annoId;
+      if (!id) return;
+      const bold = () => emphasizeChartAnnotation(chartHost, id);
+      const restore = () => emphasizeChartAnnotation(chartHost, null);
+      chip.addEventListener("mouseenter", bold);
+      chip.addEventListener("mouseleave", restore);
+      chip.addEventListener("focus", bold);
+      chip.addEventListener("blur", restore);
+    });
   }
 
   // Consume an SSE cache-miss response: `chunk` events accumulate as escaped
@@ -250,6 +287,12 @@ export function initAsk(el, opts = {}) {
     abortController = controller;
     body.innerHTML = loadingHtml;
     if (modelEl) modelEl.hidden = true; // re-hide while (re)loading
+    // Params changed (or first load): the old marks describe old data — clear
+    // them (and the reopen stash) until the new payload lands in renderDone.
+    if (chartHost) {
+      el._lastAnnotations = null;
+      clearChartAnnotations(chartHost);
+    }
     try {
       const response = await fetch(url, { signal: controller.signal });
       if (seq !== requestSeq) return; // stale — a newer request is in flight
@@ -443,19 +486,31 @@ export function initExplain(el) {
     const open = panel.hidden;
     panel.hidden = !open;
     btn.setAttribute("aria-expanded", String(open));
-    if (!open) return;
+    if (!open) {
+      // Closing dismisses the commentary AND its marks — the chart returns to
+      // its clean reading the moment the footer is gone.
+      clearChartAnnotations(el);
+      return;
+    }
     if (!ask) {
       ask = initAsk(panel, { paused: () => panel.hidden }) || null;
     } else {
+      // Reopen: re-apply the last payload's marks from client-side state (the
+      // payload is already in hand — no refetch)…
+      if (Array.isArray(panel._lastAnnotations) && panel._lastAnnotations.length) {
+        setChartAnnotations(el, panel._lastAnnotations);
+      }
+      // …then let any load deferred while closed (filters changed) supersede.
       ask.flush();
     }
   });
 }
 
 /**
- * Initialize the explain affordance on every chart that has one. (The server
- * emits it only on live pages — never in static builds — so this is a no-op
- * in an export.)
+ * Initialize the explain affordance on every chart that has one — in static
+ * exports too: the footer's ask surface reads the baked _ask/{id}.json
+ * snapshot on first open (initAsk's static branch), so click → retrieve →
+ * show works identically offline.
  */
 export function initAllExplains() {
   document.querySelectorAll(".dashdown-explain-btn").forEach((btn) => {
