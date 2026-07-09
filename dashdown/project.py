@@ -390,6 +390,77 @@ def parse_sidebar_config(raw: Any) -> SidebarConfig:
     return cfg
 
 
+# Content-column widths. `l` is the historical full-dashboard width
+# (Tailwind's max-w-7xl, 80rem); `s`/`m` narrow it for article-style reading.
+# The rem values themselves live in dashdown.css (keyed by the data-page-width
+# attribute); here we only validate the token.
+LAYOUT_WIDTHS = ("s", "m", "l")
+
+
+@dataclass
+class LayoutConfig:
+    """Optional ``layout:`` block — project-wide defaults for page chrome + width.
+
+        layout:
+          width: l        # s | m | l — content-column width (default l, the full
+                          # dashboard width; m ≈ medium, s ≈ narrow article/blog)
+          header: true    # show the top app header (brand / search / theme). false
+                          # drops it site-wide — e.g. a single-page blog.
+
+    Both keys are **per-page overridable** via frontmatter (a page's ``width:`` /
+    ``header:``), so a project can default to full-width dashboards yet mark one
+    page as a narrow article, or hide the header on just the landing page. A
+    malformed value fails at startup (same policy as ``sidebar:`` etc.)."""
+
+    width: str = "l"
+    header: bool = True
+
+
+def parse_layout_config(raw: Any) -> LayoutConfig:
+    """Parse and validate the ``layout:`` block. Raises ValueError when malformed
+    so the server refuses to start half-broken (same policy as ``auth:`` etc.)."""
+    if raw is None:
+        return LayoutConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("layout: must be a mapping")
+
+    cfg = LayoutConfig()
+    width = raw.get("width")
+    if width is not None:
+        if not isinstance(width, str) or width not in LAYOUT_WIDTHS:
+            raise ValueError("layout.width must be one of: s, m, l")
+        cfg.width = width
+    header = raw.get("header")
+    if header is not None:
+        if not isinstance(header, bool):
+            raise ValueError("layout.header must be a boolean")
+        cfg.header = header
+    return cfg
+
+
+def resolve_page_layout(
+    frontmatter: dict[str, Any], layout: LayoutConfig
+) -> tuple[str, bool]:
+    """Resolve a page's effective ``(page_width, show_header)``.
+
+    Per-page frontmatter (``width:`` / ``header:``) overrides the project-wide
+    ``layout:`` defaults. Frontmatter is handled **leniently** — an invalid
+    ``width`` or non-boolean ``header`` is ignored (falls back to the config
+    default) rather than 500-ing the page, matching how the rest of frontmatter
+    is treated."""
+    width = layout.width
+    fm_width = frontmatter.get("width")
+    if isinstance(fm_width, str) and fm_width in LAYOUT_WIDTHS:
+        width = fm_width
+
+    show_header = layout.header
+    fm_header = frontmatter.get("header")
+    if isinstance(fm_header, bool):
+        show_header = fm_header
+
+    return width, show_header
+
+
 @dataclass
 class PythonQueriesConfig:
     """Optional ``python_queries`` block — the policy knob for ``queries/**/*.py``
@@ -435,6 +506,7 @@ class ProjectConfig:
     filters: FiltersConfig = field(default_factory=FiltersConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     sidebar: SidebarConfig = field(default_factory=SidebarConfig)
+    layout: LayoutConfig = field(default_factory=LayoutConfig)
     python_queries: PythonQueriesConfig = field(default_factory=PythonQueriesConfig)
 
 
@@ -653,6 +725,7 @@ def load_project(root: Path) -> Project:
             filters=parse_filters_config(raw.get("filters")),
             search=parse_search_config(raw.get("search")),
             sidebar=parse_sidebar_config(raw.get("sidebar")),
+            layout=parse_layout_config(raw.get("layout")),
             python_queries=parse_python_queries_config(raw.get("python_queries")),
         )
         # Auth + embedding are enterprise features: parsed above so a broken

@@ -43,6 +43,7 @@ from dashdown.project import (
     build_breadcrumbs,
     format_config_json,
     resolve_logo_url,
+    resolve_page_layout,
 )
 from dashdown.render.pipeline import (
     render_page,
@@ -1028,6 +1029,11 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         nav = proj.nav_tree()
         page_title = rendered.frontmatter.get("title", md_path.stem)
         breadcrumbs = build_breadcrumbs(current, nav, page_title)
+        # Per-page chrome/width: frontmatter (`width:` / `header:`) overrides the
+        # project-wide `layout:` defaults.
+        page_width, show_header = resolve_page_layout(
+            rendered.frontmatter, proj.config.layout
+        )
 
         # For async loading, we still pass datasets for backward compatibility
         # but client will use API for async loading
@@ -1087,6 +1093,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 proj.config.sidebar.show_single_page
                 or proj.navigable_page_count() > 1
             ),
+            # Per-page presentation: content-column width + top-header visibility.
+            page_width=page_width,
+            show_header=show_header,
             live_reload=request.app.state.dev,
         )
         # Framing policy applies to every page (deny-by-default): a page can only
