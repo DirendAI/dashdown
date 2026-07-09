@@ -51,6 +51,15 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from dashdown.chart_annotations import (
+    ChartContext,
+    annotation_instructions,
+    cell_text,
+    inject_refs,
+    split_annotated_answer,
+    strip_ref_tokens,
+    validate_annotations,
+)
 from dashdown.data.base import QueryResult
 from dashdown.render.markdown import render_markdown_text
 
@@ -60,6 +69,11 @@ _ENV_RE = re.compile(r"^\$\{(\w+)\}$")
 _PARAM_RE = re.compile(r"\$\{(\w+)\}")
 
 DEFAULT_MAX_ROWS = 50
+# Chart-context (annotation-bearing) explain asks see more rows: annotation
+# candidates are validated against the full result, and a truncated view makes
+# the model propose marks that fail validation. 200 covers typical aggregated
+# chart queries at modest token cost — and explain is click-gated + cached.
+DEFAULT_EXPLAIN_MAX_ROWS = 200
 # Generous by design: every cache miss is an LLM bill, and commentary on a
 # fixed query result rarely changes meaningfully within the hour.
 DEFAULT_ANSWER_TTL = 3600
@@ -469,6 +483,13 @@ class AskDef:
     # changed context ⇒ a different id ⇒ a fresh answer.
     page_title: str = ""
     page_description: str = ""
+    # The resolved shape of the chart this ask explains (chart_annotations.py).
+    # Set only by the chart `explain` affordance on chart types with an
+    # annotation vocabulary; None keeps the ask commentary-only (plain <Ask />,
+    # live-query charts, unvocabularied chart types). Joins the id hash ONLY
+    # when set, so plain asks keep byte-identical ids — while a changed chart
+    # shape correctly busts its explain cache.
+    chart_context: ChartContext | None = None
 
     @property
     def query_name(self) -> str:
@@ -492,6 +513,7 @@ def ask_id(
     max_rows: int = DEFAULT_MAX_ROWS,
     page_title: str = "",
     page_description: str = "",
+    chart_context: ChartContext | None = None,
 ) -> str:
     """Deterministic id for an ask block — stable across renders/restarts.
 
@@ -501,13 +523,17 @@ def ask_id(
     keep their ids (and their caches / baked snapshots). ``max_rows`` is part
     of the hash because it changes the data payload the model sees, so editing
     it must bust the answer cache; the page context is in because it changes
-    the prompt (changed context ⇒ fresh answer); ``cache_ttl`` only affects
-    expiry and stays out.
+    the prompt (changed context ⇒ fresh answer); ``chart_context`` joins
+    **only when set** (it changes both the prompt and the validation, and a
+    reshaped chart must mint a fresh answer) so plain asks keep byte-identical
+    ids; ``cache_ttl`` only affects expiry and stays out.
     """
     parts: list[str] = []
     for query_name, connector in queries:
         parts += [connector, query_name]
     parts += [prompt, str(max_rows), page_title, page_description]
+    if chart_context is not None:
+        parts += ["chart_context", chart_context.canonical()]
     digest = hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
     return digest[:16]
 
@@ -520,10 +546,11 @@ def register_ask_def(
     page_title: str = "",
     page_description: str = "",
     allow_refresh: bool = True,
+    chart_context: ChartContext | None = None,
 ) -> AskDef:
     pairs = tuple((str(n), str(c)) for n, c in queries)
     d = AskDef(
-        id=ask_id(pairs, prompt, max_rows, page_title, page_description),
+        id=ask_id(pairs, prompt, max_rows, page_title, page_description, chart_context),
         queries=pairs,
         prompt=prompt,
         max_rows=max_rows,
@@ -531,6 +558,7 @@ def register_ask_def(
         page_title=page_title,
         page_description=page_description,
         allow_refresh=allow_refresh,
+        chart_context=chart_context,
     )
     _ask_def_cache[d.id] = d
     return d
@@ -541,16 +569,18 @@ def get_ask_def(id: str) -> AskDef | None:
 
 
 # --------------------------------------------------------------------------- #
-# Answer cache: (ask id, relevant substituted params) -> (html, text, expiry)
+# Answer cache: (ask id, relevant substituted params)
+#              -> (html, text, annotations, expiry)
 #
 # ``text`` is the model's raw Markdown answer, kept alongside the rendered
 # ``html`` so a cache hit (and a static bake) can *replay* the answer with the
 # same typewriter effect a live stream has — ask.js types the text out, then
 # swaps in the sanitized html. Rendering always uses ``html``; the raw text is
 # only ever shown as escaped plain text (textContent), exactly like the live
-# SSE chunks, so shipping it widens nothing.
+# SSE chunks, so shipping it widens nothing. ``annotations`` are the validated
+# chart annotations (chart_annotations.py) — [] for commentary-only asks.
 # --------------------------------------------------------------------------- #
-_answer_cache: dict[tuple[str, tuple], tuple[str, str, float]] = {}
+_answer_cache: dict[tuple[str, tuple], tuple[str, str, list[dict], float]] = {}
 
 
 def relevant_params(sql: str, params: dict[str, str]) -> dict[str, str]:
@@ -567,23 +597,36 @@ def _freeze(params: dict[str, str]) -> tuple:
     return tuple(sorted(params.items()))
 
 
-def get_cached_answer(ask_id: str, params: dict[str, str]) -> tuple[str, str] | None:
-    """Return ``(html, raw answer text)`` for a live cache entry, else None."""
+def get_cached_answer(
+    ask_id: str, params: dict[str, str]
+) -> tuple[str, str, list[dict]] | None:
+    """Return ``(html, raw answer text, annotations)`` for a live cache entry,
+    else None."""
     key = (ask_id, _freeze(params))
     entry = _answer_cache.get(key)
     if entry is None:
         return None
-    html, text, expiry = entry
+    html, text, annotations, expiry = entry
     if time.monotonic() > expiry:
         del _answer_cache[key]
         return None
-    return html, text
+    return html, text, annotations
 
 
 def cache_answer(
-    ask_id: str, params: dict[str, str], html: str, ttl: int, text: str = ""
+    ask_id: str,
+    params: dict[str, str],
+    html: str,
+    ttl: int,
+    text: str = "",
+    annotations: list[dict] | None = None,
 ) -> None:
-    _answer_cache[(ask_id, _freeze(params))] = (html, text, time.monotonic() + ttl)
+    _answer_cache[(ask_id, _freeze(params))] = (
+        html,
+        text,
+        annotations or [],
+        time.monotonic() + ttl,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -604,12 +647,10 @@ SYSTEM_PROMPT = (
 )
 
 
-def _cell_text(v: Any) -> str:
-    if v is None:
-        return "NULL"
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    return str(v)
+# One cell normalization shared with chart_annotations.py: annotation
+# candidates are matched against categories rendered exactly as the model saw
+# them in this payload, so the two must never drift.
+_cell_text = cell_text
 
 
 def format_result_for_llm(result: QueryResult, max_rows: int) -> str:
@@ -667,6 +708,11 @@ def build_ask_prompt(
     for (query_name, _connector), result in zip(ask.queries, results):
         payload = format_result_for_llm(result, ask.max_rows)
         lines.append(f"\nResult of query '{query_name}':\n{payload}")
+    # A chart-context ask also teaches the annotation protocol, grounded in
+    # the FULL primary result (domains aren't row-capped — a candidate the
+    # model grounds in truncated data would just fail validation).
+    if ask.chart_context is not None and results:
+        lines.append("\n" + annotation_instructions(ask.chart_context, results[0]))
     return "\n".join(lines)
 
 
@@ -675,16 +721,29 @@ def generate_answer(
     results: Sequence[QueryResult],
     adapter: LLMAdapter,
     params: dict[str, str] | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, list[dict]]:
     """Run one ask: build the prompt (each result capped to the ask's
     ``max_rows``), call the LLM, render the Markdown answer to HTML (raw HTML
     disabled, so model output can't inject markup into the page).
 
-    Returns ``(html, raw answer text)`` — the raw text rides along in the
-    answer cache / baked snapshot so the client can replay the answer as a
-    typewriter (see the answer-cache comment above)."""
+    Returns ``(html, raw answer text, annotations)`` — the raw text rides
+    along in the answer cache / baked snapshot so the client can replay the
+    answer as a typewriter (see the answer-cache comment above); annotations
+    are the validated chart annotations ([] for a commentary-only ask).
+
+    For a chart-context ask the raw completion carries a terminal fenced
+    ```annotations`` block: it is split off before anything renders, the
+    candidates are validated against the full primary result, surviving
+    ``[aN]`` refs become ``<abbr>`` chips in the sanitized html, and the
+    replayable text ships with the tokens stripped (chips can't exist in
+    plain text). A missing/garbled fence degrades to commentary-only."""
     answer = adapter.complete(SYSTEM_PROMPT, build_ask_prompt(ask, results, params))
-    return render_markdown_text(answer), answer
+    if ask.chart_context is None or not results:
+        return render_markdown_text(answer), answer, []
+    commentary, candidates = split_annotated_answer(answer)
+    annotations = validate_annotations(candidates, results[0], ask.chart_context)
+    html = inject_refs(render_markdown_text(commentary), annotations)
+    return html, strip_ref_tokens(commentary), annotations
 
 
 def stream_answer(

@@ -24,6 +24,7 @@ class RenderContext:
         default_connector: str = "",
         page_title: str = "",
         page_description: str = "",
+        live_queries: set[str] | None = None,
     ) -> None:
         self.queries = queries
         self.params = params or {}
@@ -49,6 +50,14 @@ class RenderContext:
         # The project's default source name (see `default_connector_name`) —
         # the fallback when a referenced query name isn't in query_connectors.
         self.default_connector = default_connector
+        # Names of this page's `live` queries (page-local :::query specs plus
+        # the shared SQL/Python libraries, local taking precedence). Threaded
+        # in — NOT read from the global stream cache — because components
+        # render before render_page registers the page's specs, so the cache
+        # only reflects a *previous* render here. A chart `explain` on a live
+        # query registers commentary-only (no chart annotations: the data
+        # changes under the marks every poll interval).
+        self.live_queries = live_queries or set()
         # Set by render_components when ANY filter component renders (inline or
         # bar-routed). Informational — placement is decided per-control.
         self.has_filters = False

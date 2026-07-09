@@ -157,8 +157,34 @@ attribute (and one-hour default) `<Ask>` takes:
            explain="Is growth accelerating or slowing?" cache_ttl=86400 />
 ```
 
-Omitted from static builds (on-demand generation needs a live
-server — the same posture as the ↻ refresh button).
+### Annotations on the chart
+
+On line, bar, scatter, and combo charts, explain doesn't just write — it can
+**mark the chart itself**: a dashed threshold line, a shaded range band, a dot
+on the peak, a highlighted bar. Each mark is cited from the commentary by a
+small numbered chip (hover or focus a chip to bold its mark; the chip's
+tooltip carries the label). The marks appear when the commentary opens and
+clear when you close the footer.
+
+Restraint is enforced, not just prompted: the model may propose at most a
+handful of annotations (an empty set is a perfectly good answer for an
+unremarkable chart), and every candidate is **validated server-side against
+the full query result** — a value outside the data's actual range, a category
+that doesn't exist, or a series the chart doesn't draw is silently dropped.
+Extremes ("the maximum") are recomputed from the live data rather than trusting
+the model's coordinates, so marks stay correct as filters change. Other chart
+types (pie, gauge, sankey, maps, …) keep commentary-only explain for now, as do
+charts bound to a [`live` streaming query](/realtime) — their data changes
+under the marks every poll interval.
+
+`max_rows=` on the chart tunes how many rows the model sees (annotated
+explains default to 200 — more than `<Ask>`'s 50 — so proposals ground in the
+full picture).
+
+Explain works in [static builds](#static-builds) too: the answer — commentary,
+chips, and annotations — is generated once at build time and baked into the
+export; the first click on the sparkle retrieves that snapshot, exactly like
+serve mode. Only the ↻ regenerate affordance needs a live server.
 
 ## Configuration
 
@@ -260,9 +286,25 @@ provider.
 
 `dashdown build` bakes one answer JSON per `<Ask>` def into the export, so the
 commentary ships in a static site with **no server or API key** at view time — the
-answer is computed once at build. The model attribution is baked in too, but the ↻
-refresh affordance is omitted — a baked answer is fixed, with no live endpoint to
-regenerate against.
+answer is computed once at build. Chart `explain` bakes the same way: the
+button and footer ship in the export, and the first click retrieves the baked
+snapshot (commentary + annotations) instead of calling a server. The model
+attribution is baked in too, but the ↻ refresh affordance is omitted — a baked
+answer is fixed, with no live endpoint to regenerate against.
+
+:::note Baked answers describe unfiltered data
+Filter controls are stripped from a static export, and each answer is baked
+once with the **default (empty) filter state** — so baked commentary and
+annotations describe the unfiltered data, never a filtered view.
+:::
+
+:::warning Baked answers are world-readable files
+A baked answer is an ordinary static JSON file (`_dashdown/data/_ask/…`), the
+same exposure class as the export's baked query snapshots. If your live
+dashboard sits behind the built-in `auth:`, remember that an export of it does
+not — don't publish an export whose commentary summarizes data you wouldn't
+publish directly.
+:::
 
 ## Try it
 

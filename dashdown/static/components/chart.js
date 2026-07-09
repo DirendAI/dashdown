@@ -5,6 +5,7 @@
 
 import { fetchQueryData, recordsOf, queryUsesFilters, esc, readBrandingConfig, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts } from "../core.js";
 import { showLoading, hideLoading } from "../loading.js";
+import { applyChartAnnotations } from "./annotations.js";
 import { mountFilterBadge } from "./filter_badge.js";
 import {
   currentEChartsTheme,
@@ -395,6 +396,10 @@ export function initChart(el) {
     // "Filtered by" corner marker (reactive to filter state; self-gates).
     mountFilterBadge(el, queryName);
 
+    // Let the explain-annotation helpers re-render this chart without going
+    // through the store (annotations.js::rerenderChart).
+    el._chartInstance = instance;
+
     // Register instance
     chartInstances.push(instance);
 
@@ -501,6 +506,11 @@ export function buildChartOption(config, records) {
     }
   }
   if (option) applyAreaGradients(option);
+  // Explain-panel annotation marks (config.annotations, set by ask.js). Inside
+  // this single funnel so they survive filter refetches, live pushes, theme
+  // re-inits, and fullscreen; re-validated against the current records so a
+  // stale mark disappears instead of mispointing.
+  if (option) applyChartAnnotations(option, config, records);
   return option;
 }
 

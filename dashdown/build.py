@@ -882,7 +882,7 @@ def _export_ask(
 
     try:
         adapter = project.get_llm_adapter()
-        html, text = generate_answer(ask, query_results, adapter, prompt_params)
+        html, text, annotations = generate_answer(ask, query_results, adapter, prompt_params)
     except Exception as e:  # noqa: BLE001
         log.warning("Ask '%s' (%s) failed during build: %s", ask.id, display_queries, e)
         _write_error(f"{type(e).__name__}: {e}")
@@ -896,6 +896,9 @@ def _export_ask(
                 # Raw answer text: lets the static client replay the answer as
                 # a typewriter (escaped plain text) before swapping in `html`.
                 "text": text,
+                # Validated chart annotations ([] for commentary-only asks) —
+                # the static client applies them exactly like a live payload.
+                "annotations": annotations,
                 "model": resolve_model_name(project.config.llm),
             },
             default=_json_default,

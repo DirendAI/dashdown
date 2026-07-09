@@ -11,9 +11,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dashdown.build import _build
+from dashdown.chart_annotations import (
+    ANNOTATION_VOCAB,
+    MAX_ANNOTATIONS,
+    ChartContext,
+    annotation_instructions,
+    build_chart_context,
+    inject_refs,
+    split_annotated_answer,
+    strip_ref_tokens,
+    validate_annotations,
+)
 from dashdown.data.base import QueryResult
 from dashdown.llm import (
     DEFAULT_ANSWER_TTL,
+    DEFAULT_EXPLAIN_MAX_ROWS,
     DEFAULT_MAX_ROWS,
     AnthropicAdapter,
     AskDef,
@@ -848,12 +860,19 @@ class TestChartExplain:
         assert rendered.ask_defs == []
         assert "dashdown-explain" not in rendered.body_html
 
-    def test_explain_stripped_in_static_build(self):
-        # On-demand generation needs a live server: a static build gets no
-        # button, no footer — and nothing joins ask_defs, so nothing is baked.
+    def test_explain_ships_in_static_build(self):
+        # Explain works in exports: the button + footer render, and the AskDef
+        # joins ask_defs so `_export_ask` bakes the answer (+ annotations) that
+        # ask.js's static branch fetches on first open — click → retrieve →
+        # show, exactly like serve mode.
         rendered = render_page(EXPLAIN_PAGE, connectors={}, static_build=True)
-        assert rendered.ask_defs == []
-        assert "dashdown-explain" not in rendered.body_html
+        assert len(rendered.ask_defs) == 1
+        assert "dashdown-explain-btn" in rendered.body_html
+        assert "dashdown-explain-panel" in rendered.body_html
+        # Same deterministic id as a live render, so the baked snapshot and a
+        # live answer cache never diverge for the same chart.
+        live = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        assert rendered.ask_defs[0].id == live.id
 
     def test_combo_chart_rides_the_shared_shell(self):
         source = """# T
@@ -932,14 +951,18 @@ class TestPayload:
         fake = FakeAdapter(reply="Top is **North**.")
         ask = AskDef(id="x", queries=(("q", "main"),), prompt="Why?", max_rows=5)
         result = QueryResult(columns=["a"], rows=[[1]])
-        html, text = generate_answer(ask, [result], fake)
+        html, text, annotations = generate_answer(ask, [result], fake)
         assert "<strong>North</strong>" in html
         # The raw answer rides along for the client-side typewriter replay.
         assert text == "Top is **North**."
+        # A plain (no chart_context) ask never carries annotations.
+        assert annotations == []
         # Prompt + data both reached the model.
         system, prompt = fake.calls[0]
         assert "Why?" in prompt
         assert "a (int)" in prompt
+        # …and the annotation protocol never leaks into a plain ask's prompt.
+        assert "annotations" not in prompt
 
     def test_llm_html_output_is_escaped(self):
         # A prompt-injected model can't smuggle markup into the page.
@@ -1010,10 +1033,17 @@ class TestAnswerCache:
     def test_roundtrip_and_expiry(self):
         # The raw answer text is cached alongside the html for typewriter replay.
         cache_answer("id1", {"a": "1"}, "<p>hi</p>", ttl=60, text="hi")
-        assert get_cached_answer("id1", {"a": "1"}) == ("<p>hi</p>", "hi")
+        assert get_cached_answer("id1", {"a": "1"}) == ("<p>hi</p>", "hi", [])
         assert get_cached_answer("id1", {"a": "2"}) is None
         cache_answer("id2", {}, "<p>old</p>", ttl=-1)  # already expired
         assert get_cached_answer("id2", {}) is None
+
+    def test_roundtrip_carries_annotations(self):
+        # Chart annotations ride the same entry, so a cache hit ships the same
+        # marks the fresh answer did.
+        marks = [{"id": "a1", "type": "extremum", "kind": "max", "label": "Peak"}]
+        cache_answer("id3", {}, "<p>hi</p>", ttl=60, text="hi", annotations=marks)
+        assert get_cached_answer("id3", {}) == ("<p>hi</p>", "hi", marks)
 
 
 # --------------------------------------------------------------------------- #
@@ -1578,3 +1608,675 @@ class TestStaticBuild:
         payload = json.loads(snapshot.read_text(encoding="utf-8"))
         assert "error" not in payload
         assert "AI commentary is not available" in payload["notice"]
+
+
+# --------------------------------------------------------------------------- #
+# Chart annotations (chart_annotations.py) — validation, the restraint layer
+# --------------------------------------------------------------------------- #
+_LINE_CTX = ChartContext(chart_type="line", x="month", y="revenue")
+_LINE_RESULT = QueryResult(
+    columns=["month", "revenue"],
+    rows=[
+        ["Jan", 100], ["Feb", 120], ["Mar", 90],
+        ["Apr", 160], ["May", 140], ["Jun", 200],
+    ],
+)
+
+_BAR_CTX = ChartContext(chart_type="bar", x="region", y="total")
+_BAR_RESULT = QueryResult(
+    columns=["region", "total"],
+    rows=[["North", 100], ["South", 200], ["West", 50]],
+)
+
+_SPLIT_CTX = ChartContext(
+    chart_type="line", x="month", y="revenue", series_by="region"
+)
+_SPLIT_RESULT = QueryResult(
+    columns=["month", "revenue", "region"],
+    rows=[
+        ["Jan", 100, "East"], ["Jan", 80, "West"],
+        ["Feb", 120, "East"], ["Feb", 90, "West"],
+    ],
+)
+
+
+class TestChartAnnotationValidation:
+    def test_axis_line_y_within_domain_survives(self):
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 135, "label": "Average"}],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["id"] == "a1"
+        assert out[0]["type"] == "axis_line"
+        assert out[0]["axis"] == "y"
+        assert out[0]["value"] == 135.0
+        assert out[0]["label"] == "Average"
+
+    def test_axis_line_slightly_above_max_survives(self):
+        # A target/threshold line a bit past the observed max is legitimate —
+        # the tolerance pad exists exactly for this.
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 210, "label": "Target"}],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out) == 1
+
+    def test_axis_line_far_out_of_domain_dropped(self):
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "y", "value": 99999, "label": "Bogus"}],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert out == []
+
+    def test_axis_line_x_category_must_exist(self):
+        good, bad = (
+            {"type": "axis_line", "axis": "x", "value": "Apr", "label": "Launch"},
+            {"type": "axis_line", "axis": "x", "value": "Sept", "label": "Ghost"},
+        )
+        out = validate_annotations([good, bad], _LINE_RESULT, _LINE_CTX)
+        assert [a["value"] for a in out] == ["Apr"]
+
+    def test_type_not_in_chart_vocab_dropped(self):
+        # `item` belongs to bar (and later pie/funnel) — not line.
+        out = validate_annotations(
+            [{"type": "item", "x": "Jan", "label": "January"}], _LINE_RESULT, _LINE_CTX
+        )
+        assert out == []
+        # `point` isn't in the bar vocabulary.
+        out = validate_annotations(
+            [{"type": "point", "x": "North", "y": 100}], _BAR_RESULT, _BAR_CTX
+        )
+        assert out == []
+
+    def test_unknown_type_and_non_dict_candidates_dropped(self):
+        out = validate_annotations(
+            [{"type": "banana", "label": "?"}, "not a dict", 42],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert out == []
+
+    def test_unknown_fields_are_stripped(self):
+        out = validate_annotations(
+            [
+                {
+                    "type": "axis_line",
+                    "axis": "y",
+                    "value": 135,
+                    "label": "Avg",
+                    "color": "red",       # not ours to take
+                    "onclick": "alert(1)",  # definitely not
+                }
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert set(out[0]) == {"id", "type", "label", "axis", "value", "_ref"}
+
+    def test_extremum_keeps_intent_only(self):
+        # The model only saw a truncated payload — its coordinates are never
+        # trusted. Only kind (+ series) survive; ECharts recomputes client-side.
+        out = validate_annotations(
+            [{"type": "extremum", "kind": "max", "x": "Feb", "y": 5, "label": "Peak"}],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["kind"] == "max"
+        assert "x" not in out[0] and "y" not in out[0]
+
+    def test_extremum_bogus_kind_dropped(self):
+        out = validate_annotations(
+            [{"type": "extremum", "kind": "biggest"}], _LINE_RESULT, _LINE_CTX
+        )
+        assert out == []
+
+    def test_series_must_name_a_real_series(self):
+        # Split-column value and metric column name are both addressable…
+        out = validate_annotations(
+            [
+                {"type": "extremum", "kind": "max", "series": "East"},
+                {"type": "extremum", "kind": "min", "series": "revenue"},
+                {"type": "extremum", "kind": "max", "series": "Atlantis"},
+            ],
+            _SPLIT_RESULT,
+            _SPLIT_CTX,
+        )
+        assert [a.get("series") for a in out] == ["East", "revenue"]
+
+    def test_range_orders_and_bounds_values(self):
+        out = validate_annotations(
+            [
+                {"type": "range", "axis": "y", "from": 160, "to": 90, "label": "Band"},
+                {"type": "range", "axis": "y", "from": 0, "to": 99999},
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["from"] == 90.0 and out[0]["to"] == 160.0
+
+    def test_range_x_categories(self):
+        out = validate_annotations(
+            [{"type": "range", "axis": "x", "from": "Feb", "to": "Apr", "label": "Q1"}],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["from"] == "Feb" and out[0]["to"] == "Apr"
+
+    def test_point_on_category_chart(self):
+        good = {"type": "point", "x": "Jun", "y": 200, "label": "High"}
+        bad_x = {"type": "point", "x": "Never", "y": 200}
+        bad_y = {"type": "point", "x": "Jun", "y": -9999}
+        out = validate_annotations([good, bad_x, bad_y], _LINE_RESULT, _LINE_CTX)
+        assert len(out) == 1
+        assert out[0]["x"] == "Jun" and out[0]["y"] == 200.0
+
+    def test_scatter_x_is_numeric(self):
+        ctx = ChartContext(chart_type="scatter", x="spend", y="revenue")
+        result = QueryResult(
+            columns=["spend", "revenue"], rows=[[10, 100], [20, 150], [30, 90]]
+        )
+        out = validate_annotations(
+            [
+                {"type": "point", "x": 20, "y": 150, "label": "Mid"},
+                {"type": "point", "x": 900, "y": 150, "label": "Far off"},
+                {"type": "axis_line", "axis": "x", "value": 25, "label": "Budget"},
+            ],
+            result,
+            ctx,
+        )
+        assert [a["type"] for a in out] == ["point", "axis_line"]
+        assert out[1]["value"] == 25.0
+
+    def test_cap_and_sequential_ids(self):
+        candidates = [
+            {"type": "axis_line", "axis": "y", "value": v, "label": f"L{v}"}
+            for v in (100, 120, 140, 160, 180)
+        ]
+        out = validate_annotations(candidates, _LINE_RESULT, _LINE_CTX)
+        assert len(out) == MAX_ANNOTATIONS
+        assert [a["id"] for a in out] == ["a1", "a2", "a3"]
+
+    def test_renumber_keeps_model_side_ref(self):
+        # Candidate #2 dies; survivors renumber a1..a2 but remember the model's
+        # numbering ([a1], [a3] in the text) via the private _ref key.
+        out = validate_annotations(
+            [
+                {"type": "extremum", "kind": "max", "label": "Peak"},
+                {"type": "item", "x": "Jan"},  # wrong vocab for line → dropped
+                {"type": "axis_line", "axis": "y", "value": 135, "label": "Avg"},
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert [(a["id"], a["_ref"]) for a in out] == [("a1", "a1"), ("a2", "a3")]
+
+    def test_no_numeric_domain_fails_closed(self):
+        result = QueryResult(columns=["month", "revenue"], rows=[["Jan", None]])
+        out = validate_annotations(
+            [
+                {"type": "axis_line", "axis": "y", "value": 10},
+                {"type": "extremum", "kind": "max"},
+            ],
+            result,
+            _LINE_CTX,
+        )
+        assert out == []
+
+    def test_label_coerced_and_capped(self):
+        out = validate_annotations(
+            [
+                {"type": "extremum", "kind": "max", "label": "x" * 500},
+                {"type": "extremum", "kind": "min", "label": {"not": "a str"}},
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        assert len(out[0]["label"]) == 80
+        assert out[1]["label"] == ""
+
+    def test_non_list_candidates_and_no_vocab(self):
+        assert validate_annotations("nope", _LINE_RESULT, _LINE_CTX) == []
+        pie_ctx = ChartContext(chart_type="pie", x="region", y="total")
+        assert (
+            validate_annotations(
+                [{"type": "item", "x": "North"}], _BAR_RESULT, pie_ctx
+            )
+            == []
+        )
+
+    def test_date_categories_match_prompt_normalization(self):
+        # Cells render into the prompt via isoformat; a candidate quoting that
+        # rendering must validate against the raw date-typed column.
+        result = QueryResult(
+            columns=["day", "revenue"],
+            rows=[[date(2026, 7, 1), 10], [date(2026, 7, 2), 30]],
+        )
+        ctx = ChartContext(chart_type="line", x="day", y="revenue")
+        out = validate_annotations(
+            [{"type": "axis_line", "axis": "x", "value": "2026-07-02"}], result, ctx
+        )
+        assert len(out) == 1
+        assert out[0]["value"] == "2026-07-02"
+
+
+# --------------------------------------------------------------------------- #
+# Annotated answer parsing: fence split, ref chips, replay-text stripping
+# --------------------------------------------------------------------------- #
+_ANNOTATED_REPLY = (
+    "Revenue peaked in June [a1]. It dipped in March [a2].\n"
+    "\n"
+    "```annotations\n"
+    '[{"type": "extremum", "kind": "max", "label": "June peak"},\n'
+    ' {"type": "point", "x": "Mar", "y": 90, "label": "March dip"}]\n'
+    "```"
+)
+
+
+class TestAnnotatedAnswerParsing:
+    def test_split_strips_fence_and_parses_candidates(self):
+        commentary, candidates = split_annotated_answer(_ANNOTATED_REPLY)
+        assert "```" not in commentary
+        assert "annotations" not in commentary
+        assert commentary.startswith("Revenue peaked in June [a1].")
+        assert [c["type"] for c in candidates] == ["extremum", "point"]
+
+    def test_missing_fence_is_commentary_only(self):
+        commentary, candidates = split_annotated_answer("Just prose, no marks.")
+        assert commentary == "Just prose, no marks."
+        assert candidates == []
+
+    def test_garbled_json_fence_still_stripped(self):
+        raw = "Prose first.\n\n```annotations\n[{not json%%\n```"
+        commentary, candidates = split_annotated_answer(raw)
+        assert commentary == "Prose first."
+        assert candidates == []
+
+    def test_non_array_json_ignored(self):
+        raw = 'Prose.\n\n```annotations\n{"type": "extremum"}\n```'
+        commentary, candidates = split_annotated_answer(raw)
+        assert commentary == "Prose."
+        assert candidates == []
+
+    def test_multiple_fences_all_stripped_last_wins(self):
+        raw = (
+            "A.\n\n```annotations\n[{\"type\": \"item\", \"x\": \"old\"}]\n```\n"
+            "B.\n\n```annotations\n[{\"type\": \"extremum\", \"kind\": \"max\"}]\n```"
+        )
+        commentary, candidates = split_annotated_answer(raw)
+        assert "```" not in commentary
+        assert "A." in commentary and "B." in commentary
+        assert [c["type"] for c in candidates] == ["extremum"]
+
+    def test_ordinary_code_fences_survive(self):
+        raw = "Look:\n\n```sql\nSELECT 1\n```\n\nDone [a1].\n\n```annotations\n[]\n```"
+        commentary, candidates = split_annotated_answer(raw)
+        assert "```sql\nSELECT 1\n```" in commentary
+        assert candidates == []
+
+    def test_strip_ref_tokens_tidies_replay_text(self):
+        text = strip_ref_tokens("Revenue peaked in June [a1]. Dip [a2] happened.")
+        assert text == "Revenue peaked in June. Dip happened."
+
+    def test_inject_refs_replaces_surviving_and_strips_orphans(self):
+        annotations = validate_annotations(
+            [
+                {"type": "extremum", "kind": "max", "label": "June peak"},
+                {"type": "item", "x": "nope"},  # dies (wrong vocab for line)
+                {"type": "axis_line", "axis": "y", "value": 135, "label": "Avg"},
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        html = "<p>Peak [a1]. Ghost [a2]. Average [a3].</p>"
+        out = inject_refs(html, annotations)
+        assert '<abbr class="dashdown-anno-ref" data-anno-id="a1"' in out
+        # The third model-side ref maps onto the renumbered second survivor.
+        assert 'data-anno-id="a2"' in out
+        assert "[a2]" not in out and "Ghost." in out  # orphan stripped, tidied
+        assert ">1</abbr>" in out and ">2</abbr>" in out
+        assert 'title="June peak"' in out and 'title="Avg"' in out
+        # The private _ref key was consumed — the shipped payload is clean.
+        assert all("_ref" not in a for a in annotations)
+
+    def test_inject_refs_escapes_labels(self):
+        # A hostile label can't break out of the title attribute — the model's
+        # text never becomes markup.
+        annotations = validate_annotations(
+            [
+                {
+                    "type": "extremum",
+                    "kind": "max",
+                    "label": '"><script>alert(1)</script>',
+                }
+            ],
+            _LINE_RESULT,
+            _LINE_CTX,
+        )
+        out = inject_refs("<p>Peak [a1].</p>", annotations)
+        assert "<script>" not in out
+        assert "&quot;&gt;&lt;script&gt;" in out
+
+    def test_generate_answer_end_to_end_with_chart_context(self):
+        fake = FakeAdapter(reply=_ANNOTATED_REPLY)
+        ask = AskDef(
+            id="x",
+            queries=(("q", "main"),),
+            prompt="Explain this chart.",
+            chart_context=_LINE_CTX,
+        )
+        html, text, annotations = generate_answer(ask, [_LINE_RESULT], fake)
+        # Annotations validated + renumbered; fence and tokens gone everywhere.
+        assert [a["id"] for a in annotations] == ["a1", "a2"]
+        assert annotations[0]["kind"] == "max"
+        assert annotations[1]["x"] == "Mar"
+        assert "```" not in html and "```" not in text
+        assert "dashdown-anno-ref" in html
+        assert "[a1]" not in text and "[a1]" not in html
+        assert text.startswith("Revenue peaked in June.")
+        # The prompt taught the protocol, grounded in the actual domains.
+        _, prompt = fake.calls[0]
+        assert "```annotations" in prompt
+        assert "X categories: Jan, Feb, Mar, Apr, May, Jun" in prompt
+        assert "Y values range from 90 to 200" in prompt
+
+    def test_generate_answer_without_fence_degrades_to_commentary(self):
+        fake = FakeAdapter(reply="Nothing remarkable here.")
+        ask = AskDef(
+            id="x",
+            queries=(("q", "main"),),
+            prompt="Explain.",
+            chart_context=_LINE_CTX,
+        )
+        html, text, annotations = generate_answer(ask, [_LINE_RESULT], fake)
+        assert annotations == []
+        assert "Nothing remarkable here." in html
+        assert text == "Nothing remarkable here."
+
+
+class TestAnnotationInstructions:
+    def test_lists_only_the_charts_vocabulary(self):
+        text = annotation_instructions(_BAR_CTX, _BAR_RESULT)
+        assert '"type": "item"' in text  # bar has item…
+        assert '"type": "point"' not in text  # …but not point
+        assert "at most 3 annotations" in text
+        assert "empty list is the right answer" in text
+        assert "X categories: North, South, West" in text
+        assert "Y values range from 50 to 200" in text
+
+    def test_series_names_listed_when_split(self):
+        text = annotation_instructions(_SPLIT_CTX, _SPLIT_RESULT)
+        assert "Series names: East, West, revenue" in text
+
+    def test_scatter_gets_numeric_x_domain(self):
+        ctx = ChartContext(chart_type="scatter", x="spend", y="revenue")
+        result = QueryResult(
+            columns=["spend", "revenue"], rows=[[10, 100], [30, 90]]
+        )
+        text = annotation_instructions(ctx, result)
+        assert "X values range from 10 to 30" in text
+        assert "X categories" not in text
+
+
+# --------------------------------------------------------------------------- #
+# chart_context in the ask registry — id compat and cache busting
+# --------------------------------------------------------------------------- #
+class TestChartContextAskIds:
+    def test_plain_ask_id_byte_compat(self):
+        # Golden value: the exact pre-chart_context hash for this input. Plain
+        # asks must keep byte-identical ids across the feature landing, or
+        # every existing answer cache / baked snapshot would silently bust.
+        assert ask_id([("sales", "main")], "What changed?") == "86260ea3e831e26a"
+        assert (
+            ask_id([("sales", "main")], "What changed?", chart_context=None)
+            == "86260ea3e831e26a"
+        )
+
+    def test_chart_context_joins_hash_only_when_set(self):
+        base = ask_id([("sales", "main")], "Explain.")
+        ctx = ChartContext(chart_type="bar", x="region", y="total")
+        assert ask_id([("sales", "main")], "Explain.", chart_context=ctx) != base
+        # Deterministic: the same shape hashes the same…
+        assert ask_id(
+            [("sales", "main")], "Explain.", chart_context=ctx
+        ) == ask_id(
+            [("sales", "main")],
+            "Explain.",
+            chart_context=ChartContext(chart_type="bar", x="region", y="total"),
+        )
+        # …and a reshaped chart must mint a fresh id (busts its explain cache).
+        assert ask_id(
+            [("sales", "main")],
+            "Explain.",
+            chart_context=ChartContext(chart_type="bar", x="region", y="profit"),
+        ) != ask_id([("sales", "main")], "Explain.", chart_context=ctx)
+
+    def test_register_threads_chart_context(self):
+        ctx = ChartContext(chart_type="line", x="month", y="revenue")
+        d = register_ask_def([("q", "main")], "Explain.", chart_context=ctx)
+        assert d.chart_context == ctx
+        assert get_ask_def(d.id).chart_context == ctx
+
+    def test_build_chart_context_only_for_vocabulary_types(self):
+        assert build_chart_context("pie", x="region", y="total") is None
+        assert build_chart_context("gauge") is None
+        ctx = build_chart_context("bar", x="region", y="total", horizontal=True)
+        assert ctx == ChartContext(
+            chart_type="bar", x="region", y="total", horizontal=True
+        )
+        # Every vocabulary type builds a context (the two tables stay in sync).
+        for chart_type in ANNOTATION_VOCAB:
+            assert build_chart_context(chart_type, x="x", y="y") is not None
+
+
+# --------------------------------------------------------------------------- #
+# chart_context threading from the chart components
+# --------------------------------------------------------------------------- #
+class TestChartExplainContext:
+    def test_bar_explain_carries_context_and_bigger_row_cap(self):
+        ask = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        assert ask.chart_context == ChartContext(
+            chart_type="bar", x="region", y="total"
+        )
+        # Annotation-bearing asks see more rows (validation runs on the full
+        # result; the model shouldn't ground candidates in a truncated view).
+        assert ask.max_rows == DEFAULT_EXPLAIN_MAX_ROWS
+
+    def test_max_rows_attr_overrides(self):
+        source = EXPLAIN_PAGE.replace(" explain", " explain max_rows=25")
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.max_rows == 25
+
+    def test_shape_flags_thread_and_bust_the_id(self):
+        base = render_page(EXPLAIN_PAGE, connectors={}).ask_defs[0]
+        source = EXPLAIN_PAGE.replace(" explain", " horizontal explain")
+        flipped = render_page(source, connectors={}).ask_defs[0]
+        assert flipped.chart_context.horizontal is True
+        assert flipped.id != base.id  # reshaped chart ⇒ fresh answer
+
+    def test_series_split_threads(self):
+        source = EXPLAIN_PAGE.replace(" explain", ' series="channel" explain')
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context.series_by == "channel"
+
+    def test_unvocabularied_chart_stays_commentary_only(self):
+        source = EXPLAIN_PAGE.replace("<BarChart", "<PieChart")
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context is None
+        # …and keeps the plain-<Ask /> row cap (its id must not move).
+        assert ask.max_rows == DEFAULT_MAX_ROWS
+
+    def test_live_query_chart_is_commentary_only(self):
+        # Decided: a chart on a `live` query gets no chart_context — the data
+        # changes under the marks every poll interval.
+        source = EXPLAIN_PAGE.replace(
+            ":::query name=by_region connector=main",
+            ":::query name=by_region connector=main live",
+        )
+        ask = render_page(source, connectors={}).ask_defs[0]
+        assert ask.chart_context is None
+        assert ask.max_rows == DEFAULT_MAX_ROWS
+
+    def test_combo_context_carries_the_series_mix(self):
+        source = """# T
+
+:::query name=q connector=main
+SELECT month, revenue, orders FROM t
+:::
+
+<ComboChart data={q} x="month" bars="revenue" lines="orders" right_axis="orders" explain />
+"""
+        ask = render_page(source, connectors={}).ask_defs[0]
+        ctx = ask.chart_context
+        assert ctx.chart_type == "combo"
+        assert ctx.x == "month"
+        assert ctx.y == "revenue,orders"
+        assert dict(ctx.extra) == {
+            "bars": "revenue",
+            "lines": "orders",
+            "right_axis": "orders",
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Endpoint behavior for annotation-bearing (chart-context) asks
+# --------------------------------------------------------------------------- #
+EXPLAIN_CHART_PAGE = """# Sales
+
+:::query name=by_region connector=main
+SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY total DESC
+:::
+
+<BarChart data={by_region} x="region" y="total" title="Revenue by region" explain />
+"""
+
+# Two grounded candidates + one hallucinated value the validator must kill.
+_EXPLAIN_REPLY = (
+    "South leads [a1]. North holds second [a2]. Impossible claim [a3].\n"
+    "\n"
+    "```annotations\n"
+    '[{"type": "extremum", "kind": "max", "label": "South peak"},\n'
+    ' {"type": "item", "x": "North", "label": "North bar"},\n'
+    ' {"type": "axis_line", "axis": "y", "value": 999999, "label": "Bogus"}]\n'
+    "```"
+)
+
+
+def _explain_client(tmp_path, fake):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _make_project(proj)
+    (proj / "pages" / "index.md").write_text(EXPLAIN_CHART_PAGE, encoding="utf-8")
+    app = create_app(proj)
+    app.state.project.llm_adapter = fake
+    client = TestClient(app)
+    assert client.get("/").status_code == 200
+    asks = [a for a in _ask_def_cache.values() if a.chart_context is not None]
+    assert len(asks) == 1
+    return client, fake, asks[0]
+
+
+class TestAnnotatedAskEndpoint:
+    def test_stream_param_ignored_returns_json_with_annotations(self, tmp_path):
+        client, fake, ask = _explain_client(tmp_path, FakeAdapter(reply=_EXPLAIN_REPLY))
+        # ask.js always sends _stream=1 — a chart-context ask must answer with
+        # the JSON payload anyway (SSE would type the fence out to the viewer).
+        r = client.get(f"/_dashdown/api/ask/{ask.id}?_stream=1")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/json")
+        body = r.json()
+        assert body["cached"] is False
+        # The hallucinated axis_line died; survivors renumbered a1..a2.
+        assert [a["id"] for a in body["annotations"]] == ["a1", "a2"]
+        assert body["annotations"][0]["type"] == "extremum"
+        assert body["annotations"][1] == {
+            "id": "a2", "type": "item", "label": "North bar", "x": "North",
+        }
+        # Chips in the html; orphan ref stripped; fence gone everywhere.
+        assert 'data-anno-id="a1"' in body["html"]
+        assert 'data-anno-id="a2"' in body["html"]
+        assert "[a3]" not in body["html"] and "```" not in body["html"]
+        # Replay text ships clean (typewriter shows plain text, chips can't).
+        assert body["text"].startswith("South leads. North holds second.")
+        assert "```" not in body["text"]
+
+    def test_cache_hit_replays_annotations(self, tmp_path):
+        client, fake, ask = _explain_client(tmp_path, FakeAdapter(reply=_EXPLAIN_REPLY))
+        first = client.get(f"/_dashdown/api/ask/{ask.id}").json()
+        second = client.get(f"/_dashdown/api/ask/{ask.id}").json()
+        assert second["cached"] is True
+        assert second["annotations"] == first["annotations"]
+        assert len(fake.calls) == 1
+
+    def test_prompt_carries_annotation_protocol_and_domains(self, tmp_path):
+        client, fake, ask = _explain_client(tmp_path, FakeAdapter(reply=_EXPLAIN_REPLY))
+        client.get(f"/_dashdown/api/ask/{ask.id}")
+        _, prompt = fake.calls[0]
+        assert "```annotations" in prompt
+        assert "X categories: South, North, West" in prompt  # ORDER BY total DESC
+        assert "Y values range from 50 to 200" in prompt
+
+    def test_plain_ask_stream_untouched(self, tmp_path):
+        # The SSE path stays exactly as-is for commentary-only asks.
+        client, fake = _client_with_fake(tmp_path, fake=StreamingFakeAdapter())
+        r = client.get(f"/_dashdown/api/ask/{THE_ASK_ID}?_stream=1")
+        assert r.headers["content-type"].startswith("text/event-stream")
+
+
+class TestAnnotatedStaticBake:
+    def test_build_bakes_annotated_explain_snapshot(self, tmp_path):
+        # The requested static parity, end to end: a chart with `explain` in a
+        # static export renders its button + panel, and the baked
+        # _ask/{id}.json carries the sanitized html (ref chips included), the
+        # replayable text, AND the validated annotations — everything ask.js's
+        # static branch needs on first click.
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_project(proj)
+        (proj / "pages" / "index.md").write_text(EXPLAIN_CHART_PAGE, encoding="utf-8")
+        project = load_project(proj)
+        project.llm_adapter = FakeAdapter(reply=_EXPLAIN_REPLY)
+        try:
+            result = _build(project, tmp_path / "dist")
+        finally:
+            project.close()
+
+        assert result.failed_asks == []
+        assert len(result.asks) == 1
+        page = (tmp_path / "dist" / "index.html").read_text(encoding="utf-8")
+        assert "dashdown-explain-btn" in page
+        assert "dashdown-explain-panel" in page
+
+        snapshot = (
+            tmp_path / "dist" / "_dashdown" / "data" / "_ask" / f"{result.asks[0]}.json"
+        )
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        # The hallucinated candidate died at build time too; survivors ship
+        # renumbered — identical validation to the live endpoint.
+        assert [a["id"] for a in payload["annotations"]] == ["a1", "a2"]
+        assert payload["annotations"][0]["kind"] == "max"
+        assert 'data-anno-id="a1"' in payload["html"]
+        assert "```" not in payload["html"] and "```" not in payload["text"]
+        assert "[a3]" not in payload["html"]
+        assert payload["text"].startswith("South leads. North holds second.")
+
+    def test_bake_payload_shape_matches_endpoint(self):
+        # _export_ask writes what generate_answer returns; lock the shape.
+        html, text, annotations = generate_answer(
+            AskDef(
+                id="x",
+                queries=(("q", "main"),),
+                prompt="Explain.",
+                chart_context=_BAR_CTX,
+            ),
+            [_BAR_RESULT],
+            FakeAdapter(reply=_EXPLAIN_REPLY),
+        )
+        assert [a["id"] for a in annotations] == ["a1", "a2"]
+        assert "dashdown-anno-ref" in html

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dashdown.chart_annotations import ChartContext, build_chart_context
 from dashdown.components.base import Component, RenderContext, register_component
 from dashdown.components.builtin._util import (
     attr_bool,
@@ -17,7 +18,12 @@ from dashdown.components.builtin._util import (
     safe_json,
 )
 from dashdown.components.builtin.ask import ask_surface_inner
-from dashdown.llm import DEFAULT_ANSWER_TTL, register_ask_def
+from dashdown.llm import (
+    DEFAULT_ANSWER_TTL,
+    DEFAULT_EXPLAIN_MAX_ROWS,
+    DEFAULT_MAX_ROWS,
+    register_ask_def,
+)
 from dashdown.render.attrs import DataRef
 
 
@@ -98,9 +104,22 @@ def _chart_placeholder(
     height = attr_int(attrs, "height", 300) or 300
     span = grid_span_style(attrs)
 
+    # The resolved shape snapshot the `explain` affordance pins to its AskDef —
+    # None for chart types without an annotation vocabulary (their explain
+    # stays commentary-only with an unchanged ask id).
+    chart_context = build_chart_context(
+        chart_type,
+        x=x,
+        y=y,
+        series_by=series_by,
+        horizontal=bool(config.get("horizontal")),
+        stacked=bool(config.get("stacked")),
+    )
+
     return _chart_card(
         attrs, ctx, chart_type=chart_type, cid=cid, name=name,
         config_json=config_json, height=height, span=span,
+        chart_context=chart_context,
     )
 
 
@@ -114,6 +133,7 @@ def _chart_card(
     config_json: str,
     height: int,
     span: str,
+    chart_context: ChartContext | None = None,
 ) -> str:
     """The bordered async-chart card shell — no shadow, p-4 skeleton body,
     matching the mockups' card style. Shared by :func:`_chart_placeholder` and
@@ -132,10 +152,14 @@ def _chart_card(
     # AskDef with a canned prompt (or the author's, via `explain="…"`) registers
     # at render time, so the opaque-id model is untouched — viewers still can't
     # send prompts. The footer is a regular ask surface that ask.js initializes
-    # only on first open, so an idle chart costs nothing. Skipped in static
-    # builds (nothing joins ctx.ask_defs, so nothing is baked) — same posture as
-    # the ↻ refresh button: on-demand generation needs a live server.
-    explain_html = _explain_affordance(chart_type, attrs, ctx, cid=cid, name=name)
+    # only on first open, so an idle chart costs nothing. Works in static
+    # builds too: the AskDef joins ctx.ask_defs, `_export_ask` bakes the
+    # answer (+ annotations) per id, and ask.js's static branch fetches that
+    # JSON on first open — click → retrieve → show, same as serve mode. Only
+    # the ↻ refresh affordance stays live-server-only (a snapshot is fixed).
+    explain_html = _explain_affordance(
+        chart_type, attrs, ctx, cid=cid, name=name, chart_context=chart_context
+    )
     if explain_html:
         # The fixed height moves onto an inner region so the card itself can
         # grow when the commentary footer opens; the plot keeps its exact size.
@@ -172,9 +196,10 @@ def _explain_affordance(
     *,
     cid: str,
     name: str,
+    chart_context: ChartContext | None = None,
 ) -> str:
     """The ✨ button + hidden commentary footer for a chart with `explain`,
-    or "" when the attr is unset / this is a static build.
+    or "" when the attr is unset.
 
     Registers the AskDef (deterministic id — same chart, same id across
     renders) and records it on ``ctx.ask_defs`` so an embed token signed for
@@ -184,12 +209,33 @@ def _explain_affordance(
     controls how long the answer stays cached, same spelling and default as
     on <Ask /> (and, like there, it only affects expiry — it stays out of the
     id hash, so tuning it never busts existing answers).
+
+    ``chart_context`` (the resolved shape, from the placeholder builders) asks
+    the model for visual chart annotations too (chart_annotations.py). It's
+    dropped for `live` queries — the data changes under the marks every poll
+    interval, so those asks stay commentary-only — and is None already for
+    chart types without an annotation vocabulary.
     """
     explain_val = attrs.get("explain")
-    if not explain_val or ctx.static_build:
+    if not explain_val:
         return ""
 
+    if name in ctx.live_queries:
+        chart_context = None
+
     cache_ttl = max(0, attr_int(attrs, "cache_ttl", DEFAULT_ANSWER_TTL))
+    # Annotation-bearing asks default to a larger data payload: candidates are
+    # validated against the full result, and a model grounded in a truncated
+    # view proposes marks that fail. Commentary-only explains keep the <Ask />
+    # default (and their pre-annotation ask ids). `max_rows=` overrides either.
+    max_rows = max(
+        1,
+        attr_int(
+            attrs,
+            "max_rows",
+            DEFAULT_EXPLAIN_MAX_ROWS if chart_context is not None else DEFAULT_MAX_ROWS,
+        ),
+    )
 
     if isinstance(explain_val, str):
         prompt = explain_val
@@ -217,9 +263,11 @@ def _explain_affordance(
     ask = register_ask_def(
         ((name, connector),),
         prompt,
+        max_rows=max_rows,
         cache_ttl=cache_ttl,
         page_title=ctx.page_title,
         page_description=ctx.page_description,
+        chart_context=chart_context,
     )
     ctx.ask_defs.append(ask)
 

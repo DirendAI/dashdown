@@ -625,7 +625,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         then one `done` event carries the server-rendered sanitized HTML —
         exactly the JSON payload's `html` — which is also what gets cached.
         A cache hit returns the single JSON payload instantly regardless, so
-        streaming only ever happens on a cache miss.
+        streaming only ever happens on a cache miss. Chart-context asks
+        (annotation-bearing chart explains) ignore `_stream=1` entirely — see
+        the inline comment at the streaming branch.
         """
         from fastapi import HTTPException
         from fastapi.responses import JSONResponse
@@ -720,7 +722,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         if not wants_refresh:
             cached = get_cached_answer(ask_id, cache_params)
             if cached is not None:
-                cached_html, cached_text = cached
+                cached_html, cached_text, cached_annotations = cached
                 # `text` is the raw answer the stream originally delivered —
                 # ask.js replays it as a typewriter (per its replay policy)
                 # before swapping in the sanitized html, so a cache hit can
@@ -730,6 +732,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                         "ask_id": ask_id,
                         "html": cached_html,
                         "text": cached_text,
+                        "annotations": cached_annotations,
                         "cached": True,
                         "model": model,
                     }
@@ -757,7 +760,12 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # Missing optional extra — surface the install hint.
             raise HTTPException(status_code=503, detail=str(e))
 
-        if request.query_params.get("_stream") == "1":
+        # Annotation-bearing (chart-context) asks never stream: the completion
+        # ends in a fenced JSON block that raw SSE chunks would type out to the
+        # viewer. They return the JSON payload below — its `text` (fence and
+        # ref tokens stripped) feeds the existing typewriter replay, so the
+        # "answer types in" feel survives. Plain <Ask /> streaming is untouched.
+        if request.query_params.get("_stream") == "1" and ask.chart_context is None:
             def _sse(event: str, data: dict) -> str:
                 return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -795,19 +803,24 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             )
 
         try:
-            answer_html, answer_text = generate_answer(ask, results, adapter, cache_params)
+            answer_html, answer_text, annotations = generate_answer(
+                ask, results, adapter, cache_params
+            )
         except Exception as e:
             log.exception("LLM request failed for ask %s", ask_id)
             raise HTTPException(
                 status_code=502, detail=f"LLM request failed: {type(e).__name__}: {e}"
             )
 
-        cache_answer(ask_id, cache_params, answer_html, ask.cache_ttl, answer_text)
+        cache_answer(
+            ask_id, cache_params, answer_html, ask.cache_ttl, answer_text, annotations
+        )
         return JSONResponse(
             {
                 "ask_id": ask_id,
                 "html": answer_html,
                 "text": answer_text,
+                "annotations": annotations,
                 "cached": False,
                 "model": model,
             }
