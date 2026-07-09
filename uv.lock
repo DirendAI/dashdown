@@ -655,6 +655,9 @@ mssql = [
 mysql = [
     { name = "pymysql" },
 ]
+ollama = [
+    { name = "openai" },
+]
 openai = [
     { name = "openai" },
 ]
@@ -705,6 +708,7 @@ requires-dist = [
     { name = "mdit-py-plugins", specifier = ">=0.4" },
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=1.0" },
     { name = "msal", marker = "extra == 'dax'", specifier = ">=1.37.0" },
+    { name = "openai", marker = "extra == 'ollama'", specifier = ">=1.40" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.40" },
     { name = "openai", marker = "extra == 'openrouter'", specifier = ">=1.40" },
     { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1" },
@@ -726,7 +730,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
     { name = "watchfiles", specifier = ">=0.21" },
 ]
-provides-extras = ["dax", "postgres", "mysql", "mssql", "snowflake", "bigquery", "clickhouse", "excel", "sheets", "mistral", "anthropic", "openai", "openrouter", "pdf", "python", "semantic", "cube"]
+provides-extras = ["dax", "postgres", "mysql", "mssql", "snowflake", "bigquery", "clickhouse", "excel", "sheets", "mistral", "anthropic", "openai", "openrouter", "ollama", "pdf", "python", "semantic", "cube"]
 
 [package.metadata.requires-dev]
 dev = [

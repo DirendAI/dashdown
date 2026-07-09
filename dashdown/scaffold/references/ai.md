@@ -14,7 +14,8 @@ Most dashboards stop at the chart. [`<Ask />`](/ai/ask) goes one step further: i
 sends a query's result to an LLM and renders the **natural-language read-out** right
 beside it — *"downloads are up 12% month-over-month, driven by the `pip` channel."*
 One tag turns a table into an explained insight, **cached** so repeat views don't
-re-bill, and pointed at any provider (Mistral, Claude, OpenAI, OpenRouter).
+re-bill, and pointed at any provider (Mistral, Claude, OpenAI, OpenRouter, or a
+local Ollama model — data stays on your machine).
 
 ```markdown
 <Ask data={downloads_by_month} ask="Summarize the download trend in two sentences." />
@@ -270,9 +271,10 @@ serve mode. Only the ↻ regenerate affordance needs a live server.
 
 ## Configuration
 
-Set `llm.provider` to one of `mistral`, `anthropic` (Claude), `openai`, or
-`openrouter` (OpenRouter's OpenAI-compatible gateway). Each provider's SDK is an
-optional extra — `pip install 'dashdown-md[mistral|anthropic|openai|openrouter]'`.
+Set `llm.provider` to one of `mistral`, `anthropic` (Claude), `openai`,
+`openrouter` (OpenRouter's OpenAI-compatible gateway), or `ollama` (a local
+Ollama server). Each provider's SDK is an optional extra —
+`pip install 'dashdown-md[mistral|anthropic|openai|openrouter|ollama]'`.
 
 ```yaml
 # dashdown.yaml
@@ -282,14 +284,30 @@ llm:
   model: claude-haiku-4-5          # optional (this is the anthropic default)
 ```
 
-`model` is optional for every provider except `openrouter`, which routes to many
-upstream models — name one explicitly (e.g. `model: anthropic/claude-3.5-sonnet`).
-The defaults are fast/cheap models; since each uncached request is billed, pin a
-more capable one (e.g. `claude-opus-4-8`) via `model` when quality matters more.
+`model` is optional for every provider except `openrouter` and `ollama`, which
+route to many upstream / locally-pulled models — name one explicitly (e.g.
+`model: anthropic/claude-3.5-sonnet` for openrouter, `model: llama3.1` for
+ollama). The defaults are fast/cheap models; since each uncached request is
+billed, pin a more capable one (e.g. `claude-opus-4-8`) via `model` when quality
+matters more.
 
-The block is **provider-only** (`provider` / `api_key` / `model`) — per-answer knobs
-like `max_rows` and `cache_ttl` are `<Ask>` attributes, not config. See
-[Configuration → `llm`](/configuration#llm).
+**Local models with Ollama.** `ollama` runs models on your own machine, so it
+needs **no** `api_key` and is billed only in local compute — a good fit for
+private data. Point `base_url` at a non-default host (it defaults to
+`http://localhost:11434/v1`); `base_url` also lets `openai` / `openrouter` target
+any other OpenAI-compatible gateway.
+
+```yaml
+# dashdown.yaml
+llm:
+  provider: ollama
+  model: llama3.1                  # a model you've pulled (`ollama pull llama3.1`)
+  # base_url: http://localhost:11434/v1   # optional — override for a remote host
+```
+
+The block is **provider-only** (`provider` / `api_key` / `base_url` / `model`) —
+per-answer knobs like `max_rows` and `cache_ttl` are `<Ask>` attributes, not
+config. See [Configuration → `llm`](/configuration#llm).
 
 ## Graceful degradation
 
@@ -358,10 +376,11 @@ data payload is capped to `max_rows` rows plus column types, and the model's ans
 is rendered as markdown with **raw HTML disabled**.
 
 :::note Data leaves your server
-`<Ask>` sends the (capped) query result to your chosen LLM provider. Treat it like
-any third-party data processor — don't point it at columns you can't share, or run
-an OpenAI-compatible endpoint yourself and target it with the `openai` / `openrouter`
-provider.
+`<Ask>` sends the (capped) query result to your chosen LLM provider. Treat a
+hosted provider like any third-party data processor — don't point it at columns
+you can't share. To keep data on-premises, use the `ollama` provider (models run
+locally, nothing leaves the machine) or run any OpenAI-compatible endpoint
+yourself and target it with the `openai` / `openrouter` provider + `base_url`.
 :::
 
 ## Static builds

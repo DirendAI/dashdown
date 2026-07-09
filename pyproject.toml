@@ -60,12 +60,14 @@ clickhouse = ["clickhouse-connect>=0.7"]
 excel = ["openpyxl>=3.1"]
 sheets = ["gspread>=6.0"]
 # LLM providers for the <Ask /> commentary component (`llm:` in dashdown.yaml).
-# Each provider's SDK is an extra so the core install stays lean. OpenRouter
-# is OpenAI-compatible, so it reuses the openai SDK against a different base URL.
+# Each provider's SDK is an extra so the core install stays lean. OpenRouter and
+# Ollama are OpenAI-compatible, so they reuse the openai SDK against a different
+# base URL (Ollama runs models locally — no API key, no per-call bill).
 mistral = ["mistralai>=1.0"]
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.40"]
 openrouter = ["openai>=1.40"]
+ollama = ["openai>=1.40"]
 # Presentation PDF export (`dashdown pdf`). Headless Chromium rasterizes the
 # static export's client-side ECharts; pypdf merges the per-page files into a
 # single deck (--combine). After installing, run the one-time browser download:

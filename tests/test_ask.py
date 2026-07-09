@@ -5,6 +5,7 @@ payload row cap, the /_dashdown/api/ask endpoint with a fake adapter
 (including answer caching), and static-build baking.
 """
 import json
+import sys
 from datetime import date
 
 import pytest
@@ -32,6 +33,7 @@ from dashdown.llm import (
     LLMAdapter,
     LLMConfig,
     MistralAdapter,
+    OllamaAdapter,
     OpenAIAdapter,
     OpenRouterAdapter,
     _answer_cache,
@@ -180,10 +182,42 @@ class TestParseLLMConfig:
         assert cfg.enabled is True
         assert cfg.model == "anthropic/claude-3.5-sonnet"
 
+    def test_ollama_no_api_key_required(self):
+        # Ollama runs locally and authenticates nothing, so the api_key
+        # requirement is waived (REQUIRES_API_KEY = False).
+        cfg = parse_llm_config({"provider": "ollama", "model": "llama3.1"})
+        assert cfg.enabled is True
+        assert cfg.provider == "ollama"
+        assert cfg.api_key == ""
+        assert cfg.model == "llama3.1"
+
+    def test_ollama_requires_model(self):
+        # Like OpenRouter, Ollama has no universal default model — the user
+        # must name a pulled model.
+        with pytest.raises(ValueError, match="no default model"):
+            parse_llm_config({"provider": "ollama"})
+
+    def test_ollama_base_url(self):
+        cfg = parse_llm_config(
+            {
+                "provider": "ollama",
+                "model": "llama3.1",
+                "base_url": "http://box:11434/v1",
+            }
+        )
+        assert cfg.base_url == "http://box:11434/v1"
+
+    def test_base_url_must_be_non_empty(self):
+        with pytest.raises(ValueError, match="base_url"):
+            parse_llm_config(
+                {"provider": "ollama", "model": "llama3.1", "base_url": "  "}
+            )
+
     def test_all_providers_registered(self):
         assert known_providers() == [
             "anthropic",
             "mistral",
+            "ollama",
             "openai",
             "openrouter",
         ]
@@ -361,6 +395,39 @@ class TestAdapters:
         assert OpenRouterAdapter.BASE_URL == "https://openrouter.ai/api/v1"
         assert isinstance(adapter, OpenAIAdapter)
 
+    def test_ollama_reuses_openai_path_with_local_endpoint(self):
+        adapter = OllamaAdapter(LLMConfig(provider="ollama", model="llama3.1"))
+        adapter._client = _FakeOpenAIClient()
+        adapter.complete("sys", "p")
+        assert adapter._client.create_kwargs["model"] == "llama3.1"
+        # Ollama is the OpenAI client pointed at the local daemon, no key.
+        assert OllamaAdapter.BASE_URL == "http://localhost:11434/v1"
+        assert OllamaAdapter.REQUIRES_API_KEY is False
+        assert isinstance(adapter, OpenAIAdapter)
+
+    def test_ollama_get_client_wiring(self, monkeypatch):
+        # _get_client points the OpenAI SDK at Ollama's local endpoint with a
+        # non-empty placeholder key (Ollama ignores it, but the SDK rejects an
+        # empty one). A base_url override wins over the default.
+        captured: list[dict] = []
+
+        class _FakeOpenAI:
+            def __init__(self, **kwargs):
+                captured.append(kwargs)
+
+        fake_openai = type(sys)("openai")
+        fake_openai.OpenAI = _FakeOpenAI
+        monkeypatch.setitem(sys.modules, "openai", fake_openai)
+
+        OllamaAdapter(LLMConfig(provider="ollama", model="llama3.1"))._get_client()
+        assert captured[-1]["base_url"] == "http://localhost:11434/v1"
+        assert captured[-1]["api_key"]  # non-empty placeholder for the SDK
+
+        OllamaAdapter(
+            LLMConfig(provider="ollama", model="llama3.1", base_url="http://box:9/v1")
+        )._get_client()
+        assert captured[-1]["base_url"] == "http://box:9/v1"
+
     def test_create_adapter_returns_right_class(self):
         a = create_adapter(LLMConfig(provider="anthropic", api_key="x"))
         assert isinstance(a, AnthropicAdapter)
@@ -370,6 +437,8 @@ class TestAdapters:
             LLMConfig(provider="openrouter", api_key="x", model="x/y")
         )
         assert isinstance(r, OpenRouterAdapter)
+        ol = create_adapter(LLMConfig(provider="ollama", model="llama3.1"))
+        assert isinstance(ol, OllamaAdapter)
 
     def test_base_stream_falls_back_to_complete(self):
         # An adapter without native streaming still works behind the SSE
