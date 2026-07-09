@@ -717,8 +717,8 @@ def _emit_page(
         # Desktop sidebar collapse: the static export ships the chrome and runs
         # Alpine, so the toggle works the same; localStorage persists the
         # reader's choice per-browser.
-        sidebar_collapsed=project.config.sidebar.collapsed,
-        sidebar_toggle=project.config.sidebar.toggle,
+        sidebar_collapsed=project.config.layout.sidebar.collapsed,
+        sidebar_toggle=project.config.layout.sidebar.toggle,
         # `sidebar.hidden` drops the nav outright; otherwise a single-page
         # project omits the nav + menu buttons (unless forced on).
         show_sidebar=project.show_sidebar(),

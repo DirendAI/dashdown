@@ -37,7 +37,7 @@ icon: "🏠"
 
 Readers can collapse the sidebar on desktop, a project with a single page
 hides the nav entirely, and `hidden: true` drops it outright on any project —
-tune all of it with the [`sidebar:` config block](/configuration#sidebar).
+tune all of it with the [`layout.sidebar` config block](/configuration#layout).
 
 ## Page width & header
 
@@ -56,9 +56,9 @@ theme_toggle: false   # …and drop the floating light/dark toggle too (on by de
 dashboard width, `m` is medium, and `s` is a narrow article measure — ideal for
 a text-heavy post that reads like a blog rather than a wall-to-wall dashboard.
 `header: false` removes the top bar entirely, which pairs well with a single-page
-site (the left nav is [already hidden](/configuration#sidebar) when there's
+site (the left nav is [already hidden](/configuration#layout) when there's
 nowhere to navigate) — or with a multi-page, blog-style site that sets
-[`sidebar: {hidden: true}`](/configuration#sidebar) and navigates through
+[`layout: {sidebar: {hidden: true}}`](/configuration#layout) and navigates through
 in-page links instead.
 
 Dropping the header also drops its light/dark toggle, so a small sun/moon button

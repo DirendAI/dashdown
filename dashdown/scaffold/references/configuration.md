@@ -58,15 +58,15 @@ search:                        # → Full-text search
   placeholder: "Search…"
   max_results: 8
 
-sidebar:                       # → Sidebar
-  collapsed: false             # first-visit state; reader's choice is remembered
-  toggle: true                 # show the desktop collapse button
-  show_single_page: false      # show the nav even on a one-page project
-  hidden: false                # never render the nav (blog/article-style sites)
-
 layout:                        # → Layout
   width: l                     # default content width: s | m | l
   header: true                 # show the top app header
+  theme_toggle: true           # floating light/dark toggle when the header is hidden
+  sidebar:                     # left-nav behavior
+    collapsed: false           # first-visit state; reader's choice is remembered
+    toggle: true               # show the desktop collapse button
+    show_single_page: false    # show the nav even on a one-page project
+    hidden: false              # never render the nav (blog/article-style sites)
 
 python_queries:                # → Python queries
   enabled: true
@@ -159,43 +159,23 @@ The built-in full-text search box in the header. `enabled` (default **true**),
 
 → **[Full-text search](/search)** for how the index is built and served.
 
-## `sidebar`
-
-Controls the left navigation menu. *(No separate page — this is the reference.)*
-
-```yaml
-sidebar:
-  collapsed: false         # nav shown on first visit; true → start collapsed
-  toggle: true             # show the desktop "hide sidebar" button
-  show_single_page: false  # one-page project hides the nav; true → keep it
-  hidden: false            # true → never render the nav at all
-```
-
-| Key                | Default | Purpose                                                              |
-| ------------------ | ------- | ------------------------------------------------------------------- |
-| `collapsed`        | `false` | First-visit state on desktop. Only a *seed* — once a reader toggles the sidebar, that choice is saved per browser and wins over this. |
-| `toggle`           | `true`  | Show the desktop collapse button in the header. `false` pins the sidebar to whatever `collapsed` says (no control). |
-| `show_single_page` | `false` | A project with a single navigable page has nothing to navigate to, so the nav **and** both menu buttons are hidden. Set `true` to keep the nav anyway. |
-| `hidden`           | `false` | Never render the nav or its menu buttons, however many pages exist (overrides `show_single_page`). For blog/article-style sites that navigate through in-page links — pairs well with [`layout: {width: s, header: false}`](#layout). |
-
-:::note
-`collapsed`/`toggle` are **desktop** behavior. The mobile slide-in menu (the ☰
-button) is unaffected by them; it's only removed when the nav is gone entirely
-(`hidden: true`, or a single page without `show_single_page`). Dynamic `[slug]`
-pages don't count toward the page total — they're already left out of the nav.
-:::
-
 ## `layout`
 
-Project-wide defaults for a page's content width and top header. Both are
-overridable per page via [frontmatter](/pages#page-width--header). *(No separate
-page — this is the reference.)*
+Project-wide defaults for a page's **chrome**: content width, the top app header,
+the floating theme toggle, and the left navigation. `width` / `header` /
+`theme_toggle` are overridable per page via [frontmatter](/pages#page-width--header);
+`sidebar` is project-wide. *(No separate page — this is the reference.)*
 
 ```yaml
 layout:
   width: l            # default content-column width: s | m | l
   header: true        # show the top app header (brand / search / theme toggle)
   theme_toggle: true  # keep a floating light/dark toggle when the header is hidden
+  sidebar:            # left-nav behavior (see “Side navigation” below)
+    collapsed: false
+    toggle: true
+    show_single_page: false
+    hidden: false
 ```
 
 | Key            | Default | Purpose                                                                   |
@@ -203,10 +183,29 @@ layout:
 | `width`        | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
 | `header`       | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
 | `theme_toggle` | `true`  | When the header is hidden, show a small floating sun/moon light/dark toggle (top-right) so readers of a chrome-less page keep the control. On by default; set `false` to drop it too. No effect while the header shows — its own toggle covers that. |
+| `sidebar`      | —       | Left navigation behavior — see the sub-keys below. |
 
-A page's frontmatter `width:` / `header:` overrides these defaults, so a project
-can default to full-width dashboards yet mark one page as a narrow, chrome-less
-article. → **[Writing pages → Page width & header](/pages#page-width--header)**.
+A page's frontmatter `width:` / `header:` / `theme_toggle:` overrides these
+defaults, so a project can default to full-width dashboards yet mark one page as a
+narrow, chrome-less article. → **[Writing pages → Page width & header](/pages#page-width--header)**.
+
+### Side navigation (`layout.sidebar`)
+
+Controls the left navigation menu.
+
+| Key                | Default | Purpose                                                              |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `collapsed`        | `false` | First-visit state on desktop. Only a *seed* — once a reader toggles the sidebar, that choice is saved per browser and wins over this. |
+| `toggle`           | `true`  | Show the desktop collapse button in the header. `false` pins the sidebar to whatever `collapsed` says (no control). |
+| `show_single_page` | `false` | A project with a single navigable page has nothing to navigate to, so the nav **and** both menu buttons are hidden. Set `true` to keep the nav anyway. |
+| `hidden`           | `false` | Never render the nav or its menu buttons, however many pages exist (overrides `show_single_page`). For blog/article-style sites that navigate through in-page links — pairs well with `layout: {width: s, header: false}`. |
+
+:::note
+`collapsed`/`toggle` are **desktop** behavior. The mobile slide-in menu (the ☰
+button) is unaffected by them; it's only removed when the nav is gone entirely
+(`hidden: true`, or a single page without `show_single_page`). Dynamic `[slug]`
+pages don't count toward the page total — they're already left out of the nav.
+:::
 
 ## `python_queries`
 

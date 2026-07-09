@@ -1084,8 +1084,8 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # Desktop sidebar collapse: `collapsed` seeds the first-visit state (a
             # saved localStorage choice overrides it); `toggle` gates the control.
             # Mobile slide-in is unaffected.
-            sidebar_collapsed=proj.config.sidebar.collapsed,
-            sidebar_toggle=proj.config.sidebar.toggle,
+            sidebar_collapsed=proj.config.layout.sidebar.collapsed,
+            sidebar_toggle=proj.config.layout.sidebar.toggle,
             # `sidebar.hidden` drops the nav outright; otherwise a single-page
             # project has nothing to navigate to, so the nav and its menu buttons
             # are omitted — unless `show_single_page` forces them on.

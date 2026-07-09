@@ -73,7 +73,7 @@ def test_parse_layout_config_values():
 
 
 def test_parse_layout_config_malformed_fails_at_startup():
-    # Fail-at-startup policy, same as sidebar:/auth:.
+    # Fail-at-startup policy, same as auth:/embed:.
     for bad in (
         [],
         "nope",
@@ -81,9 +81,20 @@ def test_parse_layout_config_malformed_fails_at_startup():
         {"width": 2},
         {"header": "yes"},
         {"theme_toggle": "yes"},
+        {"sidebar": {"hidden": "yes"}},  # nested block validates too
+        {"sidebar": "nope"},
     ):
         with pytest.raises(ValueError):
             parse_layout_config(bad)
+
+
+def test_parse_layout_config_nests_sidebar():
+    # The side-nav block now lives under layout: (moved from a top-level `sidebar:`).
+    cfg = parse_layout_config({"sidebar": {"hidden": True, "toggle": False}})
+    assert cfg.sidebar.hidden is True
+    assert cfg.sidebar.toggle is False
+    # Default when absent.
+    assert parse_layout_config({"width": "s"}).sidebar.hidden is False
 
 
 # --------------------------------------------------------------------------- #
