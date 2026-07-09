@@ -43,7 +43,7 @@ SELECT SUM(downloads) AS downloads FROM downloads
 
 <Counter data={downloads_total} column="downloads" label="Total downloads (all months)" />
 
-<LineChart data={downloads_by_month} x="month" y="downloads" title="Monthly Downloads" />
+<LineChart data={downloads_by_month} x="month" y="downloads" title="Monthly Downloads" explain />
 
 ## Try the search
 

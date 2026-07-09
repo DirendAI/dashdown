@@ -16,7 +16,7 @@ roots are gathered under one synthetic root.
 <TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" />
 ```
 
-<TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" />
+<TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" explain />
 
 :::note
 Like [SunburstChart](/components/charts/sunburst-chart), TreeChart needs an

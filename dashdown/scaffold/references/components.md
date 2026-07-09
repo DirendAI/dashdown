@@ -109,13 +109,13 @@ your data:
 ```
 
 <Grid cols=2>
-  <BarChart data={by_channel} x="month" y="downloads" series="channel" title="series= (2nd dimension)" />
-  <BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="multi-metric y=" />
+  <BarChart data={by_channel} x="month" y="downloads" series="channel" title="series= (2nd dimension)" explain />
+  <BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="multi-metric y=" explain />
 </Grid>
 
 Add `stacked` to stack the groups on a shared total:
 
-<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Stacked by channel" />
+<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Stacked by channel" explain />
 
 Both give a legend and a colour per series; they're **mutually exclusive** (if you
 set both, `series` wins). On a [PieChart](/components/charts/pie-chart), `series=`
@@ -162,19 +162,19 @@ Trends over a continuous or time axis. Add `series` to draw one line per group.
            title="Downloads by channel" format="number" />
 ```
 
-<LineChart data={by_channel} x="month" y="downloads" series="channel" title="Downloads by channel" />
+<LineChart data={by_channel} x="month" y="downloads" series="channel" title="Downloads by channel" explain />
 
 Without `series` you get a single line:
 
-<LineChart data={downloads_by_month} x="month" y="downloads" title="Total downloads" />
+<LineChart data={downloads_by_month} x="month" y="downloads" title="Total downloads" explain />
 
 Add `stacked` (with a `series`) for a stacked-area chart:
 
-<LineChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by channel (stacked)" />
+<LineChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by channel (stacked)" explain />
 
 Or pass a comma-separated `y` for one line per metric column (no `series` needed):
 
-<LineChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads per channel (multi-metric)" />
+<LineChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads per channel (multi-metric)" explain />
 
 ## From the semantic layer
 
@@ -219,15 +219,15 @@ the Y axis), or `series` for grouped bars — and `stacked` to stack those group
 <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" />
 ```
 
-<BarChart data={channel_totals} x="channel" y="downloads" title="Total by channel" />
+<BarChart data={channel_totals} x="channel" y="downloads" title="Total by channel" explain />
 
 Horizontal:
 
-<BarChart data={channel_totals} x="channel" y="downloads" horizontal title="By channel (horizontal)" />
+<BarChart data={channel_totals} x="channel" y="downloads" horizontal title="By channel (horizontal)" explain />
 
 Grouped by series and **stacked**:
 
-<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by month (stacked)" />
+<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by month (stacked)" explain />
 
 ## Multiple metrics
 
@@ -240,7 +240,7 @@ No `series=` grouping needed:
           title="Downloads by channel" />
 ```
 
-<BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads by channel" />
+<BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads by channel" explain />
 
 This is the complement of `series=`: use **`series=`** to split *one* value column
 by a category, or **a comma-separated `y`** to plot *several* value columns. The
@@ -296,7 +296,7 @@ lists) plus `right_axis=` (the subset plotted against the right axis).
             title="Visits (bars) vs signups (line)" />
 ```
 
-<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" title="Visits (bars) vs signups (line)" />
+<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" title="Visits (bars) vs signups (line)" explain />
 
 `visits` (in the hundreds) draws as bars on the **left** axis; `signups` (in the
 tens) draws as a line on its **own right axis** via `right_axis="signups"`, so the
@@ -313,7 +313,7 @@ its own bar or line series, sharing the legend:
             bars="pip,docker" lines="source" right_axis="source" />
 ```
 
-<ComboChart data={downloads_by_channel_wide} x="month" bars="pip,docker" lines="source" right_axis="source" title="pip + docker bars, source line" />
+<ComboChart data={downloads_by_channel_wide} x="month" bars="pip,docker" lines="source" right_axis="source" title="pip + docker bars, source line" explain />
 
 ## Per-series colours
 
@@ -327,7 +327,7 @@ amber line":
             bar_color="#6366f1" line_color="#f59e0b" />
 ```
 
-<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" bar_color="#6366f1" line_color="#f59e0b" title="Indigo bars, amber line" />
+<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" bar_color="#6366f1" line_color="#f59e0b" title="Indigo bars, amber line" explain />
 
 ## From the semantic layer
 
@@ -379,11 +379,11 @@ a **donut** with a center total; pass `donut=false` for a solid pie.
 <PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
 ```
 
-<PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
+<PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" explain />
 
 Solid pie:
 
-<PieChart data={channel_totals} x="channel" y="downloads" donut=false title="Solid pie" />
+<PieChart data={channel_totals} x="channel" y="downloads" donut=false title="Solid pie" explain />
 
 ## Faceted (small multiples)
 
@@ -396,7 +396,7 @@ across a dimension. Here the channel mix, one pie per month:
           title="Channel mix by month" />
 ```
 
-<PieChart data={by_channel_recent} x="channel" y="downloads" series="month" title="Channel mix by month" height=340 />
+<PieChart data={by_channel_recent} x="channel" y="downloads" series="month" title="Channel mix by month" height=340 explain />
 
 The pies are sized to fill the card from its live dimensions and re-fit on resize.
 (Faceted pies are always solid — the `donut` center total applies to a single pie
@@ -443,11 +443,11 @@ Correlation between two numeric columns — one point per row.
 <ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" />
 ```
 
-<ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" />
+<ScatterChart data={daily_metrics} x="visits" y="signups" title="Visits vs signups" explain />
 
 Add `series=` to colour points by a category — here device specs grouped by tier:
 
-<ScatterChart data={device_specs} x="price" y="speed" series="tier" title="Price vs speed, by tier" />
+<ScatterChart data={device_specs} x="price" y="speed" series="tier" title="Price vs speed, by tier" explain />
 
 ## From the semantic layer
 
@@ -489,7 +489,7 @@ Stage-by-stage values, widest at the top — useful for conversion / drop-off.
 <FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" />
 ```
 
-<FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" />
+<FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" explain />
 
 ## From the semantic layer
 
@@ -530,7 +530,7 @@ the value.
 <TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
 ```
 
-<TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
+<TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" explain />
 
 ## From the semantic layer
 
@@ -571,7 +571,7 @@ it a `date` column and a `value` column.
 <CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" />
 ```
 
-<CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" />
+<CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" explain />
 
 ## From the semantic layer
 
@@ -612,11 +612,11 @@ whiskers, and outliers are computed client-side from the raw rows.
 <BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" />
 ```
 
-<BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" />
+<BoxPlot data={daily_metrics} x="weekday" y="visits" title="Visits by weekday" explain />
 
 A single box over every row (no `x`):
 
-<BoxPlot data={daily_metrics} y="visits" title="All daily visits" />
+<BoxPlot data={daily_metrics} y="visits" title="All daily visits" explain />
 
 :::note
 BoxPlot reads **raw rows** to compute the distribution, so it takes `data={query}`
@@ -653,11 +653,11 @@ rather than just the quartiles. `y` is the value; `x` is an optional group.
 <Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" />
 ```
 
-<Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" />
+<Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" explain />
 
 Omit `x` for a single combined density shape:
 
-<Violin data={daily_metrics} y="visits" title="Overall visit density" />
+<Violin data={daily_metrics} y="visits" title="Overall visit density" explain />
 
 :::note
 Like [BoxPlot](/components/charts/box-plot), Violin reads **raw rows** for its
@@ -695,11 +695,11 @@ seen for that indicator.
 <RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" />
 ```
 
-<RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" />
+<RadarChart data={feature_scores} x="metric" y="score" series="product" title="Feature scores" explain />
 
 Omit `series` for a single polygon:
 
-<RadarChart data={dashdown_scores} x="metric" y="score" title="Dashdown scores" />
+<RadarChart data={dashdown_scores} x="metric" y="score" title="Dashdown scores" explain />
 
 ## From the semantic layer
 
@@ -741,11 +741,11 @@ on a `min`..`max` scale (defaults `0`..`100`). No `x` is needed.
 <GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" />
 ```
 
-<GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" />
+<GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" explain />
 
 `color` repaints the progress arc:
 
-<GaugeChart data={goal_completion} y="pct" min=0 max=100 color="#16a34a" title="Monthly goal (custom color)" />
+<GaugeChart data={goal_completion} y="pct" min=0 max=100 color="#16a34a" title="Monthly goal (custom color)" explain />
 
 ## From the semantic layer
 
@@ -787,7 +787,7 @@ axes** and `value` is the per-cell magnitude column.
 <HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" />
 ```
 
-<HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" />
+<HeatmapChart data={by_channel} x="month" y="channel" value="downloads" title="Downloads by month & channel" explain />
 
 ## From the semantic layer
 
@@ -834,7 +834,7 @@ width). Nodes are the union of the two columns.
 <SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" />
 ```
 
-<SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" />
+<SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" explain />
 
 ## From the semantic layer
 
@@ -883,7 +883,7 @@ columns. Bullish candles (close ≥ open) render green, bearish red.
                   title="Daily price" />
 ```
 
-<CandlestickChart data={daily_prices} x="day" open="open" high="high" low="low" close="close" title="Daily price" />
+<CandlestickChart data={daily_prices} x="day" open="open" high="high" low="low" close="close" title="Daily price" explain />
 
 ## From the semantic layer
 
@@ -938,7 +938,7 @@ its value. `x` is the time column (ISO dates parse best), `y` the value, and
 <ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" />
 ```
 
-<ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" />
+<ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" explain />
 
 ## From the semantic layer
 
@@ -982,7 +982,7 @@ their total incident weight. Drag to rearrange; scroll to zoom.
 <GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" />
 ```
 
-<GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" />
+<GraphChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Stage network" explain />
 
 ## From the semantic layer
 
@@ -1029,7 +1029,7 @@ and `label` (optional) is its display name.
 <SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" />
 ```
 
-<SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" />
+<SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" explain />
 
 :::note
 SunburstChart needs an `id`/`parent` **hierarchy**, which the
@@ -1071,7 +1071,7 @@ roots are gathered under one synthetic root.
 <TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" />
 ```
 
-<TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" />
+<TreeChart data={org_tree} id="id" parent="parent" label="name" title="Org chart" explain />
 
 :::note
 Like [SunburstChart](/components/charts/sunburst-chart), TreeChart needs an
@@ -1110,7 +1110,7 @@ the lines by group.
 <ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" />
 ```
 
-<ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" />
+<ParallelChart data={device_specs} dimensions="price, speed, battery, rating" series="tier" title="Device trade-offs" explain />
 
 ## From the semantic layer
 
@@ -1156,7 +1156,7 @@ with the `auto` flag:
 <Chart auto data={downloads_by_month} />
 ```
 
-<Chart auto data={downloads_by_month} />
+<Chart auto data={downloads_by_month} explain />
 
 Rough heuristics: a time/category `x` with a numeric `y` → line or bar; two
 numeric columns → scatter. You can still pass explicit `x`/`y`/`series` to guide
@@ -1447,7 +1447,7 @@ seeded per country+metric, so the pattern is identical on every load.
     title="Population, 2020 — 1 dot = 10M people" />
 ```
 
-<DotDensityMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people|10000000" title="Population, 2020 — 1 dot = 10M people" />
+<DotDensityMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people|10000000" title="Population, 2020 — 1 dot = 10M people" explain />
 
 ## Custom regions
 
@@ -1467,7 +1467,7 @@ unchanged:
     title="Population, 2020 — Europe" />
 ```
 
-<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" geojson="/assets/europe.json" metrics="population|Population|people" title="Population, 2020 — Europe" />
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" geojson="/assets/europe.json" metrics="population|Population|people" title="Population, 2020 — Europe" explain />
 
 ## Per-component attributes
 
@@ -1769,8 +1769,8 @@ Lay widgets out in equal-width columns. Wrap any components in `<Grid>`; set
 A child can span more than one column with `col-span=`:
 
 <Grid cols=3>
-  <LineChart data={downloads_by_month} x="month" y="downloads" col-span=2 title="Trend (spans 2 cols)" />
-  <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" />
+  <LineChart data={downloads_by_month} x="month" y="downloads" col-span=2 title="Trend (spans 2 cols)" explain />
+  <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" explain />
 </Grid>
 
 | Attribute        | Purpose                                          |
@@ -1804,10 +1804,10 @@ a tab bar.
 
 <Tabs name="view">
   <Tab title="Trend">
-    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" />
+    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" explain />
   </Tab>
   <Tab title="By channel">
-    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" />
+    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" explain />
   </Tab>
 </Tabs>
 
@@ -1864,7 +1864,7 @@ ORDER BY month
 
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 
-<LineChart data={dl_by_channel} x="month" y="downloads" title="Downloads (filtered)" />
+<LineChart data={dl_by_channel} x="month" y="downloads" title="Downloads (filtered)" explain />
 
 Pick a channel — the chart re-queries. The `'${channel}' = ''` guard makes "no
 selection" mean "all".
@@ -1882,7 +1882,7 @@ ORDER BY month
 
 <Dropdown name="channels" data={all_channels} column="channel" label="Channels" multi />
 
-<LineChart data={dl_multi} x="month" y="downloads" title="Downloads (multi-select)" />
+<LineChart data={dl_multi} x="month" y="downloads" title="Downloads (multi-select)" explain />
 
 | Attribute   | Purpose                                                  |
 | ----------- | -------------------------------------------------------- |
@@ -1951,7 +1951,7 @@ ORDER BY date
 
 <DateRange name="period" label="Period" start_param="from" end_param="to" presets="last_7_days,last_30_days,custom" />
 
-<LineChart data={daily_in_range} x="date" y="visits" title="Visits in range" />
+<LineChart data={daily_in_range} x="date" y="visits" title="Visits in range" explain />
 
 `default=` seeds a preset on first load (URL params still win):
 
@@ -1988,7 +1988,7 @@ ORDER BY date
 
 <Toggle name="busy" label="Busy days only" />
 
-<LineChart data={daily_traffic} x="date" y="visits" title="Daily visits" />
+<LineChart data={daily_traffic} x="date" y="visits" title="Daily visits" explain />
 
 Flip the switch — when **off** it stores `""`, so the `'${busy}' = ''` guard
 passes and every day shows; when **on** it stores `"true"`, the guard fails, and
@@ -2022,7 +2022,7 @@ ORDER BY date
 
 <Toggle name="weekend" label="Weekends only" on_value="Yes" off_value="No" />
 
-<LineChart data={daily_weekend} x="date" y="visits" title="Visits (weekend vs weekday)" />
+<LineChart data={daily_weekend} x="date" y="visits" title="Visits (weekend vs weekday)" explain />
 
 Here **checked** sends `weekend = 'Yes'` (weekend days) and **unchecked** sends
 `'No'` (weekdays) — there's no "show all" state, so both directions narrow the
@@ -2133,7 +2133,7 @@ ORDER BY price DESC
 
 <RangeSlider name="price" min={500} max={1500} step={50} default={[700,1300]} label="Price ($)" format="currency" currency="$" />
 
-<BarChart data={devices_in_range} x="device" y="price" title="Devices in price range" />
+<BarChart data={devices_in_range} x="device" y="price" title="Devices in price range" explain />
 
 Drag either handle — the chart re-queries. The readout above the track shows the
 live low/high, formatted with the same `format=`/`currency=` options the other
@@ -2200,7 +2200,7 @@ ORDER BY price DESC
 
 <ButtonGroup name="tier" label="Tier" options="High,Mid,Budget" />
 
-<BarChart data={devices_by_tier} x="device" y="price" title="Devices by tier" />
+<BarChart data={devices_by_tier} x="device" y="price" title="Devices by tier" explain />
 
 Click a segment — the chart re-queries. Click **All** to drop the filter again
 (selecting a segment doesn't toggle off, so "All" is how you clear it).
@@ -2251,7 +2251,7 @@ ORDER BY downloads DESC
 
 <Combobox name="country" data={countries} column="country" label="Country" placeholder="Search countries…" />
 
-<BarChart data={country_rows} x="country" y="downloads" title="Downloads by country" />
+<BarChart data={country_rows} x="country" y="downloads" title="Downloads by country" explain />
 
 Start typing — the panel lists matching values fetched from the server; pick one
 and the chart re-queries. The **×** clears the selection.
@@ -2277,7 +2277,7 @@ ORDER BY downloads DESC
 
 <Combobox name="countries" data={countries} column="country" label="Countries" multi placeholder="Add a country…" />
 
-<BarChart data={country_multi} x="country" y="downloads" title="Downloads (selected countries)" />
+<BarChart data={country_multi} x="country" y="downloads" title="Downloads (selected countries)" explain />
 
 Picks show as removable chips before the search box; the panel marks chosen rows
 with a ✓ and stays open so you can add several. **Backspace** on an empty input
@@ -2328,7 +2328,7 @@ ORDER BY rating DESC
 
 <Slider name="min_rating" min={0} max={5} step={0.1} default={4} label="Min rating" />
 
-<BarChart data={devices_rated} x="device" y="rating" title="Devices at or above the rating" />
+<BarChart data={devices_rated} x="device" y="rating" title="Devices at or above the rating" explain />
 
 Drag the handle — the chart re-queries. The readout above the track shows the
 live value, formatted with the same `format=`/`currency=` options the other

@@ -13,7 +13,7 @@ the value.
 <TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
 ```
 
-<TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
+<TreemapChart data={channel_totals} x="channel" y="downloads" title="Share by channel" explain />
 
 ## From the semantic layer
 

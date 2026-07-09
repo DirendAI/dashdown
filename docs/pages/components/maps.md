@@ -260,7 +260,7 @@ seeded per country+metric, so the pattern is identical on every load.
     title="Population, 2020 — 1 dot = 10M people" />
 ```
 
-<DotDensityMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people|10000000" title="Population, 2020 — 1 dot = 10M people" />
+<DotDensityMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people|10000000" title="Population, 2020 — 1 dot = 10M people" explain />
 
 ## Custom regions
 
@@ -280,7 +280,7 @@ unchanged:
     title="Population, 2020 — Europe" />
 ```
 
-<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" geojson="/assets/europe.json" metrics="population|Population|people" title="Population, 2020 — Europe" />
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" geojson="/assets/europe.json" metrics="population|Population|people" title="Population, 2020 — Europe" explain />
 
 ## Per-component attributes
 

@@ -14,7 +14,7 @@ width). Nodes are the union of the two columns.
 <SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" />
 ```
 
-<SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" />
+<SankeyChart data={user_flow} source="stage_from" target="stage_to" value="users" title="Lifecycle flow" explain />
 
 ## From the semantic layer
 

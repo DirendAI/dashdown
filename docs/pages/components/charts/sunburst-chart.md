@@ -15,7 +15,7 @@ and `label` (optional) is its display name.
 <SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" />
 ```
 
-<SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" />
+<SunburstChart data={org_tree} id="id" parent="parent" value="headcount" label="name" title="Headcount" explain />
 
 :::note
 SunburstChart needs an `id`/`parent` **hierarchy**, which the

@@ -14,7 +14,7 @@ its value. `x` is the time column (ISO dates parse best), `y` the value, and
 <ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" />
 ```
 
-<ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" />
+<ThemeRiver data={daily_streams} x="date" y="value" series="metric" title="Activity streams" explain />
 
 ## From the semantic layer
 

@@ -14,11 +14,11 @@ on a `min`..`max` scale (defaults `0`..`100`). No `x` is needed.
 <GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" />
 ```
 
-<GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" />
+<GaugeChart data={goal_completion} y="pct" min=0 max=100 title="Monthly goal" explain />
 
 `color` repaints the progress arc:
 
-<GaugeChart data={goal_completion} y="pct" min=0 max=100 color="#16a34a" title="Monthly goal (custom color)" />
+<GaugeChart data={goal_completion} y="pct" min=0 max=100 color="#16a34a" title="Monthly goal (custom color)" explain />
 
 ## From the semantic layer
 

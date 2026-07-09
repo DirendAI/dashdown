@@ -13,15 +13,15 @@ the Y axis), or `series` for grouped bars — and `stacked` to stack those group
 <BarChart data={channel_totals} x="channel" y="downloads" title="By channel" />
 ```
 
-<BarChart data={channel_totals} x="channel" y="downloads" title="Total by channel" />
+<BarChart data={channel_totals} x="channel" y="downloads" title="Total by channel" explain />
 
 Horizontal:
 
-<BarChart data={channel_totals} x="channel" y="downloads" horizontal title="By channel (horizontal)" />
+<BarChart data={channel_totals} x="channel" y="downloads" horizontal title="By channel (horizontal)" explain />
 
 Grouped by series and **stacked**:
 
-<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by month (stacked)" />
+<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Downloads by month (stacked)" explain />
 
 ## Multiple metrics
 
@@ -34,7 +34,7 @@ No `series=` grouping needed:
           title="Downloads by channel" />
 ```
 
-<BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads by channel" />
+<BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="Downloads by channel" explain />
 
 This is the complement of `series=`: use **`series=`** to split *one* value column
 by a category, or **a comma-separated `y`** to plot *several* value columns. The

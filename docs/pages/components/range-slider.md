@@ -35,7 +35,7 @@ ORDER BY price DESC
 
 <RangeSlider name="price" min={500} max={1500} step={50} default={[700,1300]} label="Price ($)" format="currency" currency="$" />
 
-<BarChart data={devices_in_range} x="device" y="price" title="Devices in price range" />
+<BarChart data={devices_in_range} x="device" y="price" title="Devices in price range" explain />
 
 Drag either handle — the chart re-queries. The readout above the track shows the
 live low/high, formatted with the same `format=`/`currency=` options the other

@@ -65,13 +65,13 @@ your data:
 ```
 
 <Grid cols=2>
-  <BarChart data={by_channel} x="month" y="downloads" series="channel" title="series= (2nd dimension)" />
-  <BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="multi-metric y=" />
+  <BarChart data={by_channel} x="month" y="downloads" series="channel" title="series= (2nd dimension)" explain />
+  <BarChart data={downloads_by_channel_wide} x="month" y="pip,docker,source" title="multi-metric y=" explain />
 </Grid>
 
 Add `stacked` to stack the groups on a shared total:
 
-<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Stacked by channel" />
+<BarChart data={by_channel} x="month" y="downloads" series="channel" stacked title="Stacked by channel" explain />
 
 Both give a legend and a colour per series; they're **mutually exclusive** (if you
 set both, `series` wins). On a [PieChart](/components/charts/pie-chart), `series=`

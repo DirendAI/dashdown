@@ -30,7 +30,7 @@ ORDER BY month
 
 <Dropdown name="channel" data={all_channels} column="channel" label="Channel" />
 
-<LineChart data={dl_by_channel} x="month" y="downloads" title="Downloads (filtered)" />
+<LineChart data={dl_by_channel} x="month" y="downloads" title="Downloads (filtered)" explain />
 
 Pick a channel — the chart re-queries. The `'${channel}' = ''` guard makes "no
 selection" mean "all".
@@ -56,7 +56,7 @@ ORDER BY month
 
 <Dropdown name="channels" data={all_channels} column="channel" label="Channels" multi />
 
-<LineChart data={dl_multi} x="month" y="downloads" title="Downloads (multi-select)" />
+<LineChart data={dl_multi} x="month" y="downloads" title="Downloads (multi-select)" explain />
 
 | Attribute   | Purpose                                                  |
 | ----------- | -------------------------------------------------------- |

@@ -14,11 +14,11 @@ rather than just the quartiles. `y` is the value; `x` is an optional group.
 <Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" />
 ```
 
-<Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" />
+<Violin data={daily_metrics} x="weekday" y="visits" title="Visit density by weekday" explain />
 
 Omit `x` for a single combined density shape:
 
-<Violin data={daily_metrics} y="visits" title="Overall visit density" />
+<Violin data={daily_metrics} y="visits" title="Overall visit density" explain />
 
 :::note
 Like [BoxPlot](/components/charts/box-plot), Violin reads **raw rows** for its

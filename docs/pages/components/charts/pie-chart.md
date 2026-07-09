@@ -13,11 +13,11 @@ a **donut** with a center total; pass `donut=false` for a solid pie.
 <PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
 ```
 
-<PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" />
+<PieChart data={channel_totals} x="channel" y="downloads" title="Share by channel" explain />
 
 Solid pie:
 
-<PieChart data={channel_totals} x="channel" y="downloads" donut=false title="Solid pie" />
+<PieChart data={channel_totals} x="channel" y="downloads" donut=false title="Solid pie" explain />
 
 ## Faceted (small multiples)
 
@@ -30,7 +30,7 @@ across a dimension. Here the channel mix, one pie per month:
           title="Channel mix by month" />
 ```
 
-<PieChart data={by_channel_recent} x="channel" y="downloads" series="month" title="Channel mix by month" height=340 />
+<PieChart data={by_channel_recent} x="channel" y="downloads" series="month" title="Channel mix by month" height=340 explain />
 
 The pies are sized to fill the card from its live dimensions and re-fit on resize.
 (Faceted pies are always solid — the `donut` center total applies to a single pie

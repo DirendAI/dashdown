@@ -16,7 +16,7 @@ columns. Bullish candles (close ≥ open) render green, bearish red.
                   title="Daily price" />
 ```
 
-<CandlestickChart data={daily_prices} x="day" open="open" high="high" low="low" close="close" title="Daily price" />
+<CandlestickChart data={daily_prices} x="day" open="open" high="high" low="low" close="close" title="Daily price" explain />
 
 ## From the semantic layer
 

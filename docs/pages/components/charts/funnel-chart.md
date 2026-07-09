@@ -13,7 +13,7 @@ Stage-by-stage values, widest at the top — useful for conversion / drop-off.
 <FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" />
 ```
 
-<FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" />
+<FunnelChart data={channel_totals} x="channel" y="downloads" title="Channels by volume" explain />
 
 ## From the semantic layer
 

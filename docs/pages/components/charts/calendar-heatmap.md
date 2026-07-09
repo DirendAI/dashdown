@@ -13,7 +13,7 @@ it a `date` column and a `value` column.
 <CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" />
 ```
 
-<CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" />
+<CalendarHeatmap data={daily_metrics} date="date" value="visits" title="Daily visits" explain />
 
 ## From the semantic layer
 

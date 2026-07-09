@@ -13,7 +13,7 @@ with the `auto` flag:
 <Chart auto data={downloads_by_month} />
 ```
 
-<Chart auto data={downloads_by_month} />
+<Chart auto data={downloads_by_month} explain />
 
 Rough heuristics: a time/category `x` with a numeric `y` → line or bar; two
 numeric columns → scatter. You can still pass explicit `x`/`y`/`series` to guide

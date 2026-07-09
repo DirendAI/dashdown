@@ -24,7 +24,7 @@ FROM daily
 ORDER BY date
 ```
 
-<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" title="Visits (bars) vs signups (line)" />
+<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" title="Visits (bars) vs signups (line)" explain />
 
 `visits` (in the hundreds) draws as bars on the **left** axis; `signups` (in the
 tens) draws as a line on its **own right axis** via `right_axis="signups"`, so the
@@ -41,7 +41,7 @@ its own bar or line series, sharing the legend:
             bars="pip,docker" lines="source" right_axis="source" />
 ```
 
-<ComboChart data={downloads_by_channel_wide} x="month" bars="pip,docker" lines="source" right_axis="source" title="pip + docker bars, source line" />
+<ComboChart data={downloads_by_channel_wide} x="month" bars="pip,docker" lines="source" right_axis="source" title="pip + docker bars, source line" explain />
 
 ## Per-series colours
 
@@ -55,7 +55,7 @@ amber line":
             bar_color="#6366f1" line_color="#f59e0b" />
 ```
 
-<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" bar_color="#6366f1" line_color="#f59e0b" title="Indigo bars, amber line" />
+<ComboChart data={traffic_combo} x="date" bars="visits" lines="signups" right_axis="signups" bar_color="#6366f1" line_color="#f59e0b" title="Indigo bars, amber line" explain />
 
 ## From the semantic layer
 

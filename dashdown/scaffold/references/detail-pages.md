@@ -139,7 +139,7 @@ in its queries is the URL segment, so the same file renders `pip`, `docker`, and
   <Counter data={channel_summary} column="months" label="Months tracked" />
 </Grid>
 
-<LineChart data={channel_months} x="month" y="downloads" title="Monthly downloads" />
+<LineChart data={channel_months} x="month" y="downloads" title="Monthly downloads" explain />
 
 <Table data={channel_months} format="downloads=number" />
 

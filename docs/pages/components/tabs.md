@@ -25,10 +25,10 @@ a tab bar.
 
 <Tabs name="view">
   <Tab title="Trend">
-    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" />
+    <LineChart data={downloads_by_month} x="month" y="downloads" title="Downloads over time" explain />
   </Tab>
   <Tab title="By channel">
-    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" />
+    <BarChart data={channel_totals} x="channel" y="downloads" title="Downloads by channel" explain />
   </Tab>
 </Tabs>
 
