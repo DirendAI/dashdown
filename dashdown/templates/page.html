@@ -141,7 +141,7 @@
   {# Embed mode (?_embed): the app shell — header, sidebar, breadcrumbs — is
      omitted so a page can be <iframe>'d into an external site. The page content
      and its filter bar live in body_html, so they travel intact. #}
-  {% if not embed %}
+  {% if not embed and (show_header | default(true)) %}
   <header class="dashdown-header navbar bg-base-100 border-b border-base-300">
     {% if sidebar_shown %}
     <div class="flex-none md:hidden">
@@ -206,7 +206,7 @@
     </div>
   </header>
   {% endif %}
-  <div class="dashdown-layout">
+  <div class="dashdown-layout{% if not (show_header | default(true)) %} dashdown-no-header{% endif %}">
     {% if not embed and sidebar_shown %}
     <aside class="dashdown-sidebar bg-base-200 border-r border-base-300"
            :class="{ 'open': sidebarOpen }">
@@ -255,14 +255,14 @@
          locale/currency when a component doesn't set its own. -->
     <script id="dashdown-format" type="application/json">{{ format_json | safe }}</script>
     {% endif %}
-    <main class="dashdown-main p-6">
+    <main class="dashdown-main p-6" data-page-width="{{ page_width | default('l') }}">
       {# Top bar: breadcrumbs (left) + the PDF/Embed page actions (right), on one
          line. Rendered off-embed whenever there are actions or breadcrumbs — so
          the actions show on *every* page, even one with no breadcrumbs (a
          top-level page). page_actions_html (from render_page) is empty in embeds.
          Wrapped in the same max-w-7xl column as the content so it lines up. #}
       {% if not embed and (page_actions_html or (breadcrumbs and breadcrumbs|length > 1)) %}
-      <div class="dashdown-page-topbar max-w-7xl mx-auto">
+      <div class="dashdown-page-topbar dashdown-content-col">
         {% if breadcrumbs and breadcrumbs|length > 1 %}
         <nav class="dashdown-breadcrumbs text-sm breadcrumbs" aria-label="Breadcrumb">
           <ul>
@@ -283,7 +283,7 @@
       {# Filter row: emitted inside body_html by render_page (below the page
          header) on pages that have filter components — see pipeline.py's
          _FILTER_BAR_SLOT_HTML and filter_bar.js. #}
-      <div class="max-w-7xl mx-auto dashdown-prose">
+      <div class="dashdown-content-col dashdown-prose">
         {{ body_html | safe }}
       </div>
 
@@ -293,7 +293,7 @@
          viewer; the server-rendered text is the no-JS fallback. Hidden in embed
          + print via CSS, like the breadcrumbs. #}
       {% if built_at %}
-      <footer class="dashdown-build-stamp max-w-7xl mx-auto">
+      <footer class="dashdown-build-stamp dashdown-content-col">
         Generated <time datetime="{{ built_at }}" data-dashdown-build-time>{{ built_at_display }}</time>{% if built_duration_display %} · built in {{ built_duration_display }}{% endif %}
       </footer>
       {% endif %}
@@ -301,7 +301,7 @@
       {# "Made with Dashdown" attribution — shown on every page (dev server and
          static build alike). Hidden in embed + print via CSS, like the build
          stamp. The link points at the project repo; see `made_with_url` above. #}
-      <footer class="dashdown-made-with max-w-7xl mx-auto">
+      <footer class="dashdown-made-with dashdown-content-col">
         Made with <a href="{{ made_with_url }}" target="_blank" rel="noopener noreferrer">Dashdown</a>
       </footer>
     </main>

@@ -63,6 +63,10 @@ sidebar:                       # → Sidebar
   toggle: true                 # show the desktop collapse button
   show_single_page: false      # show the nav even on a one-page project
 
+layout:                        # → Layout
+  width: l                     # default content width: s | m | l
+  header: true                 # show the top app header
+
 python_queries:                # → Python queries
   enabled: true
 ```
@@ -175,6 +179,27 @@ unaffected by `collapsed`/`toggle`; it's only hidden when the nav is empty
 (single page, no `show_single_page`). Dynamic `[slug]` pages don't count toward
 the page total — they're already left out of the nav.
 :::
+
+## `layout`
+
+Project-wide defaults for a page's content width and top header. Both are
+overridable per page via [frontmatter](/pages#page-width--header). *(No separate
+page — this is the reference.)*
+
+```yaml
+layout:
+  width: l       # default content-column width: s | m | l
+  header: true   # show the top app header (brand / search / theme toggle)
+```
+
+| Key      | Default | Purpose                                                                   |
+| -------- | ------- | ------------------------------------------------------------------------- |
+| `width`  | `l`     | Centered content-column width. `l` is the full dashboard width; `m` is medium; `s` is a narrow article measure for text-heavy, blog-style pages. |
+| `header` | `true`  | Show the top app header. `false` drops it — the brand, full-text search, and theme toggle go with it, so it suits a single-page or embed-like site. |
+
+A page's frontmatter `width:` / `header:` overrides these defaults, so a project
+can default to full-width dashboards yet mark one page as a narrow, chrome-less
+article. → **[Writing pages → Page width & header](/pages#page-width--header)**.
 
 ## `python_queries`
 

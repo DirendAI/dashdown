@@ -57,6 +57,7 @@ from dashdown.project import (
     build_breadcrumbs,
     format_config_json,
     resolve_logo_url,
+    resolve_page_layout,
 )
 from dashdown.render.pipeline import (
     RenderedPage,
@@ -658,6 +659,10 @@ def _emit_page(
     breadcrumbs = build_breadcrumbs(app_url, ctx.app_nav, page_title)
     for crumb in breadcrumbs:
         crumb["url"] = root_link(crumb["url"])
+    # Per-page chrome/width: frontmatter overrides the project `layout:` defaults.
+    page_width, show_header = resolve_page_layout(
+        rendered.frontmatter, project.config.layout
+    )
 
     html = ctx.page_template.render(
         title=project.config.title,
@@ -719,6 +724,9 @@ def _emit_page(
             project.config.sidebar.show_single_page
             or project.navigable_page_count() > 1
         ),
+        # Per-page presentation: content-column width + top-header visibility.
+        page_width=page_width,
+        show_header=show_header,
     )
 
     out_file = _output_file(app_url, ctx.out_dir)

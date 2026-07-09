@@ -170,6 +170,33 @@ body {
   min-width: 0;
 }
 
+/* --- Content column width ---------------------------------------------- */
+/* The centered reading column, shared by the topbar, the prose body, and the
+   footers so they stay in lockstep. Width is a per-page knob: <main> carries a
+   `data-page-width` (from a page's frontmatter `width:` / the `layout:` config
+   default) that sets the `--dashdown-content-max` var, which every column below
+   inherits. `l` is the historical full-dashboard width (was max-w-7xl); `m`/`s`
+   narrow it for article-style pages. */
+.dashdown-content-col {
+  max-width: var(--dashdown-content-max, 80rem);
+  margin-inline: auto;
+}
+.dashdown-main[data-page-width="s"] { --dashdown-content-max: 44rem; }
+.dashdown-main[data-page-width="m"] { --dashdown-content-max: 60rem; }
+.dashdown-main[data-page-width="l"] { --dashdown-content-max: 80rem; }
+
+/* --- Header hidden (frontmatter `header: false`) ------------------------ */
+/* The layout min-height and the sticky sidebar hardcode a 65px offset for the
+   sticky app header; with no header, reclaim that space so there's no phantom
+   gap at the top (e.g. a single-page blog, or header off but nav on). */
+.dashdown-layout.dashdown-no-header {
+  min-height: 100vh;
+}
+.dashdown-no-header .dashdown-sidebar {
+  top: 0;
+  height: 100vh;
+}
+
 /* --- Desktop sidebar collapse ------------------------------- */
 /* The header toggle flips `sidebarCollapsed` (Alpine), which adds/removes the
    `dashdown-sidebar-collapsed` class on <html> (also set pre-paint to avoid a
