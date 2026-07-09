@@ -73,9 +73,11 @@ export function initAsk(el, opts = {}) {
   const build = readBuildConfig();
   const isStatic = !!(build && build.static);
   // A chart's explain footer sits inside the chart card it explains; the
-  // payload's chart annotations are applied to that host. Null for a plain
-  // <Ask /> card — every annotation call below then no-ops.
-  const chartHost = el.closest(".dashdown-chart");
+  // payload's chart annotations are applied to that host. The SVG geo map
+  // cards (.dashdown-map) speak the same _chartConfig/_chartInstance contract,
+  // so they're hosts too. Null for a plain <Ask /> card — every annotation
+  // call below then no-ops.
+  const chartHost = el.closest(".dashdown-chart, .dashdown-map");
   const paused = opts.paused || (() => false);
   let requestSeq = 0; // drop responses that a newer request has superseded
   let abortController = null; // aborts the superseded in-flight fetch/stream

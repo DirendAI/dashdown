@@ -1255,9 +1255,14 @@ body {
 
 /* The SVG geo map cards carry the same ⛶ (emitted by _map_base.py): the filter
    badge yields the corner there too, and the map header reserves clearance so
-   a metric toggle never sits under the hover-revealed button. */
+   a metric toggle never sits under the hover-revealed button. With `explain`,
+   the corner order mirrors the charts: sparkle in the corner, ⛶ to its left,
+   badge further along. */
 .dashdown-map:has(.dashdown-chart-expand-btn) .dashdown-filter-badge { right: 2.25rem; }
 .dashdown-map:has(.dashdown-chart-expand-btn) .dashdown-map-header { padding-right: 1.25rem; }
+.dashdown-map:has(.dashdown-explain-btn) .dashdown-chart-expand-btn { right: 2.25rem; }
+.dashdown-map:has(.dashdown-chart-expand-btn):has(.dashdown-explain-btn) .dashdown-filter-badge { right: 4rem; }
+.dashdown-map:has(.dashdown-chart-expand-btn):has(.dashdown-explain-btn) .dashdown-map-header { padding-right: 3rem; }
 
 /* The commentary footer: separated from the plot by a hairline, compact
    padding (the ask surface's own header/body spacing does the rest). */
@@ -3557,6 +3562,40 @@ dialog.dashdown-fullscreen-modal::backdrop {
 }
 .dashdown-map-dot {
   fill-opacity: 0.75;
+}
+/* Explain-annotation halos (_geo.js::drawGeoAnnotations): a dashed ring +
+   leader-line label over the data layers — muted, deliberately quieter than
+   the data symbols (the geo twin of the ECharts marks in annotations.js).
+   `.is-emphasized` (a hovered/focused ref chip) bolds the one cited mark —
+   bolding only, no dim-the-rest layer. Strokes are non-scaling (set in JS),
+   so halos stay hairline under viewBox zoom. */
+.dashdown-map-anno-halo {
+  fill: none;
+  stroke: oklch(var(--bc) / 0.75);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+}
+.dashdown-map-anno-leader {
+  stroke: oklch(var(--bc) / 0.55);
+  stroke-width: 1;
+}
+.dashdown-map-anno-label {
+  fill: var(--fallback-bc, oklch(var(--bc) / 1));
+  font-weight: 600;
+  /* Keep the text legible over busy basemaps: a card-surface halo behind the
+     glyphs (paint-order draws the stroke under the fill). */
+  paint-order: stroke;
+  stroke: var(--fallback-b1, oklch(var(--b1) / 1));
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+}
+.dashdown-map-anno.is-emphasized .dashdown-map-anno-halo {
+  stroke: var(--fallback-bc, oklch(var(--bc) / 1));
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+.dashdown-map-anno.is-emphasized .dashdown-map-anno-leader {
+  stroke: var(--fallback-bc, oklch(var(--bc) / 1));
 }
 .dashdown-map-empty {
   height: 100%;

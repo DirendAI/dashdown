@@ -60,10 +60,13 @@ _HELPER_ATTRS = {
     # `grain` itself (via ref_or_literal), so every caller accepts a `grain=`.
     "resolve_semantic_query": {"grain"},
     # The shared placeholder for the SVG geo maps (components/builtin/_map_base.py):
-    # data/title plus the common basemap + color attrs every map accepts.
+    # data/title plus the common basemap + color attrs every map accepts, plus
+    # the `explain` affordance knobs it shares with the charts (the ✨ button
+    # + AI commentary footer; `annotations` opts a bubble/dot map's marks off).
     "_map_html": {
         "data", "title", "scheme", "color", "scale", "map", "geojson",
         "id_field", "empty_message", "height", "col-span", "span",
+        "explain", "cache_ttl", "max_rows", "annotations",
     },
 }
 

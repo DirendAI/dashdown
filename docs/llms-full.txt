@@ -18,50 +18,50 @@ Introspected straight from the registries — the **same data `dashdown componen
 | Component | Attributes | Summary |
 |---|---|---|
 | `Ask` | `ask`, `by`, `cache_ttl`, `col-span`, `data`, `font_size`, `grain`, `highlight`, `inline`, `label`, `lazy`, `max_rows`, `metric`, `refresh`, `replay`, `series`, `span` | Pin a question to a query's result and render the LLM's answer as a prose block alongside the charts. |
-| `BarChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `horizontal`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
-| `BivariateMap` | `col-span`, `color`, `data`, `empty_message`, `geojson`, `height`, `id`, `id_field`, `map`, `scale`, `scheme`, `span`, `title`, `x`, `xlabel`, `xunit`, `y`, `year`, `year_value`, `ylabel`, `yunit` | Bivariate choropleth — two metrics on one map via a 3×3 color matrix. |
-| `BoxPlot` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
-| `BubbleMap` | `col-span`, `color`, `data`, `empty_message`, `geojson`, `height`, `id`, `id_field`, `map`, `max_radius`, `metrics`, `scale`, `scheme`, `span`, `title`, `year`, `year_value` | Proportional-symbol map — a circle per country, area ∝ value. |
+| `BarChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `horizontal`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Bar chart — a metric across categories. |
+| `BivariateMap` | `annotations`, `cache_ttl`, `col-span`, `color`, `data`, `empty_message`, `explain`, `geojson`, `height`, `id`, `id_field`, `map`, `max_rows`, `scale`, `scheme`, `span`, `title`, `x`, `xlabel`, `xunit`, `y`, `year`, `year_value`, `ylabel`, `yunit` | Bivariate choropleth — two metrics on one map via a 3×3 color matrix. |
+| `BoxPlot` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Box-and-whisker distribution chart. |
+| `BubbleMap` | `annotations`, `cache_ttl`, `col-span`, `color`, `data`, `empty_message`, `explain`, `geojson`, `height`, `id`, `id_field`, `map`, `max_radius`, `max_rows`, `metrics`, `scale`, `scheme`, `span`, `title`, `year`, `year_value` | Proportional-symbol map — a circle per country, area ∝ value. |
 | `ButtonGroup` \* | `all_label`, `bar`, `default`, `filter_bar`, `include_all`, `label`, `name`, `options`, `url_sync` | Single-select filter shown as an inline **segmented control** — a row of pill buttons where exactly one is active ("All · Active · Churned", "Day · Week · Month"). A lower-friction alternative to a `… |
-| `CalendarHeatmap` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | GitHub-style calendar heatmap for daily activity data. |
-| `CandlestickChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Candlestick (OHLC) chart for price/range series. |
-| `Chart` | `auto`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Auto-recommended chart: picks line/bar/scatter from the result shape. |
-| `ChoroplethFacets` | `col-span`, `color`, `columns`, `data`, `empty_message`, `geojson`, `height`, `id`, `id_field`, `label`, `map`, `scale`, `scheme`, `span`, `title`, `unit`, `value`, `year`, `years` | Small-multiple choropleths — one mini world map per year, shared scale. |
-| `ChoroplethTime` | `col-span`, `color`, `data`, `empty_message`, `geojson`, `height`, `id`, `id_field`, `interval`, `map`, `metrics`, `scale`, `scheme`, `span`, `title`, `year` | Animated choropleth — a metric shaded per country, played across time. |
-| `ComboChart` | `bar_color`, `bars`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `empty_message`, `explain`, `format`, `grain`, `height`, `line_color`, `lines`, `locale`, `max_rows`, `right_axis`, `right_currency`, `right_decimals`, `right_format`, `right_locale`, `series`, `sort_by`, `span`, `title`, `x` | Combo chart — bars and lines together, with an optional second y-axis. |
+| `CalendarHeatmap` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | GitHub-style calendar heatmap for daily activity data. |
+| `CandlestickChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Candlestick (OHLC) chart for price/range series. |
+| `Chart` | `annotations`, `auto`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Auto-recommended chart: picks line/bar/scatter from the result shape. |
+| `ChoroplethFacets` | `annotations`, `cache_ttl`, `col-span`, `color`, `columns`, `data`, `empty_message`, `explain`, `geojson`, `height`, `id`, `id_field`, `label`, `map`, `max_rows`, `scale`, `scheme`, `span`, `title`, `unit`, `value`, `year`, `years` | Small-multiple choropleths — one mini world map per year, shared scale. |
+| `ChoroplethTime` | `annotations`, `cache_ttl`, `col-span`, `color`, `data`, `empty_message`, `explain`, `geojson`, `height`, `id`, `id_field`, `interval`, `map`, `max_rows`, `metrics`, `scale`, `scheme`, `span`, `title`, `year` | Animated choropleth — a metric shaded per country, played across time. |
+| `ComboChart` | `annotations`, `bar_color`, `bars`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `empty_message`, `explain`, `format`, `grain`, `height`, `line_color`, `lines`, `locale`, `max_rows`, `right_axis`, `right_currency`, `right_decimals`, `right_format`, `right_locale`, `series`, `sort_by`, `span`, `title`, `x` | Combo chart — bars and lines together, with an optional second y-axis. |
 | `Combobox` \* | `bar`, `column`, `data`, `debounce`, `filter_bar`, `label`, `limit`, `min_chars`, `multi`, `name`, `placeholder`, `url_sync` | Searchable single-select filter for a **high-cardinality** column — type-to-filter over thousands of customers / SKUs / users where a plain `<Dropdown>` (which loads *every* distinct value) would cho… |
 | `Counter` | `breakdown`, `breakdown-by`, `breakdown-column`, `breakdown-label`, `breakdown-legend`, `breakdown-values`, `by`, `col-span`, `color`, `column`, `compare`, `compare-column`, `compare-index`, `compare-row`, `currency`, `data`, `date_format`, `decimals`, `delta`, `format`, `grain`, `index`, `invert-delta`, `label`, `locale`, `metric`, `prefix`, `row`, `series`, `span`, `sparkline`, `sparkline-by`, `sparkline-column`, `suffix` | Display a single value as a large counter/KPI. |
 | `DateRange` \* | `bar`, `debounce`, `default`, `end_param`, `filter_bar`, `label`, `name`, `persist`, `presets`, `start_param`, `url_sync` | Date range picker component with preset ranges and custom selection. |
-| `DotDensityMap` | `col-span`, `color`, `data`, `dot_radius`, `empty_message`, `geojson`, `height`, `id`, `id_field`, `map`, `max_dots`, `metrics`, `scale`, `scheme`, `span`, `title`, `year`, `year_value` | Dot-density map — one dot per fixed quantity, scattered inside borders. |
+| `DotDensityMap` | `annotations`, `cache_ttl`, `col-span`, `color`, `data`, `dot_radius`, `empty_message`, `explain`, `geojson`, `height`, `id`, `id_field`, `map`, `max_dots`, `max_rows`, `metrics`, `scale`, `scheme`, `span`, `title`, `year`, `year_value` | Dot-density map — one dot per fixed quantity, scattered inside borders. |
 | `Dropdown` \* | `bar`, `column`, `data`, `filter_bar`, `label`, `multi`, `name`, `options`, `url_sync` | Dropdown filter. Populates options from the distinct values of a column. |
-| `FunnelChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Funnel chart — stage labels (`x`) with descending values (`y`). |
-| `GaugeChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max`, `max_rows`, `metric`, `min`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Speedometer-style gauge for a single KPI value. |
-| `GraphChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Force-directed network graph from an edge-list query. |
+| `FunnelChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Funnel chart — stage labels (`x`) with descending values (`y`). |
+| `GaugeChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max`, `max_rows`, `metric`, `min`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Speedometer-style gauge for a single KPI value. |
+| `GraphChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Force-directed network graph from an edge-list query. |
 | `Grid` | `cols`, `columns`, `gap` | Lay children out on a fixed-column CSS grid. |
-| `HeatmapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Matrix heatmap — a grid of cells shaded by magnitude. |
-| `LineChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Line chart — a metric over an ordered `x` (usually time). |
-| `MapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `geojson`, `grain`, `height`, `locale`, `location`, `map`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Choropleth map for geospatial data (ECharts geo). |
-| `ParallelChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `dimensions`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Parallel-coordinates plot over several numeric columns. |
-| `PieChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
+| `HeatmapChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Matrix heatmap — a grid of cells shaded by magnitude. |
+| `LineChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Line chart — a metric over an ordered `x` (usually time). |
+| `MapChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `geojson`, `grain`, `height`, `locale`, `location`, `map`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Choropleth map for geospatial data (ECharts geo). |
+| `ParallelChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `dimensions`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Parallel-coordinates plot over several numeric columns. |
+| `PieChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
 | `PivotTable` | `agg`, `data`, `empty_message`, `title`, `values` | Interactive cross-tabulation with drag-and-drop row/column axes. |
-| `RadarChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Radar (spider) chart for comparing several metrics on one shape. |
+| `RadarChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Radar (spider) chart for comparing several metrics on one shape. |
 | `RangeSlider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `max_param`, `min`, `min_param`, `name`, `step`, `url_sync` | Numeric range filter — a dual-handle slider for a *between* bound on a numeric column (price, age, score, …). |
-| `SankeyChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Sankey flow diagram from an edge-list query. |
-| `ScatterChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Scatter plot — two numeric columns as points (`x` vs `y`). |
+| `SankeyChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `source`, `span`, `target`, `title`, `value`, `x`, `y` | Sankey flow diagram from an edge-list query. |
+| `ScatterChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Scatter plot — two numeric columns as points (`x` vs `y`). |
 | `Search` \* | `bar`, `debounce`, `filter_bar`, `label`, `name`, `placeholder`, `url_sync` | Search input component for filtering. |
 | `SiteSearch` | `label`, `max_results`, `placeholder` | Full-text search across every page of the project. |
 | `Slider` \* | `bar`, `currency`, `date_format`, `debounce`, `decimals`, `default`, `filter_bar`, `format`, `label`, `locale`, `max`, `min`, `name`, `step`, `url_sync` | Single-value numeric **threshold** filter — one handle on a track for a ``min rating ≥``, ``price ≤``, ``top N`` style bound. The one-handled sibling of ``<RangeSlider>`` (which carries a low/high pa… |
-| `SunburstChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `max_rows`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
+| `SunburstChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `max_rows`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Sunburst — a hierarchy as nested rings, area encoding the value. |
 | `Tab` | `title` | One panel inside a `<Tabs>` container. |
 | `Table` | `by`, `col-span`, `currency`, `data`, `date_format`, `detail_slug`, `empty_message`, `export`, `export_filename`, `filename`, `format`, `fullscreen`, `grain`, `headers`, `heatmap`, `heatmap_scheme`, `limit`, `link_column`, `link_pattern`, `locale`, `metric`, `page-size`, `row_link`, `search`, `series`, `sort`, `span`, `title` | Data table — renders a query result as a sortable, searchable grid. |
 | `Tabs` | `col-span`, `default`, `label`, `name`, `span`, `url_sync` | Switchable tabbed sections — pure **layout**, not a filter. |
-| `ThemeRiver` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
+| `ThemeRiver` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | ThemeRiver (streamgraph) — stacked categories flowing over time. |
 | `TimeGrain` \* | `bar`, `default`, `filter_bar`, `grains`, `label`, `name`, `native`, `url_sync` | Time-grain picker — writes a `day`/`week`/`month`/… token for `grain={name}`. |
 | `Toggle` \* | `bar`, `default`, `filter_bar`, `label`, `name`, `off_value`, `on_value`, `url_sync`, `variant` | Boolean / toggle filter — a one-click switch (or checkbox) for a two-valued facet ("show only active", "include archived", "paid only"). |
-| `TreeChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `max_rows`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Tree — a hierarchy as a node-link diagram (left-to-right, collapsible). |
-| `TreemapChart` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Treemap — categories as nested rectangles sized by value. |
+| `TreeChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `id`, `label`, `locale`, `max_rows`, `metric`, `parent`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Tree — a hierarchy as a node-link diagram (left-to-right, collapsible). |
+| `TreemapChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Treemap — categories as nested rectangles sized by value. |
 | `Value` | `by`, `column`, `currency`, `data`, `date_format`, `decimals`, `format`, `grain`, `index`, `locale`, `metric`, `prefix`, `row`, `series`, `suffix` | Display a single value from a query result. |
-| `Violin` | `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Violin (kernel density) distribution chart; same attributes as BoxPlot. |
+| `Violin` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Violin (kernel density) distribution chart; same attributes as BoxPlot. |
 
 ## Connectors (16)
 
@@ -2503,6 +2503,7 @@ example; the common attributes are here.
 | `format`, `currency`, `decimals`, `locale`, `date_format` | Value-axis & tooltip number/date formatting — see [Formatting](/formatting). |
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
 | `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question, `cache_ttl=` tunes the answer cache — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
+| `annotations`  | `false` keeps an explained chart **commentary-only** — the AI never proposes (or draws) [marks on the plot](/ai/ask#annotations-on-the-chart). Default `true`. |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
@@ -3650,7 +3651,8 @@ zoomed. `location` names the region column, `value` the metric; the built-in
 The `explain` attribute works here like on any chart — and the [AI
 commentary](/ai/ask#annotations-on-the-chart) can highlight regions on the
 map, each one validated against the locations the query actually returned.
-(The SVG geo maps below are commentary-only for now.)
+(The SVG geo maps below take `explain` too — see
+[AI commentary on geo maps](#ai-commentary-on-geo-maps).)
 
 Like every chart, MapChart also takes [semantic metric refs](/semantic-layer)
 instead of `data={query}` — `by` is the region dimension (its values must match
@@ -3760,6 +3762,29 @@ deliberately left to the page, so a map never traps the wheel.
 (ChoroplethFacets panels stay un-zoomable small multiples — fullscreen is the
 "see them bigger" affordance there.)
 
+## AI commentary on geo maps
+
+Every geo map takes the charts' `explain` attribute (needs an
+[`llm:` block](/ai/ask#configuration)): a hover-revealed ✨ button that
+generates commentary on demand into a footer under the map. On **BubbleMap**
+and **DotDensityMap** the commentary can also [mark the map
+itself](/ai/ask#annotations-on-the-chart): a cited country gets a dashed
+**halo ring** with a leader-line label, referenced from the text by numbered
+chips (hover a chip to bold its halo). Every proposal is validated
+server-side against the join ids in the active year slice — a country the
+frame doesn't draw can't earn a halo — and a halo scoped to one metric shows
+only while that metric is toggled active. The choropleths
+(ChoroplethTime/ChoroplethFacets/BivariateMap) stay commentary-only: facets,
+animation frames, and two-metric encodings give one static mark nothing
+stable to point at. `annotations=false` keeps any map commentary-only;
+`explain="…"` and `cache_ttl=` work exactly as on charts.
+
+```markdown
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020"
+    metrics="population|Population|people" max_radius=35
+    title="Population, 2020" explain />
+```
+
 ## Shared attributes
 
 Every map takes `data={query}` plus:
@@ -3776,6 +3801,9 @@ Every map takes `data={query}` plus:
 | `height` | Pixel height (default `420`). |
 | `col-span` | Columns to span inside a `<Grid>`. |
 | `empty_message` | Text shown when the query returns no rows. |
+| `explain` | AI commentary footer, ✨ on hover (`explain="…"` pins your own question) — see [above](#ai-commentary-on-geo-maps). |
+| `annotations` | `false` keeps an explained BubbleMap/DotDensityMap commentary-only (no halo marks). |
+| `cache_ttl` / `max_rows` | Explain answer-cache TTL and row cap, as on charts. |
 
 ## ChoroplethTime
 
@@ -3833,10 +3861,10 @@ value, over a muted basemap. `max_radius=` caps the largest circle; several
 ```markdown
 <BubbleMap data={world_indicators} id="iso" year="year" year_value="2020"
     metrics="population|Population|people" max_radius=35
-    title="Population, 2020" />
+    title="Population, 2020" explain />
 ```
 
-<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people" max_radius=35 title="Population, 2020" />
+<BubbleMap data={world_indicators} id="iso" year="year" year_value="2020" metrics="population|Population|people" max_radius=35 title="Population, 2020" explain />
 
 ## DotDensityMap
 
@@ -5602,10 +5630,13 @@ On line, bar, scatter, and combo charts, explain doesn't just write — it can
 on the peak, a highlighted bar. Pie and funnel charts get a called-out slice
 or stage (a dashed outline, with the annotation's label as a leader-line
 callout on pies), and `<MapChart>` gets a highlighted region with its label
-drawn on the map. Each mark is cited from the commentary by a small numbered
-chip (hover or focus a chip to bold its mark; the chip's tooltip carries the
-label). The marks appear when the commentary opens and clear when you close
-the footer.
+drawn on the map. On the SVG geo maps [`<BubbleMap>` and
+`<DotDensityMap>`](/components/maps) the mark is a dashed **halo ring** with a
+leader-line label on the cited country. Each mark is cited from the commentary
+by a small numbered chip (hover or focus a chip to bold its mark; the chip's
+tooltip carries the label). The marks appear when the commentary opens and
+clear when you close the footer. `annotations=false` on any chart keeps the
+commentary but never asks for (or draws) marks.
 
 Restraint is enforced, not just prompted: the model may propose at most a
 handful of annotations (an empty set is a perfectly good answer for an
@@ -5619,9 +5650,11 @@ Chart types with no mark a validated annotation could safely target keep
 **commentary-only** explain — by decision, not omission: radar, gauge, sankey,
 graph, sunburst, tree, parallel, theme river, calendar heatmap, box plot,
 violin, treemap, candlestick, and heatmap, plus faceted pies (`series=` small
-multiples) and the SVG geo maps (`<BubbleMap>`/`<DotDensityMap>`). Charts
-bound to a [`live` streaming query](/realtime) are also commentary-only —
-their data changes under the marks every poll interval.
+multiples) and the choropleth geo maps
+(`<ChoroplethTime>`/`<ChoroplethFacets>`/`<BivariateMap>` — facets, animation
+frames, and two-metric encodings give one static mark nothing stable to point
+at). Charts bound to a [`live` streaming query](/realtime) are also
+commentary-only — their data changes under the marks every poll interval.
 
 #### See it in action
 
@@ -5660,6 +5693,13 @@ highlight a country that isn't in the data:
 ```
 
 <MapChart data={downloads_by_country} location="country" value="downloads" title="Downloads by country" height=380 explain />
+
+The SVG geo maps work the same way with a **halo ring**: on a
+[`<BubbleMap>` or `<DotDensityMap>`](/components/maps) the model cites
+countries by the same join id the data carries, each proposal is validated
+against the ids in the active year slice (a country with nothing drawn can't
+earn a halo), and a halo the model scoped to one metric shows only while that
+metric is toggled active.
 
 `max_rows=` on the chart tunes how many rows the model sees (annotated
 explains default to 200 — more than `<Ask>`'s 50 — so proposals ground in the

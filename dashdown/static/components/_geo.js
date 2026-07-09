@@ -939,7 +939,7 @@ export function sliceYear(records, config) {
  * Dashdown filter control, so it works in static exports with every frame
  * already baked into the one query). No-op (returns null) for one metric.
  */
-export function metricToggle(metrics, onChange) {
+export function metricToggle(metrics, onChange, initial = 0) {
   if (!metrics || metrics.length < 2) return null;
   const wrap = document.createElement("div");
   wrap.className = "dashdown-map-toggle";
@@ -949,7 +949,7 @@ export function metricToggle(metrics, onChange) {
     btn.type = "button";
     btn.className = "dashdown-map-toggle-btn";
     btn.textContent = m.label || m.column;
-    if (i === 0) btn.classList.add("is-active");
+    if (i === initial) btn.classList.add("is-active");
     btn.addEventListener("click", () => {
       buttons.forEach((b) => b.classList.toggle("is-active", b === btn));
       onChange(i);
@@ -958,4 +958,112 @@ export function metricToggle(metrics, onChange) {
     return btn;
   });
   return wrap;
+}
+
+// --- explain chart annotations (geo_item halos) ----------------------------------
+
+/**
+ * Draw the explain payload's `geo_item` annotations into `layer` — a `<g>` the
+ * caller appends AFTER its data layers: a dashed halo ring at the feature's
+ * anchor point plus a leader-line label. Everything is in viewBox coordinates
+ * through the shared projection, so the marks survive pan/zoom for free
+ * (strokes stay hairline via vector-effect, like the shapes). The caller
+ * redraws on every draw()/update(), which also covers the fullscreen modal
+ * via the renderer registry.
+ *
+ * Only server-validated payloads reach `config.annotations` (set by ask.js
+ * from the explain response); a location the current frame no longer draws
+ * simply doesn't mark — the same stale-annotation posture as the cartesian
+ * charts (annotations.js).
+ *
+ * @param {SVGGElement} layer - the annotation group; cleared and refilled
+ * @param {Object} world - `{byId, frame}` from loadGeometry
+ * @param {Object} config - carries `annotations` and `_annoEmphasis` (the id
+ *   of the mark a hovered/focused ref chip is bolding)
+ * @param {Object} [opts]
+ * @param {(id: string) => number} [opts.radiusFor] - the data symbol's radius
+ *   at that feature, in viewBox units (BubbleMap rings the bubble; default 0
+ *   keeps the minimum halo)
+ * @param {string} [opts.activeMetric] - the active metric column; a mark the
+ *   server scoped to another metric stays hidden until that metric is toggled
+ * @param {(id: string) => boolean} [opts.hasDatum] - whether the current
+ *   (filtered, year-sliced) data still covers that feature; a location that
+ *   raced a filter change loses its halo instead of ringing empty basemap
+ */
+export function drawGeoAnnotations(layer, world, config, opts = {}) {
+  layer.textContent = "";
+  const annotations = Array.isArray(config.annotations) ? config.annotations : [];
+  if (!annotations.length) return;
+
+  const frame = world.frame || { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  // Card-relative sizing, like bubble radii: an auto-fit custom frame scales
+  // the halos and labels with it.
+  const k = frame.w / MAP_W;
+  const radiusFor = opts.radiusFor || (() => 0);
+
+  annotations.forEach((a) => {
+    if (a.type !== "geo_item" || a.name == null) return;
+    if (a.metric && opts.activeMetric && a.metric !== opts.activeMetric) return;
+    const id = normalizeId(a.name);
+    const feature = id !== null ? world.byId[id] : null;
+    if (!feature) return; // not in this basemap — skip silently
+    if (opts.hasDatum && !opts.hasDatum(id)) return; // stale after filter drift
+    const anchor = centroid(feature.geometry);
+    if (!anchor) return;
+    const [cx, cy] = project(anchor[0], anchor[1]);
+
+    const emphasized = (config._annoEmphasis || null) === a.id;
+    const g = svgEl("g", {
+      class: "dashdown-map-anno" + (emphasized ? " is-emphasized" : ""),
+      "data-anno-id": a.id,
+      "pointer-events": "none",
+      // Decorative: the commentary text (and its chip tooltips) carry the
+      // same information for screen readers.
+      "aria-hidden": "true",
+    });
+    const r = Math.max(radiusFor(id) + 4 * k, 9 * k);
+    g.appendChild(
+      svgEl("circle", {
+        cx: cx.toFixed(1),
+        cy: cy.toFixed(1),
+        r: r.toFixed(2),
+        class: "dashdown-map-anno-halo",
+        "vector-effect": "non-scaling-stroke",
+      })
+    );
+
+    const label =
+      a.label || (feature.properties && feature.properties.name) || "";
+    if (label) {
+      // Leader line from the halo's upper shoulder to a short horizontal
+      // shelf the label sits on; flips left near the frame's right edge so
+      // the text stays inside the card.
+      const flip = cx > frame.x + frame.w * 0.72;
+      const dir = flip ? -1 : 1;
+      const x1 = cx + dir * r * 0.7071;
+      const y1 = cy - r * 0.7071;
+      const x2 = x1 + dir * 9 * k;
+      const y2 = y1 - 7 * k;
+      const x3 = x2 + dir * 7 * k;
+      g.appendChild(
+        svgEl("path", {
+          d: `M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}H${x3.toFixed(1)}`,
+          class: "dashdown-map-anno-leader",
+          fill: "none",
+          "vector-effect": "non-scaling-stroke",
+        })
+      );
+      const text = svgEl("text", {
+        x: (x3 + dir * 2 * k).toFixed(1),
+        y: y2.toFixed(1),
+        class: "dashdown-map-anno-label",
+        "font-size": (11 * k).toFixed(2),
+        "text-anchor": flip ? "end" : "start",
+        "dominant-baseline": "middle",
+      });
+      text.textContent = label;
+      g.appendChild(text);
+    }
+    layer.appendChild(g);
+  });
 }

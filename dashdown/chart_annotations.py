@@ -61,10 +61,13 @@ _MAX_LABEL_LEN = 80
 #: treemap, candlestick and heatmap have no mark grammar a validated
 #: annotation could safely target. Faceted pies (``series=`` small multiples)
 #: are excluded in :func:`build_chart_context` — their client series indexes
-#: are patched per facet and a mark can't address one pie. The SVG geo maps
-#: (BubbleMap/DotDensityMap) land in backlog Phase 4. Adding a type here
-#: without a translator branch in static/components/annotations.js would
-#: validate marks the chart can't draw.
+#: are patched per facet and a mark can't address one pie. The other SVG geo
+#: maps (ChoroplethTime/ChoroplethFacets/BivariateMap) stay commentary-only:
+#: their per-year facets / animation frames / two-metric encoding give one
+#: static halo nothing stable to point at. Adding a type here without a
+#: translator branch in static/components/annotations.js (cartesian/ECharts)
+#: or the _geo.js annotation layer (SVG maps) would validate marks the chart
+#: can't draw.
 ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     "line": frozenset({"axis_line", "range", "point", "extremum"}),
     "bar": frozenset({"axis_line", "range", "extremum", "item"}),
@@ -83,7 +86,19 @@ ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     # MapChart (ECharts choropleth): call out one region by feature name,
     # validated against the query's location column.
     "map": frozenset({"geo_item"}),
+    # The hand-drawn SVG geo maps: ring one location (halo + leader-line label
+    # in _geo.js::drawGeoAnnotations). Validated against the query's *join id*
+    # column, normalized like the client's normalizeId — and against the
+    # active year slice, since that's the frame the viewer sees.
+    "bubble-map": frozenset({"geo_item"}),
+    "dot-density-map": frozenset({"geo_item"}),
 }
+
+#: Chart types whose "x" is semantically a location. ``map`` addresses
+#: features by GeoJSON name (the MapChart join); the SVG maps address them by
+#: the normalized join id (``_dashdownId`` client-side).
+_GEO_TYPES = frozenset({"map", "bubble-map", "dot-density-map"})
+_SVG_GEO_TYPES = frozenset({"bubble-map", "dot-density-map"})
 
 #: The [aN] ref token the model places in its commentary text.
 _REF_TOKEN_RE = re.compile(r"\[(a\d+)\]")
@@ -257,6 +272,56 @@ def _x_is_numeric(chart_type: str) -> bool:
     return chart_type == "scatter"
 
 
+#: Leading-integer prefix — the slice of JS ``parseInt`` semantics geo join
+#: ids actually exercise ("004", 4 and "4" all mean Afghanistan).
+_INT_PREFIX_RE = re.compile(r"\s*[+-]?\d+")
+
+
+def normalize_geo_id(value: Any) -> str | None:
+    """Server twin of ``_geo.js::normalizeId`` — the canonical join key the
+    client stamps on features as ``_dashdownId``. Both sides of a geo_item
+    match (candidate and data) normalize through here, so "004" in the query
+    matches the model echoing 4."""
+    if value is None:
+        return None
+    text = cell_text(value).strip()
+    if not text:
+        return None
+    m = _INT_PREFIX_RE.match(text)
+    if m:
+        return str(int(m.group()))
+    return text
+
+
+def _year_sliced(result: QueryResult, ctx: ChartContext) -> QueryResult:
+    """The rows an SVG geo map actually draws: with a ``year`` column, only
+    the configured ``year_value`` (else the latest year) — mirroring the
+    client's ``sliceYear``. Grounding and validation both run on this slice,
+    so a location present only in older years can't earn a halo the current
+    frame has nothing to draw on. Non-geo charts pass through untouched."""
+    if ctx.chart_type not in _SVG_GEO_TYPES:
+        return result
+    extra = dict(ctx.extra)
+    idx = _column_index(result, extra.get("year"))
+    if idx is None:
+        return result
+    target = (extra.get("year_value") or "").strip()
+    if not target:
+        latest: tuple[float, str] | None = None
+        for row in result.rows:
+            v = row[idx] if idx < len(row) else None
+            n = _as_number(v)
+            if n is None:
+                continue
+            if latest is None or n > latest[0]:
+                latest = (n, cell_text(v))
+        if latest is None:
+            return result
+        target = latest[1]
+    rows = [r for r in result.rows if idx < len(r) and cell_text(r[idx]) == target]
+    return QueryResult(columns=result.columns, rows=rows)
+
+
 def _value_axis_columns(ctx: ChartContext) -> list[str]:
     """The value column(s) whose numeric domain grounds (in the prompt) and
     validates the value-axis marks — ``axis_line``/``range`` on ``y``.
@@ -322,18 +387,32 @@ _ITEM_SHAPE_PART_OF_WHOLE = (
     "— highlights that slice or stage"
 )
 
+#: The SVG geo maps join on an id column (ISO codes, not names) — teach the
+#: model to echo the ids the data carries. With several metrics the optional
+#: ``metric`` field scopes the halo to one of them (it only shows while that
+#: metric is toggled active).
+_GEO_ITEM_SHAPE_SVG = (
+    '{"type": "geo_item", "id": "<location id from the data>", '
+    '"label": "<short label>"} — rings that location on the map'
+)
+_GEO_ITEM_SHAPE_SVG_MULTI = (
+    '{"type": "geo_item", "id": "<location id from the data>", '
+    '"metric": "<metric column>" (optional), "label": "<short label>"} '
+    "— rings that location on the map (shown only while that metric is active)"
+)
+
 
 def _shape_summary(ctx: ChartContext) -> str:
     # A map's x/y are semantically location/value — name them that way so the
     # model reasons about regions, not axes.
-    is_map = ctx.chart_type == "map"
+    is_map = ctx.chart_type in _GEO_TYPES
     bits = [f"a {ctx.chart_type} chart"]
     if ctx.x:
         bits.append(f"{'location' if is_map else 'x'} column '{ctx.x}'")
     ys = ctx.y_columns
     if ys:
         if is_map:
-            label = "value column"
+            label = "value columns" if len(ys) > 1 else "value column"
         else:
             label = "y columns" if len(ys) > 1 else "y column"
         bits.append(f"{label} {', '.join(repr(c) for c in ys)}")
@@ -356,6 +435,10 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     validation passes more often), the restraint instruction, and the output
     protocol (terminal fenced block + ``[aN]`` refs)."""
     allowed = sorted(ANNOTATION_VOCAB.get(ctx.chart_type, frozenset()))
+    is_geo = ctx.chart_type in _GEO_TYPES
+    # An SVG geo map draws one year frame at a time — ground the model (and
+    # the validator, which slices identically) in the frame the viewer sees.
+    result = _year_sliced(result, ctx)
     lines = [
         "You may also propose visual annotations to draw on the chart "
         f"({_shape_summary(ctx)}).",
@@ -373,7 +456,12 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
             suffix = (
                 f" (first {len(shown)} of {len(cats)})" if len(cats) > len(shown) else ""
             )
-            cats_label = "Location names" if ctx.chart_type == "map" else "X categories"
+            if ctx.chart_type in _SVG_GEO_TYPES:
+                cats_label = "Location ids"
+            elif is_geo:
+                cats_label = "Location names"
+            else:
+                cats_label = "X categories"
             lines.append(f"{cats_label}{suffix}: {', '.join(shown)}")
     y_idx = [
         i
@@ -382,12 +470,15 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     ]
     y_domain = _numeric_domain(result, y_idx) if y_idx else None
     if y_domain is not None:
-        val_label = "Values" if ctx.chart_type == "map" else "Y values"
+        val_label = "Values" if is_geo else "Y values"
         lines.append(f"{val_label} range from {y_domain[0]:g} to {y_domain[1]:g}.")
     series = sorted(_series_names(result, ctx))
     if len(series) > 1:
         shown_series = series[:_MAX_PROMPT_SERIES]
-        lines.append(f"Series names: {', '.join(shown_series)}")
+        # A geo map's y columns are toggleable metrics, not coloured series —
+        # name them the way the geo_item `metric` field addresses them.
+        series_label = "Metric columns" if is_geo else "Series names"
+        lines.append(f"{series_label}: {', '.join(shown_series)}")
 
     lines.append("Allowed annotation types (JSON objects):")
     for t in allowed:
@@ -395,6 +486,13 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
         # Pie/funnel have one series — don't advertise the `series` field there.
         if t == "item" and ctx.chart_type in ("pie", "funnel"):
             shape = _ITEM_SHAPE_PART_OF_WHOLE
+        # The SVG geo maps join on ids, not names.
+        if t == "geo_item" and ctx.chart_type in _SVG_GEO_TYPES:
+            shape = (
+                _GEO_ITEM_SHAPE_SVG_MULTI
+                if len(ctx.y_columns) > 1
+                else _GEO_ITEM_SHAPE_SVG
+            )
         lines.append(f"- {shape}")
     lines.append(
         "Propose at most 3 annotations, only where a mark genuinely helps a "
@@ -409,7 +507,12 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
     elif "item" in allowed:
         example = '[{"type": "item", "x": "June", "label": "Standout"}]'
     elif "geo_item" in allowed:
-        example = '[{"type": "geo_item", "name": "Germany", "label": "Top market"}]'
+        if ctx.chart_type in _SVG_GEO_TYPES:
+            example = '[{"type": "geo_item", "id": "276", "label": "Top market"}]'
+        else:
+            example = (
+                '[{"type": "geo_item", "name": "Germany", "label": "Top market"}]'
+            )
     else:
         example = (
             '[{"type": "axis_line", "axis": "y", "value": 100, "label": "Target"}]'
@@ -526,11 +629,26 @@ def validate_annotations(
     if not vocab or not isinstance(candidates, list):
         return []
 
+    # SVG geo maps validate against the year frame the viewer sees (the same
+    # slice annotation_instructions grounded the model in).
+    result = _year_sliced(result, ctx)
+
     x_idx = _column_index(result, ctx.x)
     x_numeric = _x_is_numeric(ctx.chart_type)
     categories = (
         set(_x_categories(result, x_idx)) if (x_idx is not None and not x_numeric) else set()
     )
+    # Normalized-id → row map for the SVG geo maps: geo_item candidates match
+    # through the same normalization the client applies (_dashdownId), and the
+    # matched row backs the has-a-positive-value check (a location with no
+    # drawable symbol shouldn't earn a halo).
+    geo_rows: dict[str, Any] = {}
+    if ctx.chart_type in _SVG_GEO_TYPES and x_idx is not None:
+        for row in result.rows:
+            if x_idx < len(row):
+                norm = normalize_geo_id(row[x_idx])
+                if norm is not None:
+                    geo_rows.setdefault(norm, row)
     x_domain = (
         _numeric_domain(result, [x_idx]) if (x_idx is not None and x_numeric) else None
     )
@@ -647,16 +765,40 @@ def validate_annotations(
                     out["series"] = series
 
         elif a_type == "geo_item":
-            # The prompt teaches `name`; accept `id` as a fallback spelling
-            # (the Phase-4 SVG geo maps will formalize normalized feature
-            # ids). Either way it must name a location the query returned.
+            # MapChart's prompt teaches `name`, the SVG geo maps teach `id`;
+            # accept either spelling. Either way it must address a location
+            # the (year-sliced) query returned.
             raw = candidate.get("name")
             if raw is None or (isinstance(raw, str) and not raw.strip()):
                 raw = candidate.get("id")
-            name_text = cell_text(raw).strip() if raw is not None else ""
-            if not name_text or name_text not in categories:
-                continue
-            out["name"] = name_text
+            if ctx.chart_type in _SVG_GEO_TYPES:
+                norm = normalize_geo_id(raw)
+                row = geo_rows.get(norm) if norm is not None else None
+                if row is None:
+                    continue
+                # An optional `metric` scopes the halo to one toggleable
+                # metric; an unknown one is model noise — drop the field, not
+                # the mark (the halo then shows on every metric).
+                metric = candidate.get("metric")
+                metric = metric.strip() if isinstance(metric, str) else ""
+                metric_cols = (
+                    [metric] if metric in ctx.y_columns else ctx.y_columns
+                )
+                values = (
+                    _as_number(row[i])
+                    for i in (_column_index(result, c) for c in metric_cols)
+                    if i is not None and i < len(row)
+                )
+                if not any(v is not None and v > 0 for v in values):
+                    continue  # nothing drawn there — no symbol to ring
+                out["name"] = norm
+                if metric in ctx.y_columns:
+                    out["metric"] = metric
+            else:
+                name_text = cell_text(raw).strip() if raw is not None else ""
+                if not name_text or name_text not in categories:
+                    continue
+                out["name"] = name_text
 
         survivors.append(out)
 
