@@ -1639,6 +1639,22 @@ _SPLIT_RESULT = QueryResult(
     ],
 )
 
+# Combo with two y-axes at very different scales: revenue (left, 90–200) and
+# orders (right, 4–9). Value-axis marks must ground against the LEFT axis only.
+_COMBO_CTX = ChartContext(
+    chart_type="combo",
+    x="month",
+    y="revenue,orders",
+    extra=(("bars", "revenue"), ("lines", "orders"), ("right_axis", "orders")),
+)
+_COMBO_RESULT = QueryResult(
+    columns=["month", "revenue", "orders"],
+    rows=[
+        ["Jan", 100, 5], ["Feb", 120, 6], ["Mar", 90, 4],
+        ["Apr", 160, 8], ["May", 140, 7], ["Jun", 200, 9],
+    ],
+)
+
 
 class TestChartAnnotationValidation:
     def test_axis_line_y_within_domain_survives(self):
@@ -2022,6 +2038,56 @@ class TestAnnotationInstructions:
         text = annotation_instructions(ctx, result)
         assert "X values range from 10 to 30" in text
         assert "X categories" not in text
+
+    def test_combo_grounds_y_on_left_axis_and_omits_point(self):
+        text = annotation_instructions(_COMBO_CTX, _COMBO_RESULT)
+        # The reported Y domain is the LEFT axis (revenue 90–200), NOT the merged
+        # bars+lines domain (which would start at orders' 4) — so the model
+        # grounds threshold/range marks against the axis they actually draw on.
+        assert "Y values range from 90 to 200" in text
+        # Combo dropped the free-coordinate point from its vocabulary.
+        assert '"type": "point"' not in text
+        assert '"type": "extremum"' in text
+
+
+# --------------------------------------------------------------------------- #
+# Combo dual-axis: value marks scope to the left axis; free point is out
+# --------------------------------------------------------------------------- #
+class TestComboAnnotationAxes:
+    def test_combo_drops_free_point(self):
+        # Combo carries two y-axes at different scales, so a free-coordinate
+        # point (an explicit x+y) can't be grounded — it's out of the vocabulary.
+        out = validate_annotations(
+            [{"type": "point", "x": "Jun", "y": 200, "label": "Peak"}],
+            _COMBO_RESULT,
+            _COMBO_CTX,
+        )
+        assert out == []
+
+    def test_combo_axis_line_validates_against_left_axis(self):
+        # 150 sits in the LEFT (revenue) domain → survives; 7 is a right-axis
+        # (orders) magnitude far below the left domain → dropped, even though a
+        # naive merged bars+lines domain would have waved it through.
+        out = validate_annotations(
+            [
+                {"type": "axis_line", "axis": "y", "value": 150, "label": "Left"},
+                {"type": "axis_line", "axis": "y", "value": 7, "label": "Right"},
+            ],
+            _COMBO_RESULT,
+            _COMBO_CTX,
+        )
+        assert [a["value"] for a in out] == [150.0]
+
+    def test_combo_extremum_on_right_axis_series_survives(self):
+        # extremum carries no coordinate — ECharts recomputes it per series on
+        # that series' own axis — so a right-axis line is still a valid target.
+        out = validate_annotations(
+            [{"type": "extremum", "kind": "max", "series": "orders"}],
+            _COMBO_RESULT,
+            _COMBO_CTX,
+        )
+        assert len(out) == 1
+        assert out[0]["series"] == "orders"
 
 
 # --------------------------------------------------------------------------- #

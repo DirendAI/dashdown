@@ -16,3 +16,4 @@ format:
 llm:
   provider: mistral
   api_key: ${MISTRAL_API_KEY}
+  model: mistral-medium-latest

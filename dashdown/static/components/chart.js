@@ -391,6 +391,21 @@ export function initChart(el) {
           }
         }
       },
+      // Rebuild the option from the last-rendered records (stashed by
+      // updateChart) with NO data round-trip — used by the explain-annotation
+      // helpers so applying/clearing/emphasizing marks repaints the current
+      // reading instead of re-running render()'s fetch. Falls back to render()
+      // if nothing has painted yet.
+      repaint() {
+        const records = el._chartRecords;
+        if (Array.isArray(records) && records.length) {
+          updateChart(el, records, config);
+        } else {
+          const filters =
+            window.Alpine && Alpine.store ? { ...(Alpine.store("filters") || {}) } : {};
+          this.render(filters);
+        }
+      },
     };
 
     // "Filtered by" corner marker (reactive to filter state; self-gates).
@@ -1990,8 +2005,13 @@ export function updateChart(el, records, config) {
     }
     delete el._donutTotal;
     delete el._facetCount;
+    delete el._chartRecords;
     return;
   }
+
+  // Stash the drawn records so instance.repaint() (explain-annotation marks)
+  // can rebuild the option without a data round-trip.
+  el._chartRecords = records;
 
   if (config.type === "map") {
     wireMapRoamGuard(el);

@@ -157,9 +157,9 @@ def _combo_html(attrs: dict[str, Any], ctx: RenderContext) -> str:
     height = attr_int(attrs, "height", 320) or 320
     span = grid_span_style(attrs)
     # Combo's bespoke shape for the explain affordance: `y` carries every value
-    # column (bars + lines — one shared domain for annotation validation), and
-    # the bar/line/right-axis split rides `extra` so a re-rolled mix mints a
-    # fresh ask id.
+    # column (bars + lines), and the bar/line/right-axis split rides `extra` so
+    # a re-rolled mix mints a fresh ask id — and lets the validator scope
+    # value-axis marks to the LEFT axis (chart_annotations._value_axis_columns).
     chart_context = build_chart_context(
         "combo",
         x=x,

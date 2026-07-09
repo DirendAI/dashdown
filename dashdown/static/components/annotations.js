@@ -266,29 +266,40 @@ export function applyChartAnnotations(option, config, records) {
   for (const [idx, marks] of buckets) {
     const series = option.series[idx];
     if (!series) continue;
-    if (marks.lines.length) {
-      series.markLine = {
-        silent: true,
-        symbol: "none",
-        animation: false,
-        data: marks.lines,
-      };
-    }
-    if (marks.areas.length) {
-      series.markArea = { silent: true, animation: false, data: marks.areas };
-    }
-    if (marks.points.length) {
-      series.markPoint = { silent: true, animation: false, data: marks.points };
-    }
+    if (marks.lines.length)
+      mergeMark(series, "markLine", { symbol: "none" }, marks.lines);
+    if (marks.areas.length) mergeMark(series, "markArea", {}, marks.areas);
+    if (marks.points.length) mergeMark(series, "markPoint", {}, marks.points);
   }
 }
 
-/** Re-render the chart hosting `el` with the current filter state. The data
- * fetch is a cache hit within TTL, so this repaints without a network round
- * trip. (initChart stashes the instance on the element.) */
+/**
+ * Append explain marks to a series' mark* channel without clobbering any the
+ * chart drew natively. No supported chart type currently sets markLine/
+ * markPoint/markArea itself, but a future one might — appending to the existing
+ * `.data` (keeping its wrapper config) keeps this forward-safe.
+ */
+function mergeMark(series, key, extra, data) {
+  const existing = series[key];
+  if (existing && Array.isArray(existing.data)) {
+    existing.data = existing.data.concat(data);
+  } else {
+    series[key] = { silent: true, animation: false, ...extra, data };
+  }
+}
+
+/** Repaint the chart hosting `el` so a mark change (apply / clear / emphasize)
+ * shows. Prefers `instance.repaint()`, which rebuilds from the last-rendered
+ * records with no data round-trip — so bolding a mark on chip hover doesn't
+ * re-run the fetch path every mouseenter. Falls back to a full filter-driven
+ * render before the chart's first paint. (initChart stashes the instance.) */
 function rerenderChart(el) {
   const instance = el && el._chartInstance;
   if (!instance) return;
+  if (typeof instance.repaint === "function") {
+    instance.repaint();
+    return;
+  }
   const filters =
     window.Alpine && Alpine.store ? { ...(Alpine.store("filters") || {}) } : {};
   instance.render(filters);

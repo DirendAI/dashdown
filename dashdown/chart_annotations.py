@@ -64,7 +64,12 @@ ANNOTATION_VOCAB: dict[str, frozenset[str]] = {
     "line": frozenset({"axis_line", "range", "point", "extremum"}),
     "bar": frozenset({"axis_line", "range", "extremum", "item"}),
     "scatter": frozenset({"axis_line", "range", "point"}),
-    "combo": frozenset({"axis_line", "range", "point", "extremum"}),
+    # Combo carries two y-axes at different scales, so a free-coordinate `point`
+    # (an explicit x+y the model picks) can't be grounded against one domain —
+    # it's excluded. `axis_line`/`range` validate against the LEFT axis only
+    # (see _value_axis_columns) since they draw on series 0's axis, and
+    # `extremum` is per-series (ECharts recomputes it on that series' own axis).
+    "combo": frozenset({"axis_line", "range", "extremum"}),
 }
 
 #: The [aN] ref token the model places in its commentary text.
@@ -234,6 +239,30 @@ def _x_is_numeric(chart_type: str) -> bool:
     return chart_type == "scatter"
 
 
+def _value_axis_columns(ctx: ChartContext) -> list[str]:
+    """The value column(s) whose numeric domain grounds (in the prompt) and
+    validates the value-axis marks — ``axis_line``/``range`` on ``y``.
+
+    For a **combo** chart this is only the LEFT/primary axis columns: those
+    marks draw on series 0, which rides the left axis, so validating a
+    right-axis magnitude (a different scale) against them would place the mark
+    against the wrong ruler. ``extremum`` is unaffected — it carries no
+    coordinate and ECharts recomputes it per series, on that series' own axis.
+    Every other chart type uses all its y columns.
+    """
+    cols = ctx.y_columns
+    if ctx.chart_type != "combo":
+        return cols
+    right = {
+        c.strip()
+        for c in dict(ctx.extra).get("right_axis", "").split(",")
+        if c.strip()
+    }
+    left = [c for c in cols if c not in right]
+    # A combo with everything on the right axis is degenerate; fall back to all.
+    return left or cols
+
+
 # --------------------------------------------------------------------------- #
 # Prompt fragment
 # --------------------------------------------------------------------------- #
@@ -310,7 +339,9 @@ def annotation_instructions(ctx: ChartContext, result: QueryResult) -> str:
             )
             lines.append(f"X categories{suffix}: {', '.join(shown)}")
     y_idx = [
-        i for i in (_column_index(result, c) for c in ctx.y_columns) if i is not None
+        i
+        for i in (_column_index(result, c) for c in _value_axis_columns(ctx))
+        if i is not None
     ]
     y_domain = _numeric_domain(result, y_idx) if y_idx else None
     if y_domain is not None:
@@ -369,13 +400,21 @@ def split_annotated_answer(raw: str) -> tuple[str, list[dict]]:
     return commentary, candidates
 
 
+#: The space-before-punctuation gap a removed inline ``[aN]`` token strands
+#: ("June [a1]." → "June ."). Shared by :func:`strip_ref_tokens` and
+#: :func:`inject_refs` so the two never drift on the punctuation set. Kept to
+#: just this — no run-of-spaces collapse — so it is safe on rendered HTML too,
+#: where a doubled space can be significant (e.g. inside a ``<pre>`` block).
+_PUNCT_GAP_RE = re.compile(r"[ \t]+([.,;:!?)])")
+
+
 def strip_ref_tokens(commentary_md: str) -> str:
     """Remove every ``[aN]`` token from the replayable plain text. The
     typewriter replay shows raw text — chips only exist in the rendered HTML,
     so tokens would read as literal ``[a1]`` noise while typing."""
-    text = _REF_TOKEN_RE.sub("", commentary_md)
-    # Collapse the double spaces removal leaves behind ("June [a1]." → "June .").
-    text = re.sub(r"[ \t]+([.,;:!?)])", r"\1", text)
+    text = _PUNCT_GAP_RE.sub(r"\1", _REF_TOKEN_RE.sub("", commentary_md))
+    # Plain replay text (never HTML): also collapse the doubled space the token
+    # itself leaves behind ("June  July" → "June July").
     return re.sub(r"[ \t]{2,}", " ", text)
 
 
@@ -441,7 +480,9 @@ def validate_annotations(
         _numeric_domain(result, [x_idx]) if (x_idx is not None and x_numeric) else None
     )
     y_idx = [
-        i for i in (_column_index(result, c) for c in ctx.y_columns) if i is not None
+        i
+        for i in (_column_index(result, c) for c in _value_axis_columns(ctx))
+        if i is not None
     ]
     y_domain = _numeric_domain(result, y_idx) if y_idx else None
     valid_series = _series_names(result, ctx)
@@ -585,5 +626,7 @@ def inject_refs(html: str, annotations: list[dict]) -> str:
         )
 
     out = _REF_TOKEN_RE.sub(_replace, html)
-    # Orphan removal can leave "June ." style gaps — tidy like strip_ref_tokens.
-    return re.sub(r"[ \t]+([.,;:!?])", r"\1", out)
+    # Orphan removal can leave "June ." style gaps — tidy with the same
+    # punctuation-gap rule strip_ref_tokens uses (no space-run collapse, so a
+    # <pre> block's significant whitespace in the commentary survives).
+    return _PUNCT_GAP_RE.sub(r"\1", out)
