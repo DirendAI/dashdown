@@ -348,15 +348,16 @@ def parse_search_config(raw: Any) -> SearchConfig:
 
 @dataclass
 class SidebarConfig:
-    """Optional ``sidebar`` block — the desktop collapse behavior of the app's
-    side navigation.
+    """The desktop collapse behavior of the app's side navigation. Nested under
+    the ``layout:`` block (it's part of a project's chrome), as ``layout.sidebar``.
 
-        sidebar:
-          collapsed: false          # default-open seed; true → nav hidden on first visit
-          toggle: true              # show the desktop collapse control (true) / hide it
-          show_single_page: false   # hide the nav + its buttons when the project
+        layout:
+          sidebar:
+            collapsed: false        # default-open seed; true → nav hidden on first visit
+            toggle: true            # show the desktop collapse control (true) / hide it
+            show_single_page: false # hide the nav + its buttons when the project
                                     # has only one page; true → always show it
-          hidden: false             # true → never render the nav at all
+            hidden: false           # true → never render the nav at all
 
     ``collapsed`` sets only the *first-visit* default — a reader's later collapse
     choice is kept in ``localStorage`` and wins over this seed (same precedence as
@@ -403,21 +404,38 @@ LAYOUT_WIDTHS = ("s", "m", "l")
 
 @dataclass
 class LayoutConfig:
-    """Optional ``layout:`` block — project-wide defaults for page chrome + width.
+    """Optional ``layout:`` block — project-wide defaults for a page's chrome:
+    content width, top header, floating theme toggle, and the side-nav behavior.
 
         layout:
-          width: l        # s | m | l — content-column width (default l, the full
-                          # dashboard width; m ≈ medium, s ≈ narrow article/blog)
-          header: true    # show the top app header (brand / search / theme). false
-                          # drops it site-wide — e.g. a single-page blog.
+          width: l          # s | m | l — content-column width (default l, the full
+                            # dashboard width; m ≈ medium, s ≈ narrow article/blog)
+          header: true      # show the top app header (brand / search / theme). false
+                            # drops it site-wide — e.g. a single-page blog.
+          theme_toggle: true   # when the header is hidden, show a subtle floating
+                               # light/dark sun/moon toggle (default on; false opts out).
+          sidebar:          # side-nav behavior (see SidebarConfig)
+            hidden: false
+            collapsed: false
 
-    Both keys are **per-page overridable** via frontmatter (a page's ``width:`` /
-    ``header:``), so a project can default to full-width dashboards yet mark one
-    page as a narrow article, or hide the header on just the landing page. A
-    malformed value fails at startup (same policy as ``sidebar:`` etc.)."""
+    ``width``/``header``/``theme_toggle`` are **per-page overridable** via
+    frontmatter (a page's ``width:`` / ``header:`` / ``theme_toggle:``), so a
+    project can default to full-width dashboards yet mark one page as a narrow
+    article, or hide the header on just the landing page. ``sidebar`` is
+    project-wide only (the nav is a single app-level element). A malformed value
+    fails at startup (same policy as ``auth:`` etc.)."""
 
     width: str = "l"
     header: bool = True
+    # Only meaningful when the header is hidden (the header carries its own theme
+    # toggle otherwise): render a small floating sun/moon control so a chrome-less
+    # page still lets the reader flip light/dark. On by default so hiding the
+    # header doesn't silently strip the theme control; set false to drop it too.
+    theme_toggle: bool = True
+    # Side-nav collapse / hide behavior. Nested here (not a top-level block) so all
+    # of a project's chrome lives under one `layout:` key. Project-wide, not
+    # per-page overridable.
+    sidebar: SidebarConfig = field(default_factory=SidebarConfig)
 
 
 def parse_layout_config(raw: Any) -> LayoutConfig:
@@ -439,19 +457,27 @@ def parse_layout_config(raw: Any) -> LayoutConfig:
         if not isinstance(header, bool):
             raise ValueError("layout.header must be a boolean")
         cfg.header = header
+    theme_toggle = raw.get("theme_toggle")
+    if theme_toggle is not None:
+        if not isinstance(theme_toggle, bool):
+            raise ValueError("layout.theme_toggle must be a boolean")
+        cfg.theme_toggle = theme_toggle
+    # Side-nav behavior nests under layout:. parse_sidebar_config keeps its own
+    # per-key validation/messages (the block key is still literally `sidebar`).
+    cfg.sidebar = parse_sidebar_config(raw.get("sidebar"))
     return cfg
 
 
 def resolve_page_layout(
     frontmatter: dict[str, Any], layout: LayoutConfig
-) -> tuple[str, bool]:
-    """Resolve a page's effective ``(page_width, show_header)``.
+) -> tuple[str, bool, bool]:
+    """Resolve a page's effective ``(page_width, show_header, show_theme_toggle)``.
 
-    Per-page frontmatter (``width:`` / ``header:``) overrides the project-wide
-    ``layout:`` defaults. Frontmatter is handled **leniently** — an invalid
-    ``width`` or non-boolean ``header`` is ignored (falls back to the config
-    default) rather than 500-ing the page, matching how the rest of frontmatter
-    is treated."""
+    Per-page frontmatter (``width:`` / ``header:`` / ``theme_toggle:``) overrides
+    the project-wide ``layout:`` defaults. Frontmatter is handled **leniently** —
+    an invalid ``width`` or non-boolean ``header``/``theme_toggle`` is ignored
+    (falls back to the config default) rather than 500-ing the page, matching how
+    the rest of frontmatter is treated."""
     width = layout.width
     fm_width = frontmatter.get("width")
     if isinstance(fm_width, str) and fm_width in LAYOUT_WIDTHS:
@@ -462,7 +488,12 @@ def resolve_page_layout(
     if isinstance(fm_header, bool):
         show_header = fm_header
 
-    return width, show_header
+    show_theme_toggle = layout.theme_toggle
+    fm_theme_toggle = frontmatter.get("theme_toggle")
+    if isinstance(fm_theme_toggle, bool):
+        show_theme_toggle = fm_theme_toggle
+
+    return width, show_header, show_theme_toggle
 
 
 @dataclass
@@ -509,7 +540,6 @@ class ProjectConfig:
     global_date: GlobalDateFilterConfig = field(default_factory=GlobalDateFilterConfig)
     filters: FiltersConfig = field(default_factory=FiltersConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
-    sidebar: SidebarConfig = field(default_factory=SidebarConfig)
     layout: LayoutConfig = field(default_factory=LayoutConfig)
     python_queries: PythonQueriesConfig = field(default_factory=PythonQueriesConfig)
 
@@ -682,10 +712,11 @@ class Project:
 
     def show_sidebar(self) -> bool:
         """Whether the sidebar nav (and its menu buttons) should render:
-        ``sidebar.hidden`` drops it outright; otherwise a single-page project
-        omits it unless ``sidebar.show_single_page`` forces it on. The single
-        decision both the server and the static build feed to the template."""
-        sb = self.config.sidebar
+        ``layout.sidebar.hidden`` drops it outright; otherwise a single-page
+        project omits it unless ``layout.sidebar.show_single_page`` forces it on.
+        The single decision both the server and the static build feed to the
+        template."""
+        sb = self.config.layout.sidebar
         if sb.hidden:
             return False
         return sb.show_single_page or self.navigable_page_count() > 1
@@ -738,7 +769,6 @@ def load_project(root: Path) -> Project:
             global_date=parse_global_filters_config(raw.get("global_filters")),
             filters=parse_filters_config(raw.get("filters")),
             search=parse_search_config(raw.get("search")),
-            sidebar=parse_sidebar_config(raw.get("sidebar")),
             layout=parse_layout_config(raw.get("layout")),
             python_queries=parse_python_queries_config(raw.get("python_queries")),
         )

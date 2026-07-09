@@ -31,10 +31,11 @@ icon: "🏠"
 | `icon`             | Emoji/glyph shown next to the nav label.          |
 | `width`            | Content width: `s` · `m` · `l` (default `l`).     |
 | `header`           | Show the top app header (default `true`).         |
+| `theme_toggle`     | With `header: false`, show a floating light/dark toggle (default `true`). |
 
 Readers can collapse the sidebar on desktop, a project with a single page
 hides the nav entirely, and `hidden: true` drops it outright on any project —
-tune all of it with the [`sidebar:` config block](/configuration#sidebar).
+tune all of it with the [`layout.sidebar` config block](/configuration#layout).
 
 ## Page width & header
 
@@ -43,8 +44,9 @@ Two frontmatter keys control a page's chrome and reading width:
 ```markdown
 ---
 title: The state of sales in 2026
-width: s        # narrow, article-style column
-header: false   # drop the top app header (brand / search / theme toggle)
+width: s              # narrow, article-style column
+header: false         # drop the top app header (brand / search / theme toggle)
+theme_toggle: false   # …and drop the floating light/dark toggle too (on by default)
 ---
 ```
 
@@ -52,10 +54,15 @@ header: false   # drop the top app header (brand / search / theme toggle)
 dashboard width, `m` is medium, and `s` is a narrow article measure — ideal for
 a text-heavy post that reads like a blog rather than a wall-to-wall dashboard.
 `header: false` removes the top bar entirely, which pairs well with a single-page
-site (the left nav is [already hidden](/configuration#sidebar) when there's
+site (the left nav is [already hidden](/configuration#layout) when there's
 nowhere to navigate) — or with a multi-page, blog-style site that sets
-[`sidebar: {hidden: true}`](/configuration#sidebar) and navigates through
+[`layout: {sidebar: {hidden: true}}`](/configuration#layout) and navigates through
 in-page links instead.
+
+Dropping the header also drops its light/dark toggle, so a small sun/moon button
+floats in the top-right corner instead — readers keep the control on a chrome-less
+page. Set `theme_toggle: false` (here or project-wide in the
+[`layout:` config](/configuration#layout)) to drop that too.
 
 Both default project-wide from the [`layout:` config block](/configuration#layout);
 a page's frontmatter overrides the project default, so you can keep full-width

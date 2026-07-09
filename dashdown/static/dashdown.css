@@ -197,6 +197,56 @@ body {
   height: 100vh;
 }
 
+/* --- Floating theme toggle (chrome-less pages) ------------------------- */
+/* Rendered whenever the header is hidden (unless `layout.theme_toggle` / a page's
+   `theme_toggle:` frontmatter opts out) — the header carries its own toggle when
+   shown. A small, unobtrusive sun/moon button pinned top-right so a reader of a
+   header-less page can still flip light/dark. Same raised-surface treatment as
+   the header/cards (--b1 fill, --b3 hairline, resting shadow). Which glyph shows
+   is CSS-driven off <html data-theme> (set pre-paint), so it never flashes both
+   icons before Alpine hydrates; the click flips the Alpine `theme`, re-stamping
+   data-theme so the store + OS-preference listener stay in sync. */
+.dashdown-theme-fab {
+  position: fixed;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: 9999px;
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  cursor: pointer;
+  box-shadow: var(--dashdown-shadow-card);
+  transition: color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.dashdown-theme-fab:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  box-shadow: var(--dashdown-shadow-raised);
+  transform: translateY(-1px);
+}
+.dashdown-theme-fab:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+/* Icon swap: sun in light mode, moon in dark — keyed off <html data-theme>. */
+.dashdown-theme-fab-moon { display: none; }
+[data-theme="dark"] .dashdown-theme-fab-sun { display: none; }
+[data-theme="dark"] .dashdown-theme-fab-moon { display: inline-flex; }
+/* The fab shares the top-right corner with the page-action cluster (PDF/Embed)
+   that rides the top-bar. On a full-width page whose content reaches the viewport
+   edge they'd collide, so reserve a little corner space to hold the actions clear
+   of the fixed button. Harmless on narrow (centered) columns, where the actions
+   never reach that far right anyway. */
+.dashdown-has-theme-fab .dashdown-page-topbar {
+  padding-right: 3rem;
+}
+
 /* --- Desktop sidebar collapse ------------------------------- */
 /* The header toggle flips `sidebarCollapsed` (Alpine), which adds/removes the
    `dashdown-sidebar-collapsed` class on <html> (also set pre-paint to avoid a
@@ -237,7 +287,8 @@ body {
 .dashdown-embed .dashdown-breadcrumbs,
 .dashdown-embed .dashdown-page-topbar,
 .dashdown-embed .dashdown-build-stamp,
-.dashdown-embed .dashdown-made-with {
+.dashdown-embed .dashdown-made-with,
+.dashdown-embed .dashdown-theme-fab {
   display: none !important;
 }
 .dashdown-embed .dashdown-layout {
@@ -3079,7 +3130,8 @@ body {
 .dashdown-print .dashdown-map-zoom-hint,
 .dashdown-print .dashdown-build-stamp,
 .dashdown-print .dashdown-made-with,
-.dashdown-print .dashdown-code-copy {
+.dashdown-print .dashdown-code-copy,
+.dashdown-print .dashdown-theme-fab {
   display: none !important;
 }
 .dashdown-print .dashdown-layout {

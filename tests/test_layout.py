@@ -56,44 +56,69 @@ def test_parse_layout_config_defaults():
     d = parse_layout_config(None)
     assert d.width == "l"
     assert d.header is True
+    assert d.theme_toggle is True
 
 
 def test_parse_layout_config_values():
-    cfg = parse_layout_config({"width": "s", "header": False})
+    cfg = parse_layout_config({"width": "s", "header": False, "theme_toggle": False})
     assert cfg.width == "s"
     assert cfg.header is False
+    assert cfg.theme_toggle is False
 
     # Partial block: only the given key changes.
     partial = parse_layout_config({"width": "m"})
     assert partial.width == "m"
     assert partial.header is True
+    assert partial.theme_toggle is True
 
 
 def test_parse_layout_config_malformed_fails_at_startup():
-    # Fail-at-startup policy, same as sidebar:/auth:.
-    for bad in ([], "nope", {"width": "xl"}, {"width": 2}, {"header": "yes"}):
+    # Fail-at-startup policy, same as auth:/embed:.
+    for bad in (
+        [],
+        "nope",
+        {"width": "xl"},
+        {"width": 2},
+        {"header": "yes"},
+        {"theme_toggle": "yes"},
+        {"sidebar": {"hidden": "yes"}},  # nested block validates too
+        {"sidebar": "nope"},
+    ):
         with pytest.raises(ValueError):
             parse_layout_config(bad)
+
+
+def test_parse_layout_config_nests_sidebar():
+    # The side-nav block now lives under layout: (moved from a top-level `sidebar:`).
+    cfg = parse_layout_config({"sidebar": {"hidden": True, "toggle": False}})
+    assert cfg.sidebar.hidden is True
+    assert cfg.sidebar.toggle is False
+    # Default when absent.
+    assert parse_layout_config({"width": "s"}).sidebar.hidden is False
 
 
 # --------------------------------------------------------------------------- #
 # unit: resolve_page_layout (frontmatter overrides config default)
 # --------------------------------------------------------------------------- #
 def test_resolve_page_layout_uses_config_default():
-    cfg = LayoutConfig(width="m", header=False)
-    assert resolve_page_layout({}, cfg) == ("m", False)
+    cfg = LayoutConfig(width="m", header=False, theme_toggle=True)
+    assert resolve_page_layout({}, cfg) == ("m", False, True)
 
 
 def test_resolve_page_layout_frontmatter_overrides():
-    cfg = LayoutConfig(width="l", header=True)
-    assert resolve_page_layout({"width": "s", "header": False}, cfg) == ("s", False)
+    cfg = LayoutConfig(width="l", header=True, theme_toggle=False)
+    assert resolve_page_layout(
+        {"width": "s", "header": False, "theme_toggle": True}, cfg
+    ) == ("s", False, True)
 
 
 def test_resolve_page_layout_ignores_invalid_frontmatter():
     # A bad frontmatter value is lenient: fall back to the config default rather
     # than 500-ing the page.
-    cfg = LayoutConfig(width="l", header=True)
-    assert resolve_page_layout({"width": "xl", "header": "sure"}, cfg) == ("l", True)
+    cfg = LayoutConfig(width="l", header=True, theme_toggle=True)
+    assert resolve_page_layout(
+        {"width": "xl", "header": "sure", "theme_toggle": "sure"}, cfg
+    ) == ("l", True, True)
 
 
 # --------------------------------------------------------------------------- #
@@ -152,3 +177,43 @@ def test_config_hides_header_page_can_reenable(tmp_project):
     client = TestClient(create_app(proj))
     assert "dashdown-header navbar" not in client.get("/").text
     assert "dashdown-header navbar" in client.get("/about").text
+
+
+# --------------------------------------------------------------------------- #
+# integration: floating theme toggle (chrome-less pages)
+# --------------------------------------------------------------------------- #
+def test_theme_fab_shown_by_default_when_header_hidden(tmp_project):
+    # On by default: hiding the header shouldn't silently strip the theme control.
+    proj = _make_project(tmp_project)
+    _write_page(proj, "index.md", "---\nheader: false\n---\n# Home\n")
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-theme-fab" in html
+
+
+def test_theme_fab_opt_out_frontmatter(tmp_project):
+    # A page can drop the floating toggle with `theme_toggle: false`.
+    proj = _make_project(tmp_project)
+    _write_page(
+        proj, "index.md", "---\nheader: false\ntheme_toggle: false\n---\n# Home\n"
+    )
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-theme-fab" not in html
+
+
+def test_theme_fab_opt_out_config(tmp_project):
+    # Project-wide opt-out via the layout config, header dropped site-wide.
+    proj = _make_project(tmp_project)
+    _write_yaml(proj, "layout:\n  header: false\n  theme_toggle: false\n")
+    _write_page(proj, "index.md", "# Home\n")
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-theme-fab" not in html
+
+
+def test_theme_fab_not_shown_when_header_visible(tmp_project):
+    # Redundant with the in-header toggle, so it's suppressed while the header
+    # shows even though the flag defaults on.
+    proj = _make_project(tmp_project)
+    _write_page(proj, "index.md", "# Home\n")  # header shown (default)
+    html = TestClient(create_app(proj)).get("/").text
+    assert "dashdown-header navbar" in html
+    assert "dashdown-theme-fab" not in html

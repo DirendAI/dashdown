@@ -660,7 +660,7 @@ def _emit_page(
     for crumb in breadcrumbs:
         crumb["url"] = root_link(crumb["url"])
     # Per-page chrome/width: frontmatter overrides the project `layout:` defaults.
-    page_width, show_header = resolve_page_layout(
+    page_width, show_header, show_theme_toggle = resolve_page_layout(
         rendered.frontmatter, project.config.layout
     )
 
@@ -717,14 +717,17 @@ def _emit_page(
         # Desktop sidebar collapse: the static export ships the chrome and runs
         # Alpine, so the toggle works the same; localStorage persists the
         # reader's choice per-browser.
-        sidebar_collapsed=project.config.sidebar.collapsed,
-        sidebar_toggle=project.config.sidebar.toggle,
+        sidebar_collapsed=project.config.layout.sidebar.collapsed,
+        sidebar_toggle=project.config.layout.sidebar.toggle,
         # `sidebar.hidden` drops the nav outright; otherwise a single-page
         # project omits the nav + menu buttons (unless forced on).
         show_sidebar=project.show_sidebar(),
         # Per-page presentation: content-column width + top-header visibility.
         page_width=page_width,
         show_header=show_header,
+        # Subtle floating light/dark toggle for chrome-less pages (only shown when
+        # the header — which carries the normal toggle — is hidden).
+        show_theme_toggle=show_theme_toggle,
     )
 
     out_file = _output_file(app_url, ctx.out_dir)

@@ -1029,9 +1029,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         nav = proj.nav_tree()
         page_title = rendered.frontmatter.get("title", md_path.stem)
         breadcrumbs = build_breadcrumbs(current, nav, page_title)
-        # Per-page chrome/width: frontmatter (`width:` / `header:`) overrides the
-        # project-wide `layout:` defaults.
-        page_width, show_header = resolve_page_layout(
+        # Per-page chrome/width: frontmatter (`width:` / `header:` /
+        # `theme_toggle:`) overrides the project-wide `layout:` defaults.
+        page_width, show_header, show_theme_toggle = resolve_page_layout(
             rendered.frontmatter, proj.config.layout
         )
 
@@ -1084,8 +1084,8 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # Desktop sidebar collapse: `collapsed` seeds the first-visit state (a
             # saved localStorage choice overrides it); `toggle` gates the control.
             # Mobile slide-in is unaffected.
-            sidebar_collapsed=proj.config.sidebar.collapsed,
-            sidebar_toggle=proj.config.sidebar.toggle,
+            sidebar_collapsed=proj.config.layout.sidebar.collapsed,
+            sidebar_toggle=proj.config.layout.sidebar.toggle,
             # `sidebar.hidden` drops the nav outright; otherwise a single-page
             # project has nothing to navigate to, so the nav and its menu buttons
             # are omitted — unless `show_single_page` forces them on.
@@ -1093,6 +1093,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # Per-page presentation: content-column width + top-header visibility.
             page_width=page_width,
             show_header=show_header,
+            # Subtle floating light/dark toggle for chrome-less pages (only shown
+            # when the header — which carries the normal toggle — is hidden).
+            show_theme_toggle=show_theme_toggle,
             live_reload=request.app.state.dev,
         )
         # Framing policy applies to every page (deny-by-default): a page can only
