@@ -1535,6 +1535,23 @@ function buildChartOptionBase(config, records) {
   // infers orientation from which axis carries the categories. `inverse` keeps
   // the first row at the top, so an `ORDER BY value DESC` query reads top-down.
   const horizontal = type === "bar" && config.horizontal;
+
+  // Bar corner rounding. The theme rounds every bar's leading edge ([6,6,0,0]),
+  // which is right for a lone vertical column but scallops a *stacked* bar — each
+  // segment gets its own rounded corners — and rounds the wrong edge of a
+  // *horizontal* bar. Round only the bar's leading tip (right end when
+  // horizontal, top when vertical), and for a stack only the outermost segment,
+  // so inner segments stay flush and the bar reads as one shape with a rounded
+  // end. Series-level itemStyle overrides the theme default.
+  if (type === "bar") {
+    const tip = horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0];
+    const lastIdx = series.length - 1;
+    series = series.map((s, i) => {
+      const outer = !config.stacked || i === lastIdx;
+      return { ...s, itemStyle: { ...(s.itemStyle || {}), borderRadius: outer ? tip : 0 } };
+    });
+  }
+
   const categoryAxis = { type: "category", data: xCategories };
   // A line/area trend should span the full plot width: pin the first and last
   // points to the axis edges instead of ECharts' default half-band padding,
