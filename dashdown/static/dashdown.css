@@ -712,6 +712,20 @@ body {
 .dashdown-chart { margin: var(--dashdown-space-section) 0; }
 .dashdown-table { margin: var(--dashdown-space-section) 0; }
 
+/* <Table> component cells keep each value on one line. These are the DaisyUI
+   `.table` cells (distinct from prose/markdown tables, which are
+   `table:not(.table)` and untouched). The browser default `white-space: normal`
+   wraps a narrow column mid-value — "Tadej / Pogačar", "Visma– / Lease a / Bike",
+   "UAE Team / Emirates / XRG" — which reads as broken rows in a data grid.
+   Pinning to `nowrap` lets the built-in `.overflow-x-auto` wrapper (table.js)
+   scroll a too-wide table horizontally instead, the conventional data-table
+   behavior. (The print/PDF path restores wrapping — paper has no scroll, so a
+   wide table there must reflow to fit the page; see the .dashdown-print rule.) */
+.dashdown-table .table th,
+.dashdown-table .table td {
+  white-space: nowrap;
+}
+
 /* Per-widget "filtered by" indicator. A small funnel marker that
    appears in a data widget's corner **only while that widget is hovered/focused**
    (kept unobtrusive — it's an affordance, not chrome) when ≥1 active filter
@@ -1376,11 +1390,19 @@ body {
   min-width: 0;
 }
 
-/* Charts/tables fill their grid cell; charts keep their own inline height
-   (default 300px, overridable via the `height=` attr). */
+/* Charts/tables fill their grid cell's width but keep their natural height,
+   top-aligned. A grid defaults to `align-items: stretch`, which pulls a shorter
+   card up to the row's tallest sibling — fine when a card can fill that height,
+   but a chart's plot is a fixed size (default 300px, `height=` overridable) and
+   a chart with `explain` leaves its *card* auto-height (the height moves to an
+   inner region), so next to a tall table the card stretches and pads out with
+   dead space below the plot. `align-self: start` keeps each card its own height
+   instead of matching the tallest sibling. (An explain chart still grows
+   downward when its commentary footer opens — that's content, not stretch.) */
 .dashdown-grid > .dashdown-chart,
 .dashdown-grid > .dashdown-table {
   width: 100%;
+  align-self: start;
 }
 
 /* <Grid cols=N>: collapse to a single column on narrow viewports so col-span
@@ -3231,6 +3253,14 @@ body {
 .dashdown-print .dashdown-chart canvas,
 .dashdown-print .dashdown-table {
   max-width: 100% !important;
+}
+/* On screen a wide <Table> keeps its cells on one line and scrolls horizontally
+   (the nowrap rule up top). Paper has no scroll, so let cells wrap again here so
+   a wide table reflows to fit the printable width instead of clipping columns
+   off the right edge. */
+.dashdown-print .dashdown-table .table th,
+.dashdown-print .dashdown-table .table td {
+  white-space: normal;
 }
 
 /* A <video> can't play on paper, so its native control chrome (play button +
