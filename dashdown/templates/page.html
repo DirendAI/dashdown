@@ -35,9 +35,10 @@
    builds and embeds omit it automatically. #}
 {% macro ask_box(placeholder) -%}
 <div class="dashdown-ask-box">
-  <div class="dashdown-ask-box-field dashdown-site-search-box">
+  <div class="dashdown-ask-box-field">
     <span class="dashdown-ask-box-icon" aria-hidden="true">✦</span>
-    <input type="text" class="input input-sm dashdown-site-search-input dashdown-ask-box-input" placeholder="{{ placeholder }}" aria-label="Ask a question about your data" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
+    <input type="text" class="input input-sm dashdown-ask-box-input" placeholder="{{ placeholder }}" aria-label="Ask a question about your data" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
+    <kbd class="dashdown-site-search-hint dashdown-ask-box-hint" aria-hidden="true">Ctrl K</kbd>
   </div>
   <div class="dashdown-ask-box-panel" role="dialog" aria-label="Answer" hidden></div>
 </div>

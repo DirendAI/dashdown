@@ -351,9 +351,12 @@ export async function fetchQueryOptions(queryName, column, search = "", opts = {
  * possible there).
  * @param {string} url - Endpoint URL (may already carry a query string).
  * @param {Object} body - JSON-serializable request body.
+ * @param {Object} [opts]
+ * @param {AbortSignal} [opts.signal] - Aborts the request (a newer question
+ *   supersedes an in-flight one), so the caller's AbortController takes effect.
  * @returns {Promise<Response>} - The fetch Response (not yet parsed).
  */
-export async function postJson(url, body) {
+export async function postJson(url, body, opts = {}) {
   const embedToken = readEmbedToken();
   const finalUrl = embedToken
     ? url + (url.includes("?") ? "&" : "?") + "_embed=" + encodeURIComponent(embedToken)
@@ -362,6 +365,7 @@ export async function postJson(url, body) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: opts.signal,
   });
 }
 

@@ -30,8 +30,10 @@ import {
 } from "./annotations.js";
 
 const _DEBOUNCE_MS = 400;
-const _REPLAY_TICK_MS = 30; // typewriter cadence for replayed answers
-const _REPLAY_CAP_MS = 2500; // whole replay finishes within this budget
+// Typewriter replay pacing — shared with the header ask box (ask_box.js) so both
+// surfaces type at the same cadence and cap.
+export const _REPLAY_TICK_MS = 30; // typewriter cadence for replayed answers
+export const _REPLAY_CAP_MS = 2500; // whole replay finishes within this budget
 
 /**
  * Non-empty, non-internal filter values for the request URL. Query SQL is never
@@ -39,7 +41,7 @@ const _REPLAY_CAP_MS = 2500; // whole replay finishes within this budget
  * answer cache on only the params each query actually substitutes.
  * @returns {Object} - filter name -> string value
  */
-function relevantFilters(filters) {
+export function relevantFilters(filters) {
   const out = {};
   for (const k of Object.keys(filters || {})) {
     if (k.startsWith("_")) continue;
@@ -48,6 +50,30 @@ function relevantFilters(filters) {
     out[k] = String(v);
   }
   return out;
+}
+
+/**
+ * Hovering/focusing a ref chip inside an answer body bolds the chart mark it
+ * cites (bolding only — no dim-the-rest layer); leaving restores. The native
+ * <abbr title> tooltip carries the label with zero JS, so this degrades
+ * gracefully. Shared by the authored ask card and the header ask box, both of
+ * which emit the same `.dashdown-anno-ref` chips against a chart host.
+ * @param {HTMLElement} bodyEl - The answer body holding the ref chips.
+ * @param {HTMLElement|null} chartHost - The chart card the chips cite (a card
+ *   speaking the _chartConfig/_chartInstance contract); no-op when absent.
+ */
+export function wireAnnotationRefChips(bodyEl, chartHost) {
+  if (!chartHost) return;
+  bodyEl.querySelectorAll(".dashdown-anno-ref").forEach((chip) => {
+    const id = chip.dataset.annoId;
+    if (!id) return;
+    const bold = () => emphasizeChartAnnotation(chartHost, id);
+    const restore = () => emphasizeChartAnnotation(chartHost, null);
+    chip.addEventListener("mouseenter", bold);
+    chip.addEventListener("mouseleave", restore);
+    chip.addEventListener("focus", bold);
+    chip.addEventListener("blur", restore);
+  });
 }
 
 /**
@@ -209,24 +235,8 @@ export function initAsk(el, opts = {}) {
       if (el._lastAnnotations.length) {
         setChartAnnotations(chartHost, el._lastAnnotations);
       }
-      wireRefChips();
+      wireAnnotationRefChips(body, chartHost);
     }
-  }
-
-  // Hovering/focusing a ref chip bolds the mark it cites (bolding only — no
-  // dim-the-rest layer); leaving restores. The native <abbr title> tooltip
-  // carries the label with zero JS, so this degrades gracefully.
-  function wireRefChips() {
-    body.querySelectorAll(".dashdown-anno-ref").forEach((chip) => {
-      const id = chip.dataset.annoId;
-      if (!id) return;
-      const bold = () => emphasizeChartAnnotation(chartHost, id);
-      const restore = () => emphasizeChartAnnotation(chartHost, null);
-      chip.addEventListener("mouseenter", bold);
-      chip.addEventListener("mouseleave", restore);
-      chip.addEventListener("focus", bold);
-      chip.addEventListener("blur", restore);
-    });
   }
 
   // Consume an SSE cache-miss response: `chunk` events accumulate as escaped

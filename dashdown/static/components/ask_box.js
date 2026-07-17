@@ -27,35 +27,21 @@ import {
 } from "../core.js";
 import { currentEChartsTheme, onThemeChange } from "./echarts_theme.js";
 import { updateChart } from "./chart.js";
-import { setChartAnnotations, emphasizeChartAnnotation } from "./annotations.js";
+import { setChartAnnotations } from "./annotations.js";
 import { renderTableInto } from "./table.js";
+import {
+  _REPLAY_TICK_MS,
+  _REPLAY_CAP_MS,
+  relevantFilters,
+  wireAnnotationRefChips,
+} from "./ask.js";
 
-const _REPLAY_TICK_MS = 30; // typewriter cadence (matches ask.js)
-const _REPLAY_CAP_MS = 2500; // whole replay finishes within this budget
 const _ASK_URL = "/_dashdown/api/ask";
 
 /** ✦ AI badge markup — mirrors the authored ask card's provenance sparkle. */
 const _AI_BADGE =
   '<span class="dashdown-ask-badge dashdown-ask-box-badge" title="AI-generated answer">' +
   '<span class="dashdown-ask-badge-text">✦ AI</span></span>';
-
-/**
- * Non-empty, non-internal filter values for the request body. Query SQL is never
- * shipped to the client, so every active filter is sent; the server keys its
- * answer cache on only the params each resolution actually uses.
- * @param {Object} filters
- * @returns {Object} - filter name -> string value
- */
-function relevantFilters(filters) {
-  const out = {};
-  for (const k of Object.keys(filters || {})) {
-    if (k.startsWith("_")) continue;
-    const v = filters[k];
-    if (v == null || String(v) === "") continue;
-    out[k] = String(v);
-  }
-  return out;
-}
 
 /**
  * The current filter+route params, read lazily at submit time (Alpine stores may
@@ -178,21 +164,17 @@ export function initAskBox(el) {
     hasAnswer = true;
   }
 
-  // Hovering/focusing a ref chip in the answer bolds the chart mark it cites,
-  // exactly like the authored ask card (ask.js::wireRefChips). No-op when there
-  // is no chart host.
-  function wireRefChips(bodyEl, chartCard) {
-    if (!chartCard) return;
-    bodyEl.querySelectorAll(".dashdown-anno-ref").forEach((chip) => {
-      const id = chip.dataset.annoId;
-      if (!id) return;
-      const bold = () => emphasizeChartAnnotation(chartCard, id);
-      const restore = () => emphasizeChartAnnotation(chartCard, null);
-      chip.addEventListener("mouseenter", bold);
-      chip.addEventListener("mouseleave", restore);
-      chip.addEventListener("focus", bold);
-      chip.addEventListener("blur", restore);
-    });
+  // Paint (or repaint) the panel chart, then suppress the y-axis name ECharts
+  // draws above the axis: the compact panel has no headroom for it (it clips
+  // against the provenance line) and the provenance + table header already name
+  // the metric. This is the single place the suppression lives, so renderChart,
+  // the repaint() shim, and the theme-change re-init can't drift out of sync
+  // (a theme toggle re-inits the chart, which would otherwise bring it back).
+  function paintPanelChart(card, records, config) {
+    updateChart(card, records, config);
+    if (card._echarts_instance) {
+      card._echarts_instance.setOption({ yAxis: { name: "" } });
+    }
   }
 
   // Build a chart host that speaks the same _chartConfig/_echarts_instance/
@@ -207,6 +189,11 @@ export function initAskBox(el) {
       y: spec.y,
       title: spec.title || "",
     };
+    // The server ships a concrete chart type, which skips chart.js's
+    // resolveAutoConfig — where an auto-chart would derive sort_by for a temporal
+    // x. So thread the server's sort hint through (temporal charts set sort_by=x)
+    // or a time series renders in row order instead of by time.
+    if (spec.sort_by) config.sort_by = spec.sort_by;
     const card = document.createElement("div");
     card.className = "dashdown-chart dashdown-ask-box-chart";
     card.innerHTML = '<div class="dashdown-chart-container dashdown-ask-box-chart-container"></div>';
@@ -225,18 +212,13 @@ export function initAskBox(el) {
       repaint() {
         const recs = card._chartRecords;
         if (Array.isArray(recs) && recs.length) {
-          updateChart(card, recs, config);
-          instance.setOption({ yAxis: { name: "" } });
+          paintPanelChart(card, recs, config);
         }
       },
     };
     chartState = { card, container, config };
 
-    updateChart(card, records, config);
-    // The compact panel has no headroom for the y-axis name ECharts draws
-    // above the axis (it clips against the provenance line) — and the
-    // provenance + table header already name the metric. Merge it away.
-    instance.setOption({ yAxis: { name: "" } });
+    paintPanelChart(card, records, config);
     if (Array.isArray(payload.annotations) && payload.annotations.length) {
       setChartAnnotations(card, payload.annotations);
     }
@@ -265,7 +247,7 @@ export function initAskBox(el) {
 
     const finish = () => {
       body.innerHTML = payload.answer_html || esc(payload.answer_text || "");
-      wireRefChips(body, chartCard);
+      wireAnnotationRefChips(body, chartCard);
     };
 
     const text = payload.answer_text || "";
@@ -306,8 +288,16 @@ export function initAskBox(el) {
       panel.appendChild(prov);
     }
 
+    // Answer-first hierarchy: the operator asked a question, so the answer
+    // text is the headline — it types in at the top while the evidence (chart,
+    // then table) renders below it. With the panel's max-height scroll, what
+    // scrolls out of view is detail, never the answer. The chart is built
+    // before the answer only in DOM-insertion terms handled below: renderChart
+    // must run first so the answer's annotation ref chips have a chart host to
+    // wire against, but its card is inserted *after* the answer body.
     let chartCard = null;
-    if (payload.chart && payload.columns && payload.rows && payload.rows.length) {
+    const hasData = payload.columns && payload.rows && payload.rows.length;
+    if (payload.chart && hasData) {
       try {
         chartCard = renderChart(payload);
       } catch (e) {
@@ -316,15 +306,16 @@ export function initAskBox(el) {
       }
     }
 
-    if (payload.columns && payload.rows && payload.rows.length) {
+    renderAnswer(payload, chartCard, seq);
+    if (chartCard) panel.appendChild(chartCard); // move below the answer body
+
+    if (hasData) {
       try {
         renderTable(payload);
       } catch (e) {
         console.error("dashdown ask box: table render failed", e);
       }
     }
-
-    renderAnswer(payload, chartCard, seq);
     hasAnswer = true;
   }
 
@@ -337,10 +328,14 @@ export function initAskBox(el) {
     renderLoading();
 
     try {
-      const response = await postJson(_ASK_URL, {
-        question,
-        params: gatherParams(),
-      });
+      const response = await postJson(
+        _ASK_URL,
+        {
+          question,
+          params: gatherParams(),
+        },
+        { signal: controller.signal }
+      );
       if (seq !== requestSeq) return; // a newer question took over
       const data = await response.json().catch(() => null);
       if (seq !== requestSeq) return;
@@ -395,6 +390,19 @@ export function initAskBox(el) {
     if (!el.contains(ev.target)) close();
   });
 
+  // Ctrl/Cmd+K focuses the ask box from anywhere (search owns "/"). The hint
+  // chip in the markup ships "Ctrl K"; swap it for the Mac glyph when apt.
+  const hint = el.querySelector(".dashdown-ask-box-hint");
+  const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
+  if (hint && isMac) hint.textContent = "⌘K";
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key.toLowerCase() === "k" && (ev.metaKey || ev.ctrlKey) && !ev.altKey) {
+      ev.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+
   // A theme toggle re-bakes the panel chart's theme (ECharts applies a theme
   // only at init, and this chart isn't in chart.js's registry). Dispose +
   // re-init on the same container, then repaint the stored records.
@@ -414,7 +422,10 @@ export function initAskBox(el) {
     card._echarts_instance = next;
     if (card._chartInstance) card._chartInstance.echartsInstance = next;
     if (Array.isArray(records) && records.length) {
-      updateChart(card, records, chartState.config);
+      // Re-run the same paint helper so the y-axis-name suppression is applied
+      // on the freshly re-initialized instance too (a bare updateChart here was
+      // the theme-toggle regression: the axis name reappeared and clipped).
+      paintPanelChart(card, records, chartState.config);
     }
   });
 }
