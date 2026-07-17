@@ -224,12 +224,19 @@ export function initAskBox(el) {
       echartsInstance: instance,
       repaint() {
         const recs = card._chartRecords;
-        if (Array.isArray(recs) && recs.length) updateChart(card, recs, config);
+        if (Array.isArray(recs) && recs.length) {
+          updateChart(card, recs, config);
+          instance.setOption({ yAxis: { name: "" } });
+        }
       },
     };
     chartState = { card, container, config };
 
     updateChart(card, records, config);
+    // The compact panel has no headroom for the y-axis name ECharts draws
+    // above the axis (it clips against the provenance line) — and the
+    // provenance + table header already name the metric. Merge it away.
+    instance.setOption({ yAxis: { name: "" } });
     if (Array.isArray(payload.annotations) && payload.annotations.length) {
       setChartAnnotations(card, payload.annotations);
     }

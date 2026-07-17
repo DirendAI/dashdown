@@ -2275,6 +2275,9 @@ body {
 .dashdown-ask-box-chart {
   position: relative;
   margin: 0 0 0.75rem;
+  /* Headroom for the y-axis name ECharts draws above the axis — flush at the
+     panel top it clips against the provenance line. */
+  padding-top: 0.75rem;
 }
 .dashdown-ask-box-chart-container {
   width: 100%;
