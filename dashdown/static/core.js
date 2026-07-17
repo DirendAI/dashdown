@@ -343,6 +343,29 @@ export async function fetchQueryOptions(queryName, column, search = "", opts = {
 }
 
 /**
+ * POST a JSON body to an endpoint and return the raw Response (the caller reads
+ * status + body itself — an ask/answer response carries an error/notice payload
+ * even on a non-2xx). The first POST in the codebase: it threads the embed token
+ * as a `?_embed` query param the same way fetchQueryData does, so an authed page
+ * embedded in an iframe can still reach the endpoint (no Basic/api_key header is
+ * possible there).
+ * @param {string} url - Endpoint URL (may already carry a query string).
+ * @param {Object} body - JSON-serializable request body.
+ * @returns {Promise<Response>} - The fetch Response (not yet parsed).
+ */
+export async function postJson(url, body) {
+  const embedToken = readEmbedToken();
+  const finalUrl = embedToken
+    ? url + (url.includes("?") ? "&" : "?") + "_embed=" + encodeURIComponent(embedToken)
+    : url;
+  return fetch(finalUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
  * Convert dataset to array of record objects
  * @param {Object} ds - Dataset with columns and rows
  * @returns {Array<Object>} - Array of record objects

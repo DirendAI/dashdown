@@ -2184,6 +2184,131 @@ body {
   display: none;
 }
 
+/* ---- Header ask box --------------------------------------------------- *
+   An operator types a natural-language question; the answer opens in a wide
+   dropdown panel (provenance + chart + table + typewriter answer). The input
+   reuses the .dashdown-site-search-box/-input chrome; everything below is
+   hand-written against --dashdown-* tokens (no new vendor utility classes). */
+.dashdown-header-ask {
+  position: relative;
+  width: 16rem;
+}
+.dashdown-ask-box {
+  position: relative;
+  width: 100%;
+}
+.dashdown-ask-box-field {
+  width: 100%;
+}
+.dashdown-ask-box-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--fallback-p, oklch(var(--p) / 1));
+}
+/* Busy state: the sparkle pulses while the answer is in flight. */
+.dashdown-ask-box-busy .dashdown-ask-box-icon {
+  animation: dashdown-ask-box-pulse 1s ease-in-out infinite;
+}
+@keyframes dashdown-ask-box-pulse {
+  50% { opacity: 0.35; }
+}
+
+/* The answer panel: a wide dropdown (it holds a chart), right-aligned under the
+   box, capped in height with internal scroll. Raised elevation, works light and
+   dark (all colors are DaisyUI tokens). */
+.dashdown-ask-box-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 50;
+  width: min(34rem, 92vw);
+  max-height: min(70vh, 34rem);
+  overflow-y: auto;
+  padding: 0.875rem;
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-card);
+  box-shadow: var(--dashdown-shadow-raised, 0 8px 24px rgb(0 0 0 / 0.14));
+}
+.dashdown-ask-box-panel[hidden] { display: none; }
+
+.dashdown-ask-box-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.dashdown-ask-box-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--dashdown-radius-control);
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  cursor: pointer;
+}
+.dashdown-ask-box-close:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+
+/* Provenance line — the trust surface: small, muted, above the answer. */
+.dashdown-ask-box-provenance {
+  font-size: 0.75rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  margin-bottom: 0.5rem;
+}
+
+/* Panel chart: a fixed-height plot (ECharts needs a measured box), no section
+   margin — the panel already spaces its blocks. */
+.dashdown-ask-box-chart {
+  position: relative;
+  margin: 0 0 0.75rem;
+}
+.dashdown-ask-box-chart-container {
+  width: 100%;
+  height: 16rem;
+}
+.dashdown-ask-box-table {
+  margin: 0 0 0.75rem;
+}
+
+.dashdown-ask-box-body {
+  font-size: 0.875rem;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+
+/* Loading + notice/error rows. */
+.dashdown-ask-box-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+.dashdown-ask-box-message {
+  margin: 0;
+}
+
+/* Mobile: the header ask box hides below 768px (like the header search); the
+   box is a desktop operator affordance. */
+@media (max-width: 767px) {
+  .dashdown-header-ask {
+    display: none;
+  }
+}
+
 /* Multi-select: a dropdown button (the trigger) + a checkmark popover panel.
    The button shows the picked values joined by ", " (or the "All" placeholder),
    truncated with an ellipsis; the panel floats below, each row toggling a value

@@ -27,6 +27,21 @@
   <div class="dashdown-site-search-results" role="listbox" hidden></div>
 </div>
 {%- endmacro %}
+{# Header ask box: an operator types a natural-language question and the answer
+   (provenance + chart + table + typewriter text) opens in a dropdown panel.
+   ask_box.js finds it by the .dashdown-ask-box class and POSTs to the runtime
+   ask endpoint. Emitted only when `ask_enabled` (llm on ∧ ask on ∧ not embed) —
+   the variable is threaded by the server and is default-false here, so static
+   builds and embeds omit it automatically. #}
+{% macro ask_box(placeholder) -%}
+<div class="dashdown-ask-box">
+  <div class="dashdown-ask-box-field dashdown-site-search-box">
+    <span class="dashdown-ask-box-icon" aria-hidden="true">✦</span>
+    <input type="text" class="input input-sm dashdown-site-search-input dashdown-ask-box-input" placeholder="{{ placeholder }}" aria-label="Ask a question about your data" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
+  </div>
+  <div class="dashdown-ask-box-panel" role="dialog" aria-label="Answer" hidden></div>
+</div>
+{%- endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -191,6 +206,12 @@
     <div class="dashdown-header-search">{{ site_search(search_placeholder | default('Search…'), search_max_results | default(8)) }}</div>
     {% endif %}
     <div class="flex-none dashdown-header-actions">
+      {# Header ask box (runtime NL question → answer panel). Gated by the
+         server-threaded `ask_enabled` (default-false), so it's absent in embeds
+         and static builds. Hidden on mobile via CSS, like the header search. #}
+      {% if ask_enabled %}
+      <div class="dashdown-header-ask">{{ ask_box(ask_placeholder | default('Ask a question…')) }}</div>
+      {% endif %}
       {# Project-wide global date filter (global_filters.date): rendered into the
          sticky header so it's reachable from anywhere on a long page. Empty
          unless enabled; in embed mode it rides body_html as a page filter. #}
