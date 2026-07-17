@@ -226,9 +226,25 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
     app.state.project = project
     app.state.reload_event = reload_event
     app.state.dev = dev
+    # The triggers runner (Push surface) is started on app startup — see the
+    # startup/shutdown events below — once there's a running event loop to poll on.
+    app.state.trigger_runner = None
 
     if not dev:
         register_all_page_queries(project)
+
+    @app.on_event("startup")
+    async def _start_triggers() -> None:
+        # Start the triggers poll loops now that the event loop is running (the
+        # runner creates asyncio tasks). No-op when the project has no triggers.
+        _start_trigger_runner(app)
+
+    @app.on_event("shutdown")
+    async def _stop_triggers() -> None:
+        runner = getattr(app.state, "trigger_runner", None)
+        if runner is not None:
+            runner.stop()
+            app.state.trigger_runner = None
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
@@ -1187,6 +1203,24 @@ def trigger_reload(app: FastAPI) -> None:
     ev.set()
 
 
+def _start_trigger_runner(app: FastAPI) -> None:
+    """Start the triggers runner for the app's current project, if it has any.
+
+    Idempotent-ish: stores the runner on ``app.state.trigger_runner`` (``None``
+    when the project defines no triggers). Must be called from within a running
+    event loop (the runner spawns asyncio tasks) — i.e. on app startup or from
+    the (async) reload path."""
+    from dashdown.triggers import TriggerRunner
+
+    proj: Project = app.state.project
+    if not getattr(proj, "triggers", None):
+        app.state.trigger_runner = None
+        return
+    runner = TriggerRunner(proj)
+    runner.start()
+    app.state.trigger_runner = runner
+
+
 def reload_project(app: FastAPI) -> None:
     """Re-load project config + connectors + user modules."""
     old: Project = app.state.project
@@ -1195,8 +1229,15 @@ def reload_project(app: FastAPI) -> None:
     except Exception as e:  # noqa: BLE001
         log.error("Failed to reload project: %s", e)
         return
+    # Stop the old triggers runner before swapping the project, then start a fresh
+    # one for the reloaded project (its triggers may have been added/edited/removed).
+    old_runner = getattr(app.state, "trigger_runner", None)
+    if old_runner is not None:
+        old_runner.stop()
+        app.state.trigger_runner = None
     old.close()
     app.state.project = new
+    _start_trigger_runner(app)
 
 
 def register_all_page_queries(project: Project) -> None:

@@ -31,6 +31,7 @@ from dashdown.render.pipeline import (
     register_library_queries,
     register_python_library_queries,
 )
+from dashdown.triggers import TriggerSpec, load_triggers
 
 _SLUG_RE = re.compile(r"^\[(\w+)\]$")
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
@@ -621,6 +622,11 @@ class Project:
     # compiles it into a synthetic Python query. Empty when
     # `python_queries.enabled` is false (same trust boundary).
     semantic_models: dict[str, Any] = field(default_factory=dict)
+    # Triggers (name -> TriggerSpec) parsed from triggers/*.yml at load time (see
+    # dashdown/triggers.py). Each watches a library/python query on the shared
+    # streaming poll loop and fires actions when its condition breaches; the
+    # TriggerRunner (started by server.py on app startup) drives them.
+    triggers: dict[str, TriggerSpec] = field(default_factory=dict)
     # Lazily created from config.llm on first <Ask /> request (the provider
     # SDK import is deferred). Tests inject a fake adapter here directly.
     llm_adapter: LLMAdapter | None = None
@@ -917,6 +923,12 @@ def load_project(root: Path) -> Project:
             )
         semantic_models = {}
 
+    # Triggers (triggers/*.yml). Fail-hard parse (like auth:): a malformed file,
+    # unknown action type, or unset ${ENV} in an action's config raises here so
+    # the server won't start half-broken. The TriggerRunner is started later, on
+    # app startup (see server.py) — loading is inert (no polling, no HTTP).
+    triggers = load_triggers(root / "triggers")
+
     return Project(
         root=root,
         config=cfg,
@@ -925,6 +937,7 @@ def load_project(root: Path) -> Project:
         queries=queries,
         python_queries=python_queries,
         semantic_models=semantic_models,
+        triggers=triggers,
         component_js=component_js,
         component_css=component_css,
     )

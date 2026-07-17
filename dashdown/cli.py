@@ -142,7 +142,7 @@ async def _watch_loop(project: Path, app, reload_project, trigger_reload) -> Non
     from watchfiles import awatch
 
     watch_paths: list[str] = []
-    for sub in ("pages", "components", "data", "assets", "queries", "semantic"):
+    for sub in ("pages", "components", "data", "assets", "queries", "semantic", "triggers"):
         p = project / sub
         if p.exists():
             watch_paths.append(str(p))
@@ -167,6 +167,7 @@ async def _watch_loop(project: Path, app, reload_project, trigger_reload) -> Non
             or ((project / "components").as_posix() in Path(c[1]).as_posix())
             or ((project / "queries").as_posix() in Path(c[1]).as_posix())
             or ((project / "semantic").as_posix() in Path(c[1]).as_posix())
+            or ((project / "triggers").as_posix() in Path(c[1]).as_posix())
             or ((project / "data").as_posix() in Path(c[1]).as_posix())
             for c in changes
         ):
