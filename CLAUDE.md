@@ -26,11 +26,14 @@ dashdown query "SELECT * FROM sales LIMIT 5" -p docs   # probe a connector / ins
 dashdown components                  # introspected catalog: component attrs + connector config keys (table|json; --connectors)
 dashdown new my-dashboard            # scaffold a new project
 dashdown build docs --out dist       # static export (pre-rendered HTML + data JSON)
+dashdown ask "revenue by region?" -p examples/growth-answers   # runtime ask engine from the CLI (needs an llm: block)
+dashdown serve examples/growth-answers   # the "ask → answer → action" demo project
 ```
 
 There is no configured linter/formatter and no frontend build/test tooling — JS is shipped as-is.
 The `docs/` project doubles as an end-to-end integration fixture; serve it to verify rendering
-changes by hand.
+changes by hand. `examples/growth-answers/` is the runnable demo of the ask → answer → action
+surfaces (runtime ask box, semantic model, triggers) — smoke-tested by `tests/test_examples.py`.
 
 ## Two distinct domains
 
@@ -294,6 +297,43 @@ on `QuerySpec` and are recorded in a separate `_stream_def_cache`; `get_stream_i
 mandatory and separate (Starlette's HTTP middleware does not run for WebSockets, so the endpoint calls
 `is_authorized` itself). On the client, `core.js` adds `subscribeQueryData` + `bindLiveQuery`; live
 components **skip the one-shot data-API fetch** and let the socket deliver the first payload.
+
+## Triggers & actions
+
+`triggers/*.yml` (name = file stem) watches a **library/python query** and fires **actions** when a
+condition breaches — the Push surface: the operator never visits the dashboard.
+`dashdown/triggers.py` owns the spec/parse/runner; `dashdown/actions.py` owns the `Action` ABC +
+`@register_action` registry (connector-registry shape) with `webhook` and `slack` (incoming-webhook)
+built-ins; config values env-expand `${VAR}` **at load** (fail-hard, like `auth:`). Conditions are
+regex-parsed `value|rows <op> number` — **never eval** (`value` = first cell of first row). The
+`TriggerRunner` subscribes each enabled trigger into the *existing* `StreamHub` poll loop
+**socket-less** (a plain `asyncio.Queue`; the poller key matches the WS endpoint's, so a live socket
+and a trigger on the same query share one poll). Firing is edge-triggered (clear→breach transition,
+optional `cooldown` re-fires while breached); actions run in `asyncio.to_thread`, exceptions logged
+never fatal. Started on app startup, restarted by `reload_project`, `triggers/` is dev-watched.
+
+## Runtime ask engine (the operator ask box)
+
+The author-pinned `<Ask />` answers a *fixed* prompt; `dashdown/ask_engine.py` is its runtime
+sibling: an operator types a free-form question (header **ask box**, `POST /_dashdown/api/ask`, or
+`dashdown ask` CLI) and one constrained LLM call routes it onto an existing source via the
+**resolution ladder** — (1) a semantic metric ref (pure-JSON values, no injection surface), (2) a
+named library/python query (params through the one blessed `_substitute_params`), (3) raw SQL **only**
+behind `ask: allow_sql: true` (default false). The LLM chooses from a **catalog**
+(`build_ask_catalog`: semantic measures/dims + query names/descriptions/params) — never a raw schema;
+an invalid/hallucinated resolution degrades to kind `none` with a reason, **never a 500**. The result
+feeds the *same* `generate_answer()` path as `<Ask />`, with a **server-side chart-shape inference**
+(`infer_chart_shape`, mirroring `chart.js::resolveAutoConfig`) so the answer ships a chart config the
+client renders verbatim — which also arms the **chart-annotation protocol** for runtime answers.
+Every answer carries a `provenance` line (the trust surface) and appends to
+`<project>/.dashdown/ask_log.jsonl` (telemetry seed; best-effort). Config: `ask:` block
+(`AskConfig` in project.py — `enabled`/`allow_sql`/`max_rows`/`cache_ttl`/`log`); the box renders
+only when `llm:` is configured ∧ `ask.enabled` ∧ not embed (server threads `ask_enabled`;
+default-false in the template, so static builds omit it). Frontend:
+`static/components/ask_box.js` (site-search chrome, `postJson` in core.js, answer panel reusing
+`updateChart`/`renderTableInto`/`setChartAnnotations` + the ask typewriter). Answer cache keys on
+`(normalized question, frozen params)`. Extend `tests/test_ask_engine.py` for any resolver/execution
+change — the ladder is security-relevant.
 
 ## Embedding
 
