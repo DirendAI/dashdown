@@ -433,6 +433,83 @@ def _print_semantic_models(models) -> None:
     typer.echo(f"{len(models)} model(s)", err=True)
 
 
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="A natural-language question to answer."),
+    project: Path = typer.Option(
+        Path("."), "--project", "-p", help="Project directory"
+    ),
+    param: list[str] = typer.Option(
+        [],
+        "--param",
+        help="Filter value as key=value (repeatable) — the live dashboard filter "
+        "state the answer is grounded in (e.g. region=East, date_start=2026-01-01)",
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Print the full response payload as JSON"
+    ),
+) -> None:
+    """Answer a free-form question through the **runtime ask engine**.
+
+    The same path as the ask box / ``POST /_dashdown/api/ask``: one constrained LLM
+    call routes the question onto an existing data source (a semantic model, a
+    library/python query, or — only with ``ask.allow_sql`` — raw SQL), runs it, and
+    an LLM writes a short answer. Prints the provenance line, the result table, then
+    the answer:
+
+        dashdown ask "Which campaign drove repeat purchases this week?"
+        dashdown ask "revenue by region" -p . --param region=East
+        dashdown ask "top products" --json
+    """
+    from .ask_engine import (
+        AskLLMError,
+        AskQueryError,
+        answer_question,
+        ask_unavailable_notice,
+    )
+    from .data.base import QueryResult
+    from .project import load_project
+
+    params: dict[str, str] = {}
+    for item in param:
+        if "=" not in item:
+            raise typer.BadParameter(f"--param must be key=value, got: {item!r}")
+        key, value = item.split("=", 1)
+        params[key.strip()] = value
+
+    proj = load_project(project.resolve())
+    try:
+        notice = ask_unavailable_notice(proj)
+        if notice is not None:
+            typer.echo(notice, err=True)
+            raise typer.Exit(1)
+
+        try:
+            payload = answer_question(proj, question.strip(), params)
+        except AskLLMError as exc:
+            typer.echo(f"LLM request failed: {exc}", err=True)
+            raise typer.Exit(1)
+        except AskQueryError as exc:
+            typer.echo(f"Query execution failed: {exc}", err=True)
+            raise typer.Exit(1)
+    finally:
+        proj.close()
+
+    if as_json:
+        import json
+
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+
+    resolved = payload.get("resolved") or {}
+    typer.echo(f"Provenance: {resolved.get('provenance', '')}", err=True)
+    if payload.get("columns") is not None:
+        result = QueryResult(columns=payload["columns"], rows=payload["rows"])
+        _print_query_result(result, "table", 50)
+        typer.echo("")
+    typer.echo(payload.get("answer_text") or "")
+
+
 _ERROR_TITLE_RE = re.compile(
     r'dashdown-error-title[^>]*>(.*?)</div>\s*<pre[^>]*>(.*?)</pre>', re.DOTALL
 )

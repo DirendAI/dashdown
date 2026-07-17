@@ -530,12 +530,63 @@ def parse_python_queries_config(raw: Any) -> PythonQueriesConfig:
 
 
 @dataclass
+class AskConfig:
+    """Optional ``ask:`` block — the runtime natural-language ask box / endpoint
+    (``POST /_dashdown/api/ask``, ``dashdown/ask_engine.py``).
+
+        ask:
+          enabled: true        # default true (effective only when llm: is configured)
+          allow_sql: false     # rung 3 opt-in — let the model emit raw SQL; default false
+          max_rows: 50         # rows of result data shown to the answering model
+          cache_ttl: 3600      # answer cache seconds
+          log: true            # append runtime asks to .dashdown/ask_log.jsonl
+
+    The engine routes a free-form question onto an existing data source (semantic
+    model, library/python query, or — only with ``allow_sql`` — raw SQL). It is
+    inert unless an ``llm:`` provider is also configured (like ``<Ask />``): the box
+    then reports "no LLM provider configured" instead of erroring. ``allow_sql`` is
+    the single lever that lets the model bypass the constrained ladder — off by
+    default, and clearly marked in provenance when on."""
+
+    enabled: bool = True
+    allow_sql: bool = False
+    max_rows: int = 50
+    cache_ttl: int = 3600
+    log: bool = True
+
+
+def parse_ask_config(raw: Any) -> AskConfig:
+    """Parse and validate the ``ask:`` block. Raises ValueError when malformed so
+    the server refuses to start half-broken (same policy as ``search:`` etc.)."""
+    if raw is None:
+        return AskConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("ask: must be a mapping")
+
+    cfg = AskConfig()
+    for key in ("enabled", "allow_sql", "log"):
+        val = raw.get(key)
+        if val is not None:
+            if not isinstance(val, bool):
+                raise ValueError(f"ask.{key} must be a boolean")
+            setattr(cfg, key, val)
+    for key in ("max_rows", "cache_ttl"):
+        val = raw.get(key)
+        if val is not None:
+            if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+                raise ValueError(f"ask.{key} must be a positive integer")
+            setattr(cfg, key, val)
+    return cfg
+
+
+@dataclass
 class ProjectConfig:
     title: str = "Dashdown"
     auth: AuthConfig = field(default_factory=AuthConfig)
     branding: BrandingConfig = field(default_factory=BrandingConfig)
     format: FormatConfig = field(default_factory=FormatConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    ask: AskConfig = field(default_factory=AskConfig)
     embed: EmbedConfig = field(default_factory=EmbedConfig)
     global_date: GlobalDateFilterConfig = field(default_factory=GlobalDateFilterConfig)
     filters: FiltersConfig = field(default_factory=FiltersConfig)
@@ -765,6 +816,7 @@ def load_project(root: Path) -> Project:
             branding=parse_branding_config(raw.get("branding")),
             format=parse_format_config(raw.get("format")),
             llm=llm_config,
+            ask=parse_ask_config(raw.get("ask")),
             embed=parse_embed_config(raw.get("embed")),
             global_date=parse_global_filters_config(raw.get("global_filters")),
             filters=parse_filters_config(raw.get("filters")),

@@ -827,6 +827,58 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             }
         )
 
+    @app.post("/_dashdown/api/ask")
+    def post_runtime_ask(request: Request, body: dict):
+        """Answer a free-form natural-language question (the runtime ask box).
+
+        Distinct from the author-pinned ``GET /_dashdown/api/ask/{id}`` (which
+        resolves an opaque id to a fixed prompt): this takes a *question* and
+        routes it, via one constrained LLM call, onto an existing data source —
+        the resolution ladder in ``ask_engine.py``. Deliberately a sync ``def``
+        (FastAPI runs it in the threadpool) so the two multi-second LLM calls
+        don't block the event loop. Behind the same auth middleware as everything
+        else.
+
+        200 always on a *routed* answer (kind none included — the model's reason
+        rides in ``answer_html``); a 200 ``{notice}`` when llm/ask is disabled;
+        400 on a malformed body / empty question; 502 on an LLM failure; 500 on a
+        query failure.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        from dashdown.ask_engine import (
+            AskLLMError,
+            AskQueryError,
+            answer_question,
+            ask_unavailable_notice,
+        )
+
+        proj: Project = request.app.state.project
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        question = body.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise HTTPException(status_code=400, detail="a non-empty 'question' is required")
+        raw_params = body.get("params") or {}
+        if not isinstance(raw_params, dict):
+            raise HTTPException(status_code=400, detail="'params' must be an object")
+        params = {str(k): str(v) for k, v in raw_params.items() if not str(k).startswith("_")}
+        refresh = bool(body.get("refresh"))
+
+        notice = ask_unavailable_notice(proj)
+        if notice is not None:
+            return JSONResponse({"question": question, "answer_html": "", "notice": notice})
+
+        try:
+            payload = answer_question(proj, question.strip(), params, refresh=refresh)
+        except AskLLMError as e:
+            raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+        except AskQueryError as e:
+            raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
+        return JSONResponse(payload)
+
     @app.get("/_dashdown/api/pdf")
     def export_page_pdf(request: Request):
         """Render the current page to a presentation PDF with headless Chromium —
@@ -1081,6 +1133,14 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             search_enabled=proj.config.search.enabled,
             search_placeholder=proj.config.search.placeholder,
             search_max_results=proj.config.search.max_results,
+            # Runtime ask box: shown only when an LLM provider is configured AND
+            # ask.enabled AND this isn't a chrome-less embed. The template treats
+            # it default-false, so static builds / embeds omit it with no change.
+            ask_enabled=(
+                proj.config.llm.enabled
+                and proj.config.ask.enabled
+                and not embed_on
+            ),
             # Desktop sidebar collapse: `collapsed` seeds the first-visit state (a
             # saved localStorage choice overrides it); `toggle` gates the control.
             # Mobile slide-in is unaffected.
