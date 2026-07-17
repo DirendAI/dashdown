@@ -52,6 +52,7 @@ def _clear_caches():
 
     def _clear():
         ask_engine._answer_cache.clear()
+        ask_engine._rate_marks.clear()
         pipeline._query_def_cache.clear()
         pipeline._result_cache.clear()
         pipeline._python_def_cache.clear()
@@ -226,6 +227,26 @@ def test_normalize_question_collapses_whitespace():
     assert normalize_question("  Which  Region\nLeads? ") == "which region leads?"
 
 
+def test_rate_limited_counts_and_refuses():
+    assert ask_engine.rate_limited(2) is False
+    assert ask_engine.rate_limited(2) is False
+    assert ask_engine.rate_limited(2) is True  # third within the window
+    # A refused attempt is not recorded — the window still holds two marks.
+    assert len(ask_engine._rate_marks) == 2
+    assert ask_engine.rate_limited(0) is False  # 0 disables
+
+
+def test_parse_ask_config_rate_limit_validation():
+    from dashdown.project import parse_ask_config
+
+    assert parse_ask_config(None).rate_limit == 60
+    assert parse_ask_config({"rate_limit": 0}).rate_limit == 0
+    assert parse_ask_config({"rate_limit": 5}).rate_limit == 5
+    for bad in (-1, "10", True, 1.5):
+        with pytest.raises(ValueError):
+            parse_ask_config({"rate_limit": bad})
+
+
 # --------------------------------------------------------------------------- #
 # Endpoint — the resolution ladder end to end
 # --------------------------------------------------------------------------- #
@@ -339,6 +360,49 @@ class TestAskEndpoint:
         for payload in ("just a string", [1, 2, 3], None):
             r = client.post("/_dashdown/api/ask", json=payload)
             assert r.status_code == 400, r.text
+
+    def test_rate_limit_returns_429(self, tmp_path):
+        # Two distinct questions with rate_limit: 1 — the second cache-miss is
+        # refused with 429 and never reaches the LLM.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "One.",
+            '{"kind": "query", "name": "by_region", "params": {}}', "Two.",
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  rate_limit: 1\n")
+        r1 = client.post("/_dashdown/api/ask", json={"question": "first question"})
+        assert r1.status_code == 200, r1.text
+        calls_after_first = len(fake.calls)
+        r2 = client.post("/_dashdown/api/ask", json={"question": "second question"})
+        assert r2.status_code == 429
+        assert "rate limit" in r2.json()["detail"]
+        assert len(fake.calls) == calls_after_first  # no LLM spend on refusal
+
+    def test_cache_hit_does_not_consume_rate_limit(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "One."
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  rate_limit: 1\n")
+        assert (
+            client.post("/_dashdown/api/ask", json={"question": "same q"}).status_code
+            == 200
+        )
+        # Repeat of the same question is a cache hit — allowed despite the
+        # exhausted per-minute budget.
+        r = client.post("/_dashdown/api/ask", json={"question": "same q"})
+        assert r.status_code == 200
+        assert r.json()["cached"] is True
+
+    def test_rate_limit_zero_disables(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "One.",
+            '{"kind": "query", "name": "by_region", "params": {}}', "Two.",
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  rate_limit: 0\n")
+        for q in ("q one", "q two"):
+            assert (
+                client.post("/_dashdown/api/ask", json={"question": q}).status_code
+                == 200
+            )
 
 
     def test_cache_hit_skips_llm(self, tmp_path):

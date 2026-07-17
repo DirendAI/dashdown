@@ -465,6 +465,7 @@ def ask(
     from .ask_engine import (
         AskLLMError,
         AskQueryError,
+        AskRateLimitError,
         answer_question,
         ask_unavailable_notice,
     )
@@ -487,6 +488,9 @@ def ask(
 
         try:
             payload = answer_question(proj, question.strip(), params)
+        except AskRateLimitError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
         except AskLLMError as exc:
             typer.echo(f"LLM request failed: {exc}", err=True)
             raise typer.Exit(1)

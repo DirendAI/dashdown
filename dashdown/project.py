@@ -541,6 +541,7 @@ class AskConfig:
           max_rows: 50         # rows of result data shown to the answering model
           cache_ttl: 3600      # answer cache seconds
           log: true            # append runtime asks to .dashdown/ask_log.jsonl
+          rate_limit: 60       # cache-miss asks per minute, process-wide; 0 = off
 
     The engine routes a free-form question onto an existing data source (semantic
     model, library/python query, or — only with ``allow_sql`` — raw SQL). It is
@@ -554,6 +555,9 @@ class AskConfig:
     max_rows: int = 50
     cache_ttl: int = 3600
     log: bool = True
+    # Cache-miss asks per minute, process-wide (each is two billable LLM
+    # calls). 0 disables. Generous for humans; a wall for crawlers/loops.
+    rate_limit: int = 60
 
 
 def parse_ask_config(raw: Any) -> AskConfig:
@@ -577,6 +581,12 @@ def parse_ask_config(raw: Any) -> AskConfig:
             if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
                 raise ValueError(f"ask.{key} must be a positive integer")
             setattr(cfg, key, val)
+    val = raw.get("rate_limit")
+    if val is not None:
+        # 0 is meaningful here (disable the limit), unlike max_rows/cache_ttl.
+        if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+            raise ValueError("ask.rate_limit must be a non-negative integer")
+        cfg.rate_limit = val
     return cfg
 
 

@@ -304,11 +304,16 @@ components **skip the one-shot data-API fetch** and let the socket deliver the f
 condition breaches — the Push surface: the operator never visits the dashboard.
 `dashdown/triggers.py` owns the spec/parse/runner; `dashdown/actions.py` owns the `Action` ABC +
 `@register_action` registry (connector-registry shape) with `webhook` and `slack` (incoming-webhook)
-built-ins; config values env-expand `${VAR}` **at load** (fail-hard, like `auth:`). Conditions are
+built-ins; config values env-expand `${VAR}` **at load** (fail-hard, like `auth:` — but a
+**disabled** trigger only structure-validates its actions and defers env expansion until enabled,
+so shipped examples can reference unset vars). Conditions are
 regex-parsed `value|rows <op> number` — **never eval** (`value` = first cell of first row). The
 `TriggerRunner` subscribes each enabled trigger into the *existing* `StreamHub` poll loop
-**socket-less** (a plain `asyncio.Queue`; the poller key matches the WS endpoint's, so a live socket
-and a trigger on the same query share one poll). Firing is edge-triggered (clear→breach transition,
+**socket-less** (a plain `asyncio.Queue`; fetch thunk + poller key come from the one shared
+`streaming.build_query_fetch`, so a live socket and a trigger on the same query provably share one
+poll — the hub runs a shared poller at the fastest subscriber's interval, and a joiner replays
+`poller.latest` so a steadily-breached value fires immediately). Firing is edge-triggered
+(clear→breach transition,
 optional `cooldown` re-fires while breached); actions run in `asyncio.to_thread`, exceptions logged
 never fatal. Started on app startup, restarted by `reload_project`, `triggers/` is dev-watched.
 
@@ -327,13 +332,16 @@ feeds the *same* `generate_answer()` path as `<Ask />`, with a **server-side cha
 client renders verbatim — which also arms the **chart-annotation protocol** for runtime answers.
 Every answer carries a `provenance` line (the trust surface) and appends to
 `<project>/.dashdown/ask_log.jsonl` (telemetry seed; best-effort). Config: `ask:` block
-(`AskConfig` in project.py — `enabled`/`allow_sql`/`max_rows`/`cache_ttl`/`log`); the box renders
-only when `llm:` is configured ∧ `ask.enabled` ∧ not embed (server threads `ask_enabled`;
-default-false in the template, so static builds omit it). Frontend:
-`static/components/ask_box.js` (site-search chrome, `postJson` in core.js, answer panel reusing
-`updateChart`/`renderTableInto`/`setChartAnnotations` + the ask typewriter). Answer cache keys on
-`(normalized question, frozen params)`. Extend `tests/test_ask_engine.py` for any resolver/execution
-change — the ladder is security-relevant.
+(`AskConfig` in project.py — `enabled`/`allow_sql`/`max_rows`/`cache_ttl`/`log`/`rate_limit`); the
+box renders only when `llm:` is configured ∧ `ask.enabled` ∧ not embed (server threads
+`ask_enabled`; default-false in the template, so static builds omit it). Frontend:
+`static/components/ask_box.js` (answer-first panel — provenance → typed answer → chart → table —
+Ctrl/Cmd+K focus, `postJson` in core.js, reusing `updateChart`/`renderTableInto`/
+`setChartAnnotations` + helpers exported from ask.js). Cost control: the answer cache (bounded LRU,
+keys on `(normalized question, frozen params)`; kind-`none` cached only briefly) plus a
+process-wide sliding-window **rate limit** on cache-miss asks (`ask.rate_limit`/min, default 60,
+0 disables → endpoint 429s) — every miss is two billable LLM calls. Extend
+`tests/test_ask_engine.py` for any resolver/execution change — the ladder is security-relevant.
 
 ## Embedding
 

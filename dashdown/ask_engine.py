@@ -37,8 +37,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -91,6 +92,34 @@ MAX_CACHED_ANSWERS = 256
 # must not make a valid question "unanswerable" for the full cache_ttl.
 NONE_ANSWER_TTL = 60
 
+# ---- Rate limit (cost control) -------------------------------------------- #
+# Every cache-miss ask is two billable LLM calls, and (unlike the authored
+# <Ask />, whose prompts are a fixed authored set) the runtime endpoint accepts
+# arbitrary questions — so an un-authed dashboard with ask enabled would be an
+# open LLM-spend endpoint. A process-wide sliding window bounds the burn:
+# generous for humans, a wall for crawlers/loops. `ask.rate_limit` (per minute)
+# configures it; 0 disables. Cache hits never consume the budget.
+_RATE_WINDOW_SECONDS = 60.0
+_rate_lock = threading.Lock()
+_rate_marks: deque[float] = deque()
+
+
+def rate_limited(limit: int) -> bool:
+    """Record one ask attempt; True when it exceeds ``limit`` per minute.
+
+    Thread-safe (the endpoint runs in FastAPI's threadpool). A refused attempt
+    is *not* recorded, so a client that backs off recovers as the window slides."""
+    if limit <= 0:
+        return False
+    now = time.monotonic()
+    with _rate_lock:
+        while _rate_marks and now - _rate_marks[0] > _RATE_WINDOW_SECONDS:
+            _rate_marks.popleft()
+        if len(_rate_marks) >= limit:
+            return True
+        _rate_marks.append(now)
+        return False
+
 # The valid resolution kinds the parser recognizes; anything else degrades to none.
 _KINDS = frozenset({"semantic", "query", "sql", "none"})
 
@@ -104,6 +133,10 @@ class AskLLMError(RuntimeError):
 
 class AskQueryError(RuntimeError):
     """Executing the resolved query failed — the endpoint maps this to 500."""
+
+
+class AskRateLimitError(RuntimeError):
+    """The process-wide ask rate limit was hit — the endpoint maps this to 429."""
 
 
 # --------------------------------------------------------------------------- #
@@ -714,6 +747,14 @@ def answer_question(
             hit = dict(cached)
             hit["cached"] = True
             return hit
+
+    # Past the cache → LLM spend ahead; the rate limit guards exactly this line.
+    if rate_limited(cfg.rate_limit):
+        raise AskRateLimitError(
+            "ask rate limit reached "
+            f"({cfg.rate_limit}/min — ask.rate_limit in dashdown.yaml); "
+            "try again shortly"
+        )
 
     adapter = project.get_llm_adapter()
     started = time.monotonic()

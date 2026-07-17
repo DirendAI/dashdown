@@ -280,6 +280,15 @@ export function initAskBox(el) {
   function renderAnswerPayload(payload, seq) {
     panelShell();
 
+    // Model attribution on the ✦ badge tooltip — the same trust affordance the
+    // authored ask cards carry (theirs hover-reveals a .dashdown-ask-model).
+    if (payload.model) {
+      const badge = panel.querySelector(".dashdown-ask-box-badge");
+      if (badge) {
+        badge.setAttribute("title", `AI-generated answer · ${payload.model}`);
+      }
+    }
+
     const resolved = payload.resolved || {};
     if (resolved.provenance) {
       const prov = document.createElement("div");

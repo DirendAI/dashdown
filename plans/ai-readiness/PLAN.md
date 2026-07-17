@@ -1,6 +1,7 @@
 # AI-Readiness: from dashboards to answers
 
-**Branch:** `feat/ai-readiness` · **Status:** in progress
+**Branch:** `feat/ai-readiness` · **Status:** shipped (all in-scope items delivered;
+review deltas + accepted issues + follow-ups tracked in BACKLOG.md)
 
 ## Thesis
 

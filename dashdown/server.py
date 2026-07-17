@@ -52,7 +52,6 @@ from dashdown.render.pipeline import (
     get_query_def,
     get_python_query_def,
     get_stream_interval,
-    _freeze_params,
     _substitute_params,
     get_cached_result,
     cache_result,
@@ -69,7 +68,6 @@ from dashdown.streaming import (
     hub as stream_hub,
     watch_disconnect,
 )
-from dashdown.data.base import Connector
 
 log = logging.getLogger(__name__)
 
@@ -852,7 +850,8 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         200 always on a *routed* answer (kind none included — the model's reason
         rides in ``answer_html``); a 200 ``{notice}`` when llm/ask is disabled;
-        400 on a malformed body / empty question; 502 on an LLM failure; 500 on a
+        400 on a malformed body / empty question; 429 past the process-wide
+        ask rate limit (cost control); 502 on an LLM failure; 500 on a
         query failure.
         """
         from fastapi import HTTPException
@@ -861,6 +860,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         from dashdown.ask_engine import (
             AskLLMError,
             AskQueryError,
+            AskRateLimitError,
             answer_question,
             ask_unavailable_notice,
         )
@@ -884,6 +884,8 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         try:
             payload = answer_question(proj, question.strip(), params, refresh=refresh)
+        except AskRateLimitError as e:
+            raise HTTPException(status_code=429, detail=str(e))
         except AskLLMError as e:
             raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
         except AskQueryError as e:
