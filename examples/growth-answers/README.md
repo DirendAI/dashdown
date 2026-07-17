@@ -125,6 +125,13 @@ look, or your own sink):
   uv run dashdown serve examples/growth-answers
   ```
 
+  **Restart the server, don't hot-flip.** A running server's environment is
+  frozen — an `export` in another shell is invisible to it, and if the
+  dev-watcher reloads a trigger whose env var the server can't see, the
+  reload fails with only a stderr log line while the old (disabled) config
+  silently stays live. Set `DEMO_HOOK_URL`, flip `enabled: true`, then start
+  a fresh `dashdown serve` in that same shell.
+
   With `interval: 60` and the seeded value at ~21.6 (below the 20 line only
   after you trim a few repeat rows — see "The trigger" above), the first fire
   should land within a minute of crossing the threshold, then again every

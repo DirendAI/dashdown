@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ from dashdown.data.base import QueryResult
 from dashdown.llm import LLMAdapter, LLMConfig
 from dashdown.project import load_project
 from dashdown.render import pipeline
+from dashdown.render.pipeline import serialize_result
 from dashdown.server import create_app
 
 runner = CliRunner()
@@ -180,46 +182,44 @@ def test_parse_resolution_unknown_query_is_none(tmp_path):
 # Chart inference (mirrors chart.js::resolveAutoConfig)
 # --------------------------------------------------------------------------- #
 class TestChartInference:
-    def test_temporal_x_is_line(self):
-        result = QueryResult(
-            columns=["week", "revenue"],
-            rows=[["2026-01-01", 10], ["2026-01-08", 20], ["2026-01-15", 15]],
+    # infer_chart_shape takes the *serialized* payload (what the browser sees),
+    # so tests serialize exactly like answer_question does.
+    @staticmethod
+    def _shape(columns, rows):
+        return infer_chart_shape(serialize_result(QueryResult(columns=columns, rows=rows)))
+
+    def test_temporal_x_is_line_sorted_by_x(self):
+        # Temporal charts carry sort_by=x — the server ships a concrete type,
+        # which skips the client's resolveAutoConfig (where auto time series
+        # get their sort), so the hint must ride the config.
+        shape = self._shape(
+            ["week", "revenue"],
+            [["2026-01-01", 10], ["2026-01-08", 20], ["2026-01-15", 15]],
         )
-        assert infer_chart_shape(result) == {"type": "line", "x": "week", "y": "revenue"}
+        assert shape == {"type": "line", "x": "week", "y": "revenue", "sort_by": "week"}
 
     def test_categorical_x_is_bar(self):
-        result = QueryResult(
-            columns=["region", "total"],
-            rows=[["North", 100], ["South", 200], ["West", 50]],
+        shape = self._shape(
+            ["region", "total"], [["North", 100], ["South", 200], ["West", 50]]
         )
-        assert infer_chart_shape(result) == {"type": "bar", "x": "region", "y": "total"}
+        assert shape == {"type": "bar", "x": "region", "y": "total"}
 
     def test_numeric_x_is_scatter(self):
-        result = QueryResult(
-            columns=["spend", "revenue"],
-            rows=[[10, 100], [20, 150], [30, 90]],
-        )
-        assert infer_chart_shape(result) == {
-            "type": "scatter",
-            "x": "spend",
-            "y": "revenue",
-        }
+        shape = self._shape(["spend", "revenue"], [[10, 100], [20, 150], [30, 90]])
+        assert shape == {"type": "scatter", "x": "spend", "y": "revenue"}
 
     def test_single_value_is_no_chart(self):
-        result = QueryResult(columns=["total"], rows=[[42]])
-        assert infer_chart_shape(result) is None
+        assert self._shape(["total"], [[42]]) is None
 
     def test_single_row_breakdown_is_no_chart(self):
         # One row is a headline, even with a category column.
-        result = QueryResult(columns=["region", "total"], rows=[["North", 42]])
-        assert infer_chart_shape(result) is None
+        assert self._shape(["region", "total"], [["North", 42]]) is None
 
     def test_no_numeric_column_is_no_chart(self):
-        result = QueryResult(
-            columns=["region", "manager"],
-            rows=[["North", "Ann"], ["South", "Bob"]],
+        assert (
+            self._shape(["region", "manager"], [["North", "Ann"], ["South", "Bob"]])
+            is None
         )
-        assert infer_chart_shape(result) is None
 
 
 def test_normalize_question_collapses_whitespace():
@@ -320,6 +320,26 @@ class TestAskEndpoint:
         assert body["resolved"]["kind"] == "none"
         assert body["answer_text"]  # the model's reason rides in the answer
         assert len(fake.calls) == 1
+
+    def test_none_is_cached_only_briefly(self, tmp_path):
+        # A "none" may be a transient resolver misroute; caching it for the full
+        # cache_ttl would pin a valid question as unanswerable for an hour.
+        fake = FakeAdapter("garbage", "garbage")
+        client = _client(tmp_path, fake=fake)
+        client.post("/_dashdown/api/ask", json={"question": "flaky question"})
+        entries = list(ask_engine._answer_cache.values())
+        assert len(entries) == 1
+        _, expiry = entries[0]
+        assert expiry - time.monotonic() <= ask_engine.NONE_ANSWER_TTL + 1
+
+    def test_non_object_body_is_400_not_422(self, tmp_path):
+        # The endpoint owns its malformed-body contract (400 + message), so the
+        # body param must accept arbitrary JSON instead of letting FastAPI 422.
+        client = _client(tmp_path, fake=FakeAdapter("x"))
+        for payload in ("just a string", [1, 2, 3], None):
+            r = client.post("/_dashdown/api/ask", json=payload)
+            assert r.status_code == 400, r.text
+
 
     def test_cache_hit_skips_llm(self, tmp_path):
         fake = FakeAdapter(
@@ -467,6 +487,26 @@ class TestSemanticResolution:
         assert body["chart"]["type"] == "bar"
         assert "<strong>North</strong>" in body["answer_html"]
         assert len(fake.calls) == 2
+
+    def test_grain_on_categorical_by_is_dropped(self, tmp_path):
+        # A hallucinated grain on a non-time dimension must not 500 — it's
+        # soft-dropped (same forgiveness as unknown filter keys) and the
+        # resolution still routes.
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "grain": "month", "filters": {}}',
+            "North leads.",
+        )
+        app = create_app(_semantic_project(tmp_path))
+        app.state.project.llm_adapter = fake
+        client = TestClient(app)
+        r = client.post(
+            "/_dashdown/api/ask", json={"question": "revenue by region monthly"}
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved"]["kind"] == "semantic"
+        assert body["resolved"]["detail"]["grain"] is None
 
     def test_unknown_metric_is_none(self, tmp_path):
         fake = FakeAdapter(

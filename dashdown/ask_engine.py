@@ -38,16 +38,15 @@ import json
 import logging
 import re
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dashdown.chart_annotations import ChartContext, build_chart_context
 from dashdown.data.base import QueryResult
 from dashdown.llm import (
     AskDef,
-    LLMAdapter,
     generate_answer,
     resolve_model_name,
     unavailable_notice,
@@ -55,14 +54,15 @@ from dashdown.llm import (
 from dashdown.render.markdown import render_markdown_text
 from dashdown.render.pipeline import (
     DEFAULT_CACHE_TTL,
+    _PARAM_RE,
+    _freeze_params,
+    _substitute_params,
     cache_result,
     get_cached_result,
     get_python_query_def,
     get_query_def,
     register_python_query_def,
     serialize_result,
-    serialize_value,
-    _substitute_params,
 )
 from dashdown.python_query import run_python_query
 from dashdown.semantic import (
@@ -78,11 +78,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only (avoids an import cycle)
 
 log = logging.getLogger(__name__)
 
-_PARAM_RE = re.compile(r"\$\{(\w+)\}")
-
 # Defensive cap on rows returned by the raw-SQL rung: a hand-written SELECT has no
 # author-set LIMIT and its result feeds both the model payload and the wire.
 MAX_SQL_ROWS = 1000
+
+# The runtime cache keys on free-form operator text, so unlike the authored
+# <Ask /> cache (bounded by the finite set of ask ids) its key space is
+# unbounded — bound it like pipeline's _result_cache.
+MAX_CACHED_ANSWERS = 256
+
+# A kind-"none" payload is cached only briefly: a transient resolver misroute
+# must not make a valid question "unanswerable" for the full cache_ttl.
+NONE_ANSWER_TTL = 60
 
 # The valid resolution kinds the parser recognizes; anything else degrades to none.
 _KINDS = frozenset({"semantic", "query", "sql", "none"})
@@ -300,12 +307,7 @@ def parse_resolution(
         return _none(f"unknown resolution kind {kind!r}")
 
     if kind == "none":
-        return Resolution(
-            kind="none",
-            reason=str(obj.get("reason", "") or "no matching data source"),
-            provenance="unresolved: "
-            + str(obj.get("reason", "") or "no matching data source"),
-        )
+        return _none(str(obj.get("reason", "") or "no matching data source"))
 
     if kind == "sql":
         if not allow_sql:
@@ -362,6 +364,14 @@ def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
     grain = grain.strip().lower() if isinstance(grain, str) and grain.strip() else None
     if grain is not None and grain not in GRAIN_TOKENS:
         return _none(f"unknown grain {grain!r}")
+    # Grain only makes sense bucketing the model's time dimension; a
+    # hallucinated grain on a categorical `by` would raise deep in the semantic
+    # backend (→ a 500, breaking the never-500 contract), so soft-drop it —
+    # same forgiveness as unknown filter keys.
+    if grain is not None:
+        time_dim = (handle.time_dimension or "").split(".")[-1]
+        if not by or by.split(".")[-1] != time_dim:
+            grain = None
 
     # Filters are soft: a value keyed by a real dimension is kept; an unknown
     # dimension key is dropped rather than failing the whole answer (the model
@@ -448,14 +458,19 @@ def _execute_semantic(
     )
     spec = build_semantic_spec(project.semantic_models, ref, project.connectors)
     # Register so a follow-up data fetch by the synthetic name resolves too (same
-    # seam the render pipeline uses for a `metric={…}` chart).
-    register_python_query_def(spec.name, spec.connector, spec)
+    # seam the render pipeline uses for a `metric={…}` chart). The name is stable
+    # per (metric, by, grain), so skip the redundant global write on repeats.
+    if get_python_query_def(spec.name, spec.connector) is None:
+        register_python_query_def(spec.name, spec.connector, spec)
     resolution.query_name = spec.name
     resolution.connector = spec.connector
 
     # build_filters reads dimension keys + date_start/date_end off params. Start
     # from the live dashboard filters, then overlay the resolution's own filters
-    # (data, never `${param}`-interpolated).
+    # (data, never `${param}`-interpolated). Known limitation: filter params are
+    # comma-joined multi-value strings (the framework-wide Dropdown convention
+    # build_filters splits on), so a single value that itself contains a comma
+    # cannot ride this encoding.
     exec_params = dict(params)
     for dim, values in resolution.filters.items():
         exec_params[dim] = ",".join(values)
@@ -560,16 +575,19 @@ def _is_number(s: str) -> bool:
         return False
 
 
-def infer_chart_shape(result: QueryResult) -> dict[str, str] | None:
-    """Infer ``{type, x, y}`` for a result, or ``None`` for a headline value.
+def infer_chart_shape(payload: dict[str, Any]) -> dict[str, str] | None:
+    """Infer ``{type, x, y[, sort_by]}`` for a **serialized** result payload
+    (``{"columns", "rows"}``), or ``None`` for a headline value.
 
     Mirrors ``resolveAutoConfig`` so the client renders *exactly* this chart:
-    temporal x → line, categorical x → bar, numeric x → scatter; y is the first
-    numeric column that isn't x. A single-row result (or one with no chartable
-    numeric column) is a headline, not a chart → ``None``. Classification runs on
-    the **serialized** cells (dates as ISO strings, Decimals as floats) so it sees
-    what the browser would."""
-    payload = serialize_result(result)
+    temporal x → line (sorted by x, like the client's auto path — the server
+    ships a concrete type, which skips ``resolveAutoConfig``, so the sort hint
+    must ride along or time series render in row order), categorical x → bar,
+    numeric x → scatter; y is the first numeric column that isn't x. A
+    single-row result (or one with no chartable numeric column) is a headline,
+    not a chart → ``None``. Takes the serialized payload (dates as ISO strings,
+    Decimals as floats) so it classifies what the browser would see — and so the
+    caller serializes exactly once."""
     columns = payload["columns"]
     rows = payload["rows"]
     # A single row (or none) is a headline number, not a chart.
@@ -586,25 +604,29 @@ def infer_chart_shape(result: QueryResult) -> dict[str, str] | None:
         return next((c for c in columns if kind[c] == k and c != exclude), None)
 
     x = first_of("temporal") or first_of("categorical") or columns[0]
-    y = next((c for c in columns if c != x and kind[c] == "numeric"), None)
+    y = first_of("numeric", exclude=x)
     if not y:
         return None
 
-    chart_type = "bar"
     if kind[x] == "temporal":
-        chart_type = "line"
-    elif kind[x] == "numeric":
-        chart_type = "scatter"
-    return {"type": chart_type, "x": x, "y": y}
+        return {"type": "line", "x": x, "y": y, "sort_by": x}
+    if kind[x] == "numeric":
+        return {"type": "scatter", "x": x, "y": y}
+    return {"type": "bar", "x": x, "y": y}
 
 
 # --------------------------------------------------------------------------- #
 # Answer cache: (normalized question, frozen params) -> full response payload
 # --------------------------------------------------------------------------- #
-# Mirrors llm.py::_answer_cache. The value is the whole response payload so a hit
-# replays chart + table + answer identically; `refresh` (POST body) bypasses it —
-# config can't disable runtime refresh, cache_ttl bounds the cost instead.
-_answer_cache: dict[tuple[str, tuple], tuple[dict[str, Any], float]] = {}
+# Mirrors llm.py::_answer_cache in shape, but bounded like pipeline's
+# _result_cache: the key space here is free-form operator text, so without an
+# LRU cap a stream of unique questions grows the dict forever. The value is the
+# whole response payload so a hit replays chart + table + answer identically;
+# `refresh` (POST body) bypasses it — config can't disable runtime refresh,
+# cache_ttl bounds the cost instead.
+_answer_cache: OrderedDict[tuple[str, tuple], tuple[dict[str, Any], float]] = (
+    OrderedDict()
+)
 
 _WS_RE = re.compile(r"\s+")
 
@@ -615,14 +637,16 @@ def normalize_question(question: str) -> str:
     return _WS_RE.sub(" ", (question or "").strip().lower())
 
 
-def _freeze(params: dict[str, str]) -> tuple:
-    return tuple(sorted((str(k), str(v)) for k, v in params.items()))
+def _cache_key(question: str, params: dict[str, str]) -> tuple[str, tuple]:
+    # _freeze_params is the same freezer the result cache keys on, so the two
+    # layers can never disagree about what "the same params" means.
+    return (normalize_question(question), _freeze_params(params))
 
 
 def get_cached_answer(
     question: str, params: dict[str, str]
 ) -> dict[str, Any] | None:
-    key = (normalize_question(question), _freeze(params))
+    key = _cache_key(question, params)
     entry = _answer_cache.get(key)
     if entry is None:
         return None
@@ -630,14 +654,18 @@ def get_cached_answer(
     if time.monotonic() > expiry:
         _answer_cache.pop(key, None)
         return None
+    _answer_cache.move_to_end(key)
     return payload
 
 
 def cache_answer(
     question: str, params: dict[str, str], payload: dict[str, Any], ttl: int
 ) -> None:
-    key = (normalize_question(question), _freeze(params))
+    key = _cache_key(question, params)
     _answer_cache[key] = (payload, time.monotonic() + ttl)
+    _answer_cache.move_to_end(key)
+    while len(_answer_cache) > MAX_CACHED_ANSWERS:
+        _answer_cache.popitem(last=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -720,13 +748,18 @@ def answer_question(
             "model": model,
             "cached": False,
         }
-        cache_answer(question, params, payload, cfg.cache_ttl)
+        # Short TTL: a "none" may be a transient resolver misroute, and the ask
+        # box never sends refresh — caching it for the full cache_ttl would pin
+        # a valid question as "unanswerable" for up to an hour.
+        cache_answer(question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL))
         _log(project, question, resolution, 0, started, model, cfg)
         return payload
 
-    # 2) Execute.
+    # 2) Execute. Serialize once — the chart inference classifies the same
+    # browser-facing cells the payload ships.
     result = execute_resolution(resolution, project, params)
-    chart = infer_chart_shape(result)
+    serialized = serialize_result(result)
+    chart = infer_chart_shape(serialized)
 
     # 3) Answer — reuse the exact <Ask /> generation path. A chart shape means a
     # ChartContext, so generate_answer runs the annotation protocol for it.
@@ -748,7 +781,6 @@ def answer_question(
     except Exception as e:  # noqa: BLE001
         raise AskLLMError(f"{type(e).__name__}: {e}") from e
 
-    serialized = serialize_result(result)
     payload = {
         "question": question,
         "resolved": {

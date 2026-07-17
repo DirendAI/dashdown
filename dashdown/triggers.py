@@ -17,13 +17,15 @@ A trigger is a ``triggers/*.yml`` file (name = file stem) that names a **query**
       - {type: slack, webhook_url: "${SLACK_WEBHOOK_URL}"}
 
 **Evaluation rides the existing streaming poll loop.** For each enabled trigger
-the :class:`TriggerRunner` builds a fetch thunk exactly like the WebSocket data
-endpoint (python-first: ``get_python_query_def`` → ``run_python_query``, else
-``get_query_def`` → ``_substitute_params`` → ``connector.query``) and subscribes
-it into ``streaming.hub`` — the same fan-out ``_Poller`` that serves live
-sockets, so N viewers *and* a trigger on the same query share one query per
-interval. The runner is **socket-less**: it consumes the poller's queue in an
-asyncio task instead of forwarding to a WebSocket.
+the :class:`TriggerRunner` gets its fetch thunk + poller key from
+``streaming.build_query_fetch`` — the *same* builder the WebSocket data endpoint
+uses — and subscribes it into ``streaming.hub``, the same fan-out ``_Poller``
+that serves live sockets. So N viewers *and* a trigger on the same
+query+connector+params provably share one query per interval (the hub runs a
+shared poller at the fastest subscriber's cadence). The runner is
+**socket-less**: it consumes the poller's queue in an asyncio task instead of
+forwarding to a WebSocket, replaying the poller's latest snapshot on join so a
+steadily-breached value fires immediately rather than waiting for a change.
 
 **Firing is edge-triggered.** An action fires on a clear→breach transition, and
 again every ``cooldown`` seconds while the condition stays breached (no
@@ -50,16 +52,13 @@ from typing import Any, Callable
 
 import yaml
 
-from dashdown.actions import Action, build_action
+from dashdown.actions import Action, build_action, validate_action_entry
 from dashdown.data.base import QueryResult
-from dashdown.python_query import run_python_query
-from dashdown.render.pipeline import (
-    _freeze_params,
-    _substitute_params,
-    get_python_query_def,
-    get_query_def,
+from dashdown.streaming import (
+    DISCONNECT,
+    build_query_fetch,
+    hub as stream_hub,
 )
-from dashdown.streaming import DISCONNECT, hub as stream_hub
 
 log = logging.getLogger(__name__)
 
@@ -193,11 +192,12 @@ def parse_trigger(raw: Any, name: str) -> TriggerSpec:
     ``when``, out-of-range ``interval``/``cooldown``, non-mapping ``params``,
     unknown action type) — fail-at-startup, exactly like ``auth:`` parsing.
 
-    A **disabled** trigger skips action building entirely: actions are where
-    ``${ENV_VAR}`` expansion happens, and a scaffolded/example trigger shipped
-    ``enabled: false`` must load cleanly even when its env vars aren't set yet.
-    Flipping ``enabled`` re-parses on the dev-reload path, so the fail-hard
-    checks still run the moment the trigger actually goes live."""
+    A **disabled** trigger still has every action's *structure* validated (a
+    typo'd ``type`` fails at load regardless), but skips building them — action
+    build is where ``${ENV_VAR}`` expansion happens, and a scaffolded/example
+    trigger shipped ``enabled: false`` must load cleanly even when its env vars
+    aren't set yet. Flipping ``enabled`` re-parses (fresh start or dev reload),
+    so env resolution fail-hards the moment the trigger actually goes live."""
     if not isinstance(raw, dict):
         raise ValueError(f"trigger {name!r} must be a mapping")
 
@@ -241,7 +241,15 @@ def parse_trigger(raw: Any, name: str) -> TriggerSpec:
     actions_raw = raw.get("actions") or []
     if not isinstance(actions_raw, list):
         raise ValueError(f"trigger {name!r} actions must be a list")
-    actions = [build_action(a) for a in actions_raw] if enabled else []
+    if enabled:
+        actions = [build_action(a) for a in actions_raw]
+    else:
+        # Structure (mapping shape, known type) is validated even when disabled
+        # so a typo'd action fails at load; only ${ENV_VAR} resolution — which
+        # may legitimately be unset until the trigger goes live — is deferred.
+        for a in actions_raw:
+            validate_action_entry(a)
+        actions = []
 
     return TriggerSpec(
         name=name,
@@ -353,39 +361,28 @@ class TriggerRunner:
         return len(self._states)
 
     def _subscribe(self, spec: TriggerSpec) -> _TriggerState | None:
-        """Build the fetch thunk (python-first, mirroring the WS endpoint) and
-        subscribe it into the hub. Returns ``None`` (logged) if the referenced
-        query can't be resolved."""
+        """Subscribe one trigger into the hub via the shared fetch builder.
+        Returns ``None`` (logged) if the referenced query can't be resolved."""
         connector = spec.connector or getattr(self.project, "default_connector", None) or ""
-        params = dict(spec.params)
-
-        py_spec = get_python_query_def(spec.query, connector)
-        if py_spec is not None:
-            all_params = params
-            fetch: Callable[[], QueryResult] = (
-                lambda: run_python_query(py_spec, all_params, self.project.connectors)
+        built = build_query_fetch(self.project, spec.query, connector, dict(spec.params))
+        if built is None:
+            log.warning(
+                "Trigger %r references unknown query %r on connector %r; skipping",
+                spec.name,
+                spec.query,
+                connector or "(none)",
             )
-        else:
-            query_def = get_query_def(spec.query, connector)
-            conn = self.project.connectors.get(connector)
-            if query_def is None or conn is None:
-                log.warning(
-                    "Trigger %r references unknown query %r on connector %r; skipping",
-                    spec.name,
-                    spec.query,
-                    connector or "(none)",
-                )
-                return None
-            sql, default_params, _ = query_def
-            all_params = {**default_params, **params}
-            final_sql = _substitute_params(sql, all_params)
-            fetch = lambda: conn.query(final_sql)  # noqa: E731
+            return None
+        fetch, key = built
 
         interval = max(MIN_TRIGGER_INTERVAL, spec.interval)
-        # Share the poller key shape with the WS endpoint so a live socket and a
-        # trigger watching the same query+connector+params reuse one poll loop.
-        key = (spec.query, connector, _freeze_params(all_params))
-        _poller, queue = stream_hub.subscribe(key, fetch, spec.query, interval)
+        poller, queue = stream_hub.subscribe(key, fetch, spec.query, interval)
+        # Replay the poller's current payload (the WS endpoint does the same):
+        # broadcasts are digest-gated, so joining an existing poller whose value
+        # sits *constantly* breached would otherwise never deliver a frame — and
+        # the alert would never fire until the number happened to change.
+        if poller.latest is not None:
+            queue.put_nowait(poller.latest)
         return _TriggerState(spec=spec, key=key, queue=queue)
 
     async def _consume(self, state: _TriggerState) -> None:

@@ -21,7 +21,15 @@ import math
 from typing import Any, Callable
 
 from dashdown.data.base import QueryResult
-from dashdown.render.pipeline import payload_digest, serialize_result
+from dashdown.python_query import run_python_query
+from dashdown.render.pipeline import (
+    _freeze_params,
+    _substitute_params,
+    get_python_query_def,
+    get_query_def,
+    payload_digest,
+    serialize_result,
+)
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +131,36 @@ class _Poller:
             await asyncio.sleep(self.interval)
 
 
+def build_query_fetch(
+    project: Any, query_name: str, connector_name: str, params: dict[str, str]
+) -> tuple[Callable[[], QueryResult], Any] | None:
+    """Build the ``(fetch, poller_key)`` pair for polling one registered query.
+
+    THE single definition of both the python-first fetch thunk and the poller
+    key shape — shared by the WS data endpoint and the trigger runner, so a live
+    socket and a trigger watching the same query+connector+params provably reuse
+    one poll loop (two hand-kept copies of this logic would drift and silently
+    double the query load). Returns ``None`` when the query/connector can't be
+    resolved (callers decide whether that's a closed socket or a logged skip).
+    """
+    py_spec = get_python_query_def(query_name, connector_name)
+    if py_spec is not None:
+        all_params = dict(params)
+        fetch: Callable[[], QueryResult] = lambda: run_python_query(  # noqa: E731
+            py_spec, all_params, project.connectors
+        )
+    else:
+        query_def = get_query_def(query_name, connector_name)
+        connector = project.connectors.get(connector_name)
+        if query_def is None or connector is None:
+            return None
+        sql, default_params, _ = query_def
+        all_params = {**default_params, **params}
+        final_sql = _substitute_params(sql, all_params)
+        fetch = lambda: connector.query(final_sql)  # noqa: E731
+    return fetch, (query_name, connector_name, _freeze_params(all_params))
+
+
 class StreamHub:
     """Reference-counted registry of pollers keyed by (query, connector, params)."""
 
@@ -141,12 +179,19 @@ class StreamHub:
         poller runs each interval (SQL or Python query). Synchronous — runs to
         completion on the event loop with no await, so there's no create/teardown
         race. ``fetch`` is only used when *creating* a poller; a key with an
-        existing poller reuses it (subscribers share one fetch)."""
+        existing poller reuses it (subscribers share one fetch). A shared poller
+        runs at the **fastest** interval any subscriber asked for: a live chart
+        (5s) joining a trigger's slow poller (300s) speeds it up on the next
+        cycle — first-subscriber-wins would silently starve later ones. (It
+        stays fast after the fast subscriber leaves; the next full teardown
+        resets it.)"""
         poller = self._pollers.get(key)
         if poller is None:
             poller = _Poller(fetch, query_name, interval)
             self._pollers[key] = poller
             poller.start()
+        elif interval < poller.interval:
+            poller.interval = interval
         q: asyncio.Queue = asyncio.Queue()
         poller.add(q)
         return poller, q

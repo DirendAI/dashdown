@@ -297,6 +297,18 @@ class TestLoadTriggers:
         assert spec.enabled is False
         assert spec.actions == []
 
+    def test_disabled_trigger_still_validates_action_structure(self, tmp_path):
+        # Only ${ENV} resolution is deferred for disabled triggers; a typo'd
+        # action type must fail at load regardless of the enabled flag.
+        d = tmp_path / "triggers"
+        _write_trigger(
+            d, "t",
+            "query: q\nwhen: 'rows > 0'\nenabled: false\n"
+            "actions:\n  - type: nope\n",
+        )
+        with pytest.raises(ValueError, match="unknown action type"):
+            load_triggers(d)
+
     def test_unset_env_in_action_raises(self, tmp_path, monkeypatch):
         monkeypatch.delenv("DEFINITELY_UNSET_TRIGGER_VAR", raising=False)
         d = tmp_path / "triggers"
@@ -577,3 +589,68 @@ class TestRunnerIntegration:
         app = create_app(tmp_path)
         with TestClient(app) as client:
             assert client.app.state.trigger_runner is None
+
+    def test_joining_existing_poller_replays_latest(self, tmp_path):
+        # A trigger that subscribes to a poller which ALREADY holds a breached
+        # snapshot must fire from the replay: broadcasts are digest-gated, so a
+        # constant value would otherwise never deliver a frame to the late
+        # joiner and the alert would never fire.
+        import asyncio
+
+        from dashdown.project import load_project
+        from dashdown.triggers import TriggerRunner
+        from dashdown.streaming import build_query_fetch
+
+        _make_trigger_project(tmp_path, when="value < 100", interval=5, val=5)
+        proj = load_project(tmp_path)
+        try:
+            async def scenario():
+                # First subscriber creates the poller and lets it publish once.
+                built = build_query_fetch(proj, "kpi", "main", {})
+                assert built is not None
+                fetch, key = built
+                poller, q = stream_hub.subscribe(key, fetch, "kpi", 5)
+                assert await asyncio.wait_for(q.get(), timeout=5) is not None
+                assert poller.latest is not None
+
+                # Now the runner joins the SAME poller (shared key) — the value
+                # never changes again, so only the replay can trigger the fire.
+                runner = TriggerRunner(proj)
+                runner.start()
+                try:
+                    for _ in range(100):
+                        if _RECORDED:
+                            break
+                        await asyncio.sleep(0.05)
+                finally:
+                    runner.stop()
+                    stream_hub.unsubscribe(key, q)
+                assert _RECORDED and _RECORDED[0]["trigger"] == "kpi-watch"
+
+            asyncio.run(scenario())
+        finally:
+            proj.close()
+
+
+class TestSharedPollerInterval:
+    def test_faster_subscriber_speeds_up_existing_poller(self):
+        # First-subscriber-wins would starve a later, faster subscriber (e.g. a
+        # 5s live chart joining a 300s trigger poller). The hub adopts the
+        # fastest requested cadence instead.
+        import asyncio
+
+        from dashdown.data.base import QueryResult as QR
+
+        async def scenario():
+            fetch = lambda: QR(columns=["v"], rows=[[1]])  # noqa: E731
+            poller, q1 = stream_hub.subscribe(("q", "c", ()), fetch, "q", 300)
+            assert poller.interval == 300
+            _, q2 = stream_hub.subscribe(("q", "c", ()), fetch, "q", 5)
+            assert poller.interval == 5
+            # A slower joiner never slows it back down.
+            _, q3 = stream_hub.subscribe(("q", "c", ()), fetch, "q", 60)
+            assert poller.interval == 5
+            for q in (q1, q2, q3):
+                stream_hub.unsubscribe(("q", "c", ()), q)
+
+        asyncio.run(scenario())

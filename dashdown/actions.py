@@ -101,15 +101,13 @@ def known_action_types() -> list[str]:
     return sorted(_ACTION_TYPES)
 
 
-def build_action(raw: Any) -> Action:
-    """Build one :class:`Action` from a trigger's ``actions:`` list entry.
+def validate_action_entry(raw: Any) -> str:
+    """Structurally validate one ``actions:`` list entry, returning its type.
 
-    The entry is a mapping with a ``type`` key selecting the implementation; every
-    other key is its config. ``${ENV_VAR}`` references in string values are
-    expanded here (once, at load) so the action carries concrete secrets. Raises
-    ``ValueError`` on a malformed entry or an unknown type — fail-at-startup, like
-    the rest of config parsing.
-    """
+    The half of :func:`build_action` with no environment dependency — a mapping
+    with a known ``type``. Split out so a *disabled* trigger can still fail-hard
+    on a typo'd action type at load, while deferring ``${ENV_VAR}`` resolution
+    (which may legitimately be unset until the trigger is enabled)."""
     if not isinstance(raw, dict):
         raise ValueError("each action must be a mapping with a 'type' key")
     type_name = str(raw.get("type", "")).strip()
@@ -120,6 +118,19 @@ def build_action(raw: Any) -> Action:
             f"unknown action type {type_name!r} "
             f"(known: {', '.join(known_action_types()) or 'none'})"
         )
+    return type_name
+
+
+def build_action(raw: Any) -> Action:
+    """Build one :class:`Action` from a trigger's ``actions:`` list entry.
+
+    The entry is a mapping with a ``type`` key selecting the implementation; every
+    other key is its config. ``${ENV_VAR}`` references in string values are
+    expanded here (once, at load) so the action carries concrete secrets. Raises
+    ``ValueError`` on a malformed entry or an unknown type — fail-at-startup, like
+    the rest of config parsing.
+    """
+    type_name = validate_action_entry(raw)
     config = {
         k: (_resolve_secret(v) if isinstance(v, str) else v)
         for k, v in raw.items()

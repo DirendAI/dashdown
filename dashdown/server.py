@@ -8,7 +8,9 @@ import math
 import time
 from pathlib import Path, PurePosixPath
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from typing import Any
+
+from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -61,7 +63,12 @@ from dashdown.render.pipeline import (
     DEFAULT_OPTIONS_LIMIT,
 )
 from dashdown.python_query import run_python_query
-from dashdown.streaming import DISCONNECT, hub as stream_hub, watch_disconnect
+from dashdown.streaming import (
+    DISCONNECT,
+    build_query_fetch,
+    hub as stream_hub,
+    watch_disconnect,
+)
 from dashdown.data.base import Connector
 
 log = logging.getLogger(__name__)
@@ -580,26 +587,14 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             if not key.startswith("_")
         }
 
-        # A live Python query polls through the same fan-out loop — the only
-        # difference is the fetch thunk (run the function vs. SQL). Checked first,
-        # like the data API.
-        py_spec = get_python_query_def(query_name, connector_name)
-        if py_spec is not None:
-            all_params = dict(filter_params)
-            fetch = lambda: run_python_query(py_spec, all_params, proj.connectors)
-        else:
-            query_def = get_query_def(query_name, connector_name)
-            connector = proj.connectors.get(connector_name)
-            if query_def is None or connector is None:
-                await websocket.close(code=1008)
-                return
-            sql, default_params, _ = query_def
-            all_params = {**default_params, **filter_params}
-            final_sql = _substitute_params(sql, all_params)
-            fetch = lambda: connector.query(final_sql)
-
-        # Subscribers sharing the same query+connector+params share one poller.
-        key = (query_name, connector_name, _freeze_params(all_params))
+        # The python-first fetch thunk + poller key come from the one shared
+        # builder (streaming.build_query_fetch) so this endpoint and the trigger
+        # runner provably share pollers for the same query+connector+params.
+        built = build_query_fetch(proj, query_name, connector_name, filter_params)
+        if built is None:
+            await websocket.close(code=1008)
+            return
+        fetch, key = built
 
         await websocket.accept()
         poller, queue = stream_hub.subscribe(key, fetch, query_name, interval)
@@ -844,7 +839,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         )
 
     @app.post("/_dashdown/api/ask")
-    def post_runtime_ask(request: Request, body: dict):
+    def post_runtime_ask(request: Request, body: Any = Body(default=None)):
         """Answer a free-form natural-language question (the runtime ask box).
 
         Distinct from the author-pinned ``GET /_dashdown/api/ask/{id}`` (which
