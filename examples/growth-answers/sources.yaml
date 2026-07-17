@@ -1,0 +1,8 @@
+# One CSV source: an embedded DuckDB over the files in data/ — no external
+# database needed to run this demo. `default: growth` makes it the implicit
+# connector for every query/model below that omits `connector:`.
+growth:
+  type: csv
+  directory: data
+
+default: growth

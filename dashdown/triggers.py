@@ -191,7 +191,13 @@ def parse_trigger(raw: Any, name: str) -> TriggerSpec:
 
     Raises ``ValueError`` on anything malformed (missing/invalid ``query`` or
     ``when``, out-of-range ``interval``/``cooldown``, non-mapping ``params``,
-    unknown action type) — fail-at-startup, exactly like ``auth:`` parsing."""
+    unknown action type) — fail-at-startup, exactly like ``auth:`` parsing.
+
+    A **disabled** trigger skips action building entirely: actions are where
+    ``${ENV_VAR}`` expansion happens, and a scaffolded/example trigger shipped
+    ``enabled: false`` must load cleanly even when its env vars aren't set yet.
+    Flipping ``enabled`` re-parses on the dev-reload path, so the fail-hard
+    checks still run the moment the trigger actually goes live."""
     if not isinstance(raw, dict):
         raise ValueError(f"trigger {name!r} must be a mapping")
 
@@ -235,7 +241,7 @@ def parse_trigger(raw: Any, name: str) -> TriggerSpec:
     actions_raw = raw.get("actions") or []
     if not isinstance(actions_raw, list):
         raise ValueError(f"trigger {name!r} actions must be a list")
-    actions = [build_action(a) for a in actions_raw]
+    actions = [build_action(a) for a in actions_raw] if enabled else []
 
     return TriggerSpec(
         name=name,

@@ -282,6 +282,21 @@ class TestLoadTriggers:
         spec = load_triggers(d)["t"]
         assert spec.actions[0].config["url"] == "https://secret.example/hook"
 
+    def test_disabled_trigger_skips_action_build(self, tmp_path, monkeypatch):
+        # A disabled trigger must load even when its action names an unset env
+        # var (or an unknown type): actions are only built when the trigger is
+        # live, so a scaffolded/example trigger ships enabled:false cleanly.
+        monkeypatch.delenv("TRIGGER_HOOK_URL_UNSET", raising=False)
+        d = tmp_path / "triggers"
+        _write_trigger(
+            d, "t",
+            "query: q\nwhen: 'rows > 0'\nenabled: false\n"
+            "actions:\n  - type: webhook\n    url: ${TRIGGER_HOOK_URL_UNSET}\n",
+        )
+        spec = load_triggers(d)["t"]
+        assert spec.enabled is False
+        assert spec.actions == []
+
     def test_unset_env_in_action_raises(self, tmp_path, monkeypatch):
         monkeypatch.delenv("DEFINITELY_UNSET_TRIGGER_VAR", raising=False)
         d = tmp_path / "triggers"

@@ -1,0 +1,23 @@
+# The Push surface: watches the same number the Monday-morning question is
+# about (kpi.repeat_rate) and fires when it slips, so nobody has to remember
+# to ask. kpi.repeat_rate is scaled 0-100 (a percentage); the seeded data
+# currently sits at ~21.6 — close enough to the 20 line that a small demo
+# tweak (delete a few of the recent Summer Referral Push rows in
+# data/orders.csv, or add a burst of Viral Reels Blast first-time orders)
+# trips it.
+query: kpi.repeat_rate
+interval: 60
+when: "value < 20"
+message: "Repeat-purchase rate slipped below 20% in the last 7 days"
+cooldown: 3600
+
+# Disabled out of the box so the project loads with zero setup. A disabled
+# trigger's actions are not built (and their ${VAR}s not resolved) until it
+# is enabled, so referencing DEMO_HOOK_URL here is safe. To see it fire:
+#   export DEMO_HOOK_URL=http://127.0.0.1:9999/hook   (any local listener)
+# then flip `enabled: true` and either lower the data or raise the threshold
+# (e.g. `when: "value < 25"`). See README.md "Enable the trigger".
+enabled: false
+actions:
+  - type: webhook
+    url: "${DEMO_HOOK_URL}"

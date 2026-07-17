@@ -1,0 +1,20 @@
+title: Growth Answers
+
+# Powers the header ask box + the authored <Ask />/<BarChart explain> below.
+# With MISTRAL_API_KEY unset, `parse_llm_config` degrades this to a *disabled*
+# config (see dashdown/llm.py) — the server still starts, `dashdown build`
+# still runs, and every AI surface just shows a muted "not available" note.
+# No key required to see the dashboard itself.
+llm:
+  provider: mistral
+  api_key: ${MISTRAL_API_KEY}
+  model: mistral-small-latest
+
+# The runtime natural-language ask engine (dashdown/ask_engine.py) — the
+# header ask box and `dashdown ask`. Inert (same graceful "no LLM provider"
+# note) whenever llm: above is disabled. allow_sql stays false: every answer
+# is resolved onto the semantic model or a named library query, never raw SQL
+# the model wrote itself.
+ask:
+  enabled: true
+  allow_sql: false
