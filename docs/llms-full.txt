@@ -11,7 +11,7 @@ Auto-generated from the Dashdown docs by tooling/gen-agent-docs.py. This is the 
 
 Introspected straight from the registries — the **same data `dashdown components` prints**, in file-readable form. A new component attribute or connector config key appears here automatically (it is recovered from the source, not hand-written), so this can't drift. Prefer running `dashdown components` when you have a shell; read this shard when you don't.
 
-## Components (45)
+## Components (46)
 
 `*` marks a **filter** component (it writes a `${param}` and is stripped from static builds). Charts share a common attribute set via the shared chart helper.
 
@@ -40,6 +40,7 @@ Introspected straight from the registries — the **same data `dashdown componen
 | `Grid` | `cols`, `columns`, `gap` | Lay children out on a fixed-column CSS grid. |
 | `HeatmapChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Matrix heatmap — a grid of cells shaded by magnitude. |
 | `LineChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `stacked`, `title`, `x`, `y` | Line chart — a metric over an ordered `x` (usually time). |
+| `List` | `col-span`, `columns`, `desc`, `limit`, `model`, `order_by`, `span`, `title` | Detail list — pins a semantic *list* (dimensions + order + limit) as a table. |
 | `MapChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `geojson`, `grain`, `height`, `locale`, `location`, `map`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `value`, `x`, `y` | Choropleth map for geospatial data (ECharts geo). |
 | `ParallelChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `dimensions`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Parallel-coordinates plot over several numeric columns. |
 | `PieChart` | `annotations`, `by`, `cache_ttl`, `col-span`, `color`, `currency`, `data`, `date_format`, `decimals`, `donut`, `empty_message`, `explain`, `format`, `grain`, `height`, `locale`, `max_rows`, `metric`, `series`, `sort_by`, `span`, `title`, `x`, `y` | Pie/donut chart — parts of a whole (`x` = slice label, `y` = value). |
