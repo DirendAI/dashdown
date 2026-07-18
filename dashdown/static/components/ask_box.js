@@ -1,20 +1,28 @@
-// Dashdown Header Ask Box
+// Dashdown Ask Integration (omnibox answer panel)
 //
-// A global operator "ask box" in the app header: type a question, press Enter,
-// and a dropdown panel answers it with provenance + an auto-inferred chart +
-// a result table + a typewriter answer. It POSTs the question to the runtime
-// ask endpoint (POST /_dashdown/api/ask), which resolves it against the
-// project's semantic models / named queries and returns a single JSON payload
-// (see ARCHITECTURE.md §B for the contract).
+// The runtime operator "ask" surface, merged into the centered site-search box
+// (site_search.js). There is no standalone ask box any more: the search input
+// doubles as the ask input, and this module attaches an answer panel *under the
+// same box*. Flow: the user picks the "Ask the data" row (or, in ask-only mode,
+// just hits Enter); site_search.js fires a `dashdown:ask` DOM event; this module
+// runs the submit — POST /_dashdown/api/ask, which resolves the question against
+// the project's semantic models / named queries and returns a single JSON
+// payload — then paints provenance + an auto-inferred chart + a result table +
+// a typewriter answer (answer-first order preserved).
 //
 // This is the free-form sibling of the authored <Ask /> card (ask.js): it reuses
 // the same typewriter feel, the same chart-annotation ref chips, and the same
 // chart/table renderers, but the question is the operator's, not the author's.
 //
-// The box is gated server-side (`{% if ask_enabled %}` — llm on ∧ ask on ∧ not
-// embed), so it never appears in static builds or embeds. The panel is only
-// built on user interaction, so a headless print/screenshot run (which never
-// types a question) is untouched.
+// Ask is gated server-side (the box's data-config `ask` flag comes from
+// `ask_enabled` — llm on ∧ ask on ∧ not embed), so this never wires up in static
+// builds or embeds. The panel is only built on user interaction, so a headless
+// print/screenshot run (which never asks) is untouched.
+//
+// The "Keep on this page" button (when `ask_keep` is on and the answer resolved
+// to a semantic metric or named query) POSTs to /_dashdown/api/ask/keep to append
+// the answer's chart to the current page's source markdown; the dev server's file
+// watcher then live-reloads the page.
 
 "use strict";
 
@@ -37,6 +45,7 @@ import {
 } from "./ask.js";
 
 const _ASK_URL = "/_dashdown/api/ask";
+const _KEEP_URL = "/_dashdown/api/ask/keep";
 
 /** ✦ AI badge markup — mirrors the authored ask card's provenance sparkle. */
 const _AI_BADGE =
@@ -63,30 +72,55 @@ function prefersReducedMotion() {
 }
 
 /**
- * Initialize one header ask box.
- * @param {HTMLElement} el - The `.dashdown-ask-box` wrapper.
+ * Wire the ask surface onto one omnibox (a `[data-async-component="site-search"]`
+ * element whose config has `ask: true`). Builds the answer panel, attaches it
+ * under the box, and listens for the `dashdown:ask` event site_search.js fires.
+ * @param {HTMLElement} el - The `.dashdown-site-search` wrapper.
  */
-export function initAskBox(el) {
-  const input = el.querySelector(".dashdown-ask-box-input");
-  const panel = el.querySelector(".dashdown-ask-box-panel");
-  const field = el.querySelector(".dashdown-ask-box-field");
-  if (!input || !panel) return;
+function initOne(el) {
+  let config = {};
+  try {
+    config = JSON.parse(el.dataset.config || "{}");
+  } catch (e) {
+    /* keep defaults */
+  }
+  if (!config.ask) return; // search-only box — nothing to wire
+
+  const input = el.querySelector(".dashdown-site-search-input");
+  const results = el.querySelector(".dashdown-site-search-results");
+  if (!input) return;
+
+  // The answer panel isn't in the template (the omnibox ships as a search box);
+  // build it and anchor it under the same box. It reuses the ask-box panel
+  // chrome; a scoping class widens it to the search slot (see dashdown.css).
+  const panel = document.createElement("div");
+  panel.className = "dashdown-ask-box-panel dashdown-ask-answer-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Answer");
+  panel.hidden = true;
+  el.appendChild(panel);
 
   let requestSeq = 0; // drop responses a newer question superseded
   let abortController = null;
   let hasAnswer = false; // panel holds a rendered answer (for reopen)
+  let lastQuestion = ""; // the question the current answer belongs to
+  let lastPayload = null; // the current answer payload (for the keep button)
   // The live panel chart, so a theme toggle can dispose + re-init it (it's not
   // in chart.js's registry, so onThemeChange there won't reach it).
   let chartState = null; // { card, container, config }
 
   function setBusy(busy) {
-    if (field) field.classList.toggle("dashdown-ask-box-busy", busy);
+    el.classList.toggle("dashdown-ask-answer-busy", busy);
     input.setAttribute("aria-busy", busy ? "true" : "false");
   }
 
   function open() {
     if (panel.hidden) {
       panel.hidden = false;
+      // While the answer panel is up, the search results dropdown stays hidden
+      // (CSS keys off this class), so the two never stack under the box.
+      el.classList.add("dashdown-ask-answer-open");
+      if (results) results.hidden = true;
       input.setAttribute("aria-expanded", "true");
       // The panel was display:none while closed, so a chart initialized inside
       // it measured 0×0 — resize it now that it has a box.
@@ -98,6 +132,7 @@ export function initAskBox(el) {
 
   function close() {
     panel.hidden = true;
+    el.classList.remove("dashdown-ask-answer-open");
     input.setAttribute("aria-expanded", "false");
   }
 
@@ -325,10 +360,63 @@ export function initAskBox(el) {
         console.error("dashdown ask box: table render failed", e);
       }
     }
+
+    renderKeepFooter(payload);
     hasAnswer = true;
   }
 
+  // "Keep on this page": append this answer's chart to the current page's source
+  // markdown, so the operator's ad-hoc question becomes a permanent card. Only
+  // for answers that resolved to a semantic metric or a named query (`resolved.kind`
+  // "semantic"/"query") — a raw-SQL answer has no stable, re-runnable reference to
+  // embed. Gated by the box's `ask_keep` config flag (server: `ask_keep_enabled`).
+  function renderKeepFooter(payload) {
+    if (!config.ask_keep) return;
+    const resolved = payload.resolved || {};
+    if (resolved.kind !== "semantic" && resolved.kind !== "query") return;
+
+    const footer = document.createElement("div");
+    footer.className = "dashdown-ask-box-keep";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dashdown-ask-box-keep-btn";
+    btn.textContent = "Keep on this page";
+    const err = document.createElement("span");
+    err.className = "dashdown-ask-box-keep-error";
+    footer.appendChild(btn);
+    footer.appendChild(err);
+    panel.appendChild(footer);
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      err.textContent = "";
+      try {
+        const resp = await postJson(_KEEP_URL, {
+          question: lastQuestion,
+          resolved: payload.resolved,
+          chart: payload.chart,
+          path: window.location.pathname,
+        });
+        const data = await resp.json().catch(() => null);
+        if (resp.ok && data && data.ok) {
+          // Success: the server appended the card; the dev server's watcher will
+          // live-reload the page shortly. Don't reload programmatically.
+          btn.textContent = "Kept ✓ — added below";
+          btn.classList.add("dashdown-ask-box-keep-done");
+        } else {
+          btn.disabled = false;
+          err.textContent =
+            (data && data.detail) || `Keep failed (HTTP ${resp.status})`;
+        }
+      } catch (e) {
+        btn.disabled = false;
+        err.textContent = (e && e.message) || "Keep failed";
+      }
+    });
+  }
+
   async function submit(question) {
+    lastQuestion = question;
     const seq = ++requestSeq;
     if (abortController) abortController.abort();
     const controller = new AbortController();
@@ -361,6 +449,7 @@ export function initAskBox(el) {
         renderError(data.error || data.detail || `HTTP ${response.status}`);
         return;
       }
+      lastPayload = data;
       renderAnswerPayload(data, seq);
     } catch (error) {
       if (seq !== requestSeq || (error && error.name === "AbortError")) return;
@@ -370,24 +459,40 @@ export function initAskBox(el) {
     }
   }
 
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") {
-      ev.preventDefault();
-      const q = input.value.trim();
-      if (q) submit(q);
-    } else if (ev.key === "Escape") {
-      if (!panel.hidden) {
-        ev.preventDefault();
-        close();
-      } else {
-        input.blur();
-      }
-    }
+  // site_search.js fires this when the operator picks the "Ask the data" row
+  // (or hits Enter in ask-only mode). The modules stay decoupled — no import
+  // either way, just the DOM event.
+  el.addEventListener("dashdown:ask", (ev) => {
+    const q = ((ev.detail && ev.detail.question) || "").trim();
+    if (q) submit(q);
   });
 
-  // Reopening re-shows the last answer without re-asking. Both focus AND click
-  // are wired: after Esc-close the input keeps focus, so a later click on the
+  // Escape closes the answer panel *first*, then falls through to search's own
+  // Escape on a second press. Capture phase on `el` (an ancestor of the input)
+  // fires before site_search.js's target-phase keydown, so stopPropagation keeps
+  // the first Escape from also closing/blurring search.
+  el.addEventListener(
+    "keydown",
+    (ev) => {
+      if (ev.key === "Escape" && !panel.hidden) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        close();
+      }
+    },
+    true
+  );
+
+  // Typing a new query closes the answer and lets search take over (the search
+  // dropdown re-appears once `dashdown-ask-answer-open` is dropped).
+  input.addEventListener("input", () => {
+    if (!panel.hidden) close();
+  });
+
+  // Reopening re-shows the last answer without re-asking. Focus AND click are
+  // both wired: after Esc-close the input keeps focus, so a later click on the
   // still-focused field fires no `focus` event — the click handler covers it.
+  // `open()` re-hides the search dropdown, so the two panels never stack.
   const reopen = () => {
     if (hasAnswer) open();
   };
@@ -397,19 +502,6 @@ export function initAskBox(el) {
   // Click-away closes the panel (leaves its content for the next reopen).
   document.addEventListener("click", (ev) => {
     if (!el.contains(ev.target)) close();
-  });
-
-  // Ctrl/Cmd+K focuses the ask box from anywhere (search owns "/"). The hint
-  // chip in the markup ships "Ctrl K"; swap it for the Mac glyph when apt.
-  const hint = el.querySelector(".dashdown-ask-box-hint");
-  const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
-  if (hint && isMac) hint.textContent = "⌘K";
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key.toLowerCase() === "k" && (ev.metaKey || ev.ctrlKey) && !ev.altKey) {
-      ev.preventDefault();
-      input.focus();
-      input.select();
-    }
   });
 
   // A theme toggle re-bakes the panel chart's theme (ECharts applies a theme
@@ -440,8 +532,12 @@ export function initAskBox(el) {
 }
 
 /**
- * Initialize every header ask box on the page (there is normally one).
+ * Wire the ask surface onto every omnibox on the page whose config opts in
+ * (`ask: true`). A no-op on search-only boxes and when ask is off entirely (the
+ * server then emits no ask flag), so static builds / embeds cost nothing.
  */
-export function initAllAskBoxes() {
-  document.querySelectorAll(".dashdown-ask-box").forEach((el) => initAskBox(el));
+export function initAskIntegration() {
+  document
+    .querySelectorAll('[data-async-component="site-search"]')
+    .forEach((el) => initOne(el));
 }

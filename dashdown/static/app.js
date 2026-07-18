@@ -30,7 +30,7 @@ import { initAllMermaid } from "./components/mermaid.js";
 import { initAllCopyCode } from "./components/copy_code.js";
 import { initFullscreen } from "./components/fullscreen.js";
 import { initAllSiteSearches } from "./components/site_search.js";
-import { initAllAskBoxes } from "./components/ask_box.js";
+import { initAskIntegration } from "./components/ask_box.js";
 import { initPrint, initPdfButton } from "./components/print.js";
 import { initLegacy } from "./legacy.js";
 
@@ -245,12 +245,12 @@ function init() {
   // of the async-component path — a prose-only docs page must still get search.
   initAllSiteSearches();
 
-  // Header ask box: an operator types a question, the answer panel is built on
-  // submit. Init outside the async-component gate (like site search) so it
-  // works on prose-only pages too; it self-gates (no-op when the server didn't
-  // emit the box, i.e. llm/ask off or embed/static build). It reads Alpine
+  // Ask integration: attach the runtime answer panel onto every omnibox whose
+  // config opts in (`ask: true`). Must run after initAllSiteSearches so the
+  // search wiring exists first; it self-gates (no-op on search-only boxes and
+  // when ask is off, i.e. llm/ask off or embed/static build). Reads Alpine
   // stores lazily at submit time, so it's safe before stores exist.
-  initAllAskBoxes();
+  initAskIntegration();
 
   // PDF export support: dress the page for print + expose a readiness signal.
   // No-op unless opened for export, so ordinary viewers pay nothing. Outside

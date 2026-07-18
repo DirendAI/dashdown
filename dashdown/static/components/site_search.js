@@ -126,29 +126,55 @@ function rank(entries, query, max) {
   return scored.slice(0, max);
 }
 
-function renderResults(panel, results) {
-  if (!results.length) {
-    panel.innerHTML = '<div class="dashdown-site-search-empty">No matches</div>';
-    panel.hidden = false;
-    return [];
-  }
-  const items = results.map((r, i) => {
-    const e = r.entry;
-    const anchor = r.bestHeading ? "#" + r.bestHeading.id : "";
-    const href = hrefFor(e.url) + anchor;
-    const sub = r.bestHeading ? esc(r.bestHeading.text) : esc(e.url);
-    return (
-      `<a class="dashdown-site-search-result" href="${esc(href)}" role="option" ` +
-      `data-idx="${i}" ${i === 0 ? 'aria-selected="true"' : ""}>` +
-      `<span class="dashdown-site-search-title">${esc(e.title)}</span>` +
-      `<span class="dashdown-site-search-crumb">${sub}</span>` +
-      `<span class="dashdown-site-search-snippet">${snippetFor(e, r.terms)}</span>` +
-      `</a>`
+// Render the dropdown for one query. `results` are ranked search hits (may be
+// empty); when `askOn` we append a final selectable "Ask the data" row and, if
+// search is on but matched nothing, a "no pages match" hint above it. Every
+// selectable node carries role="option" so keyboard nav treats hits and the ask
+// row uniformly. Returns the option elements in DOM order.
+function renderResults(panel, results, query, opts) {
+  const askOn = !!(opts && opts.askOn);
+  const searchOn = !(opts && opts.searchOn === false);
+  const parts = [];
+
+  if (results.length) {
+    results.forEach((r, i) => {
+      const e = r.entry;
+      const anchor = r.bestHeading ? "#" + r.bestHeading.id : "";
+      const href = hrefFor(e.url) + anchor;
+      const sub = r.bestHeading ? esc(r.bestHeading.text) : esc(e.url);
+      parts.push(
+        `<a class="dashdown-site-search-result" href="${esc(href)}" role="option" ` +
+          `data-idx="${i}">` +
+          `<span class="dashdown-site-search-title">${esc(e.title)}</span>` +
+          `<span class="dashdown-site-search-crumb">${sub}</span>` +
+          `<span class="dashdown-site-search-snippet">${snippetFor(e, r.terms)}</span>` +
+          `</a>`
+      );
+    });
+  } else if (searchOn) {
+    // Zero search hits. With ask available, nudge toward asking; otherwise the
+    // plain "no matches" (unchanged search-only behavior).
+    parts.push(
+      '<div class="dashdown-site-search-empty">' +
+        (askOn ? "No pages match — ask the data instead" : "No matches") +
+        "</div>"
     );
-  });
-  panel.innerHTML = items.join("");
+  }
+
+  if (askOn) {
+    parts.push(
+      '<div class="dashdown-site-search-result dashdown-site-search-ask-row" role="option" ' +
+        `data-idx="${results.length}">` +
+        '<span class="dashdown-site-search-ask-icon" aria-hidden="true">✦</span>' +
+        '<span class="dashdown-site-search-ask-label">Ask the data: ' +
+        `<span class="dashdown-site-search-ask-q">“${esc(query)}”</span></span>` +
+        "</div>"
+    );
+  }
+
+  panel.innerHTML = parts.join("");
   panel.hidden = false;
-  return Array.from(panel.querySelectorAll(".dashdown-site-search-result"));
+  return Array.from(panel.querySelectorAll('[role="option"]'));
 }
 
 export function initSiteSearch(el) {
@@ -163,6 +189,11 @@ export function initSiteSearch(el) {
     /* keep defaults */
   }
   const maxResults = config.max_results || 8;
+  // `search` defaults on (a bare `{max_results}` config is a plain search box);
+  // `ask` merges the runtime ask surface into this box (an "Ask the data" row +
+  // an answer panel attached by ask_box.js).
+  const askOn = !!config.ask;
+  const searchOn = config.search !== false;
 
   let entries = null;
   let options = [];
@@ -184,18 +215,43 @@ export function initSiteSearch(el) {
     opt.scrollIntoView({ block: "nearest" });
   }
 
+  // Selecting the ask row: hand the question to ask_box.js via a DOM event (no
+  // import — the modules stay decoupled) and close the results panel.
+  function selectAsk() {
+    const question = input.value.trim();
+    if (!question) return;
+    close();
+    el.dispatchEvent(
+      new CustomEvent("dashdown:ask", { detail: { question }, bubbles: true })
+    );
+  }
+
+  function isAskRow(opt) {
+    return opt && opt.classList.contains("dashdown-site-search-ask-row");
+  }
+
   async function run() {
     const q = input.value.trim();
     if (!q) {
       close();
       return;
     }
-    if (entries === null) entries = await loadIndex();
-    // Bail if the input changed while we were loading the index.
-    if (input.value.trim() !== q) return;
-    const results = rank(entries, q, maxResults);
-    options = renderResults(panel, results);
+    let results = [];
+    if (searchOn) {
+      if (entries === null) entries = await loadIndex();
+      // Bail if the input changed while we were loading the index.
+      if (input.value.trim() !== q) return;
+      results = rank(entries, q, maxResults);
+    }
+    options = renderResults(panel, results, q, { askOn, searchOn });
+    // Wire the ask row's click (search results are <a>, so they navigate on
+    // their own; the ask row is a <div> and needs an explicit handler).
+    const askRow = panel.querySelector(".dashdown-site-search-ask-row");
+    if (askRow) askRow.addEventListener("click", (e) => { e.preventDefault(); selectAsk(); });
     input.setAttribute("aria-expanded", "true");
+    // Default selection: the first search hit when search matched, else the ask
+    // row (which is options[0] whenever there are no hits) — so a plain Enter
+    // prefers a page when one matched and asks otherwise.
     active = options.length ? 0 : -1;
   }
 
@@ -212,9 +268,17 @@ export function initSiteSearch(el) {
       ev.preventDefault();
       setActive(active - 1);
     } else if (ev.key === "Enter") {
-      if (active >= 0 && options[active]) {
+      const opt = active >= 0 ? options[active] : null;
+      if (isAskRow(opt)) {
         ev.preventDefault();
-        window.location.href = options[active].getAttribute("href");
+        selectAsk();
+      } else if (opt && opt.tagName === "A") {
+        ev.preventDefault();
+        window.location.href = opt.getAttribute("href");
+      } else if (askOn && !searchOn && input.value.trim()) {
+        // Ask-only mode: Enter always asks, even before a row is rendered.
+        ev.preventDefault();
+        selectAsk();
       }
     } else if (ev.key === "Escape") {
       close();
@@ -231,21 +295,43 @@ export function initSiteSearch(el) {
   });
 
   // "/" focuses the first *visible* search box (skip when already typing in a
-  // field). Visibility matters because the header box is display:none on mobile
-  // and the menu box is display:none on desktop — the shortcut should land on
-  // whichever one the user can actually see.
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    const t = ev.target;
-    const tag = t && t.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
-    const inputs = Array.from(document.querySelectorAll(".dashdown-site-search-input"));
-    const firstVisible = inputs.find((i) => i.offsetParent !== null);
-    if (firstVisible === input) {
-      ev.preventDefault();
-      input.focus();
-    }
-  });
+  // field, and in ask-only boxes where the "/" hint isn't shown). Visibility
+  // matters because the header box is display:none on mobile and the menu box is
+  // display:none on desktop — the shortcut should land on whichever one the user
+  // can actually see.
+  if (searchOn) {
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target;
+      const tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      const inputs = Array.from(document.querySelectorAll(".dashdown-site-search-input"));
+      const firstVisible = inputs.find((i) => i.offsetParent !== null);
+      if (firstVisible === input) {
+        ev.preventDefault();
+        input.focus();
+      }
+    });
+  }
+
+  // Ctrl/Cmd+K focuses the omnibox from anywhere (search owns "/"; this box owns
+  // ⌘K when ask is on — the one owner, so no double-preventDefault). Same
+  // first-visible arbitration as "/". Swap the hint chip for the Mac glyph.
+  if (askOn) {
+    const askHint = el.querySelector(".dashdown-site-search-hint-ask");
+    const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
+    if (askHint && isMac) askHint.textContent = "⌘K";
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key.toLowerCase() !== "k" || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+      const inputs = Array.from(document.querySelectorAll(".dashdown-site-search-input"));
+      const firstVisible = inputs.find((i) => i.offsetParent !== null);
+      if (firstVisible === input) {
+        ev.preventDefault();
+        input.focus();
+        input.select();
+      }
+    });
+  }
 }
 
 export function initAllSiteSearches() {

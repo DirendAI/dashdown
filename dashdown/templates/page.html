@@ -13,34 +13,40 @@
 {# "Made with Dashdown" attribution footer (rendered into <main> below). Single
    source of truth for the link — swap for the product site once it exists. #}
 {% set made_with_url = "https://github.com/DirendAI/dashdown" %}
-{# Full-text search box. Rendered into the header (centered, desktop)
-   and the top of the mobile menu — see the .dashdown-header-search /
-   .dashdown-sidebar-search wrappers below. site_search.js finds it by the
-   data-async-component selector and fetches the index client-side. #}
-{% macro site_search(placeholder, max_results) -%}
-<div class="dashdown-site-search" data-async-component="site-search" data-config='{"max_results":{{ max_results | default(8) }}}'>
+{# Omnibox flags (search + runtime ask, merged into one field). `search_enabled`
+   defaults on; `ask_enabled`/`ask_keep_enabled` are server-threaded and
+   default-false (embeds/static builds stay search-only). Placeholder reflects
+   which surfaces are live. Set at top level so both the header and the mobile
+   menu instances see them even when the header is hidden. #}
+{% set omni_search = search_enabled | default(true) %}
+{% set omni_ask = ask_enabled | default(false) %}
+{% set omni_ask_keep = ask_keep_enabled | default(false) %}
+{% if omni_search and omni_ask %}
+  {% set omni_placeholder = 'Search — or ask your data…' %}
+{% elif omni_ask %}
+  {% set omni_placeholder = 'Ask your data…' %}
+{% else %}
+  {% set omni_placeholder = search_placeholder | default('Search…') %}
+{% endif %}
+{# Omnibox: full-text search AND the runtime ask box in one centered field.
+   Rendered into the header (centered, desktop) and the top of the mobile menu —
+   see the .dashdown-header-search / .dashdown-sidebar-search wrappers below.
+   site_search.js finds it by the data-async-component selector and ranks the
+   search index client-side; when `ask` is on it also offers an "Ask the data"
+   row, and ask_box.js attaches an answer panel to this same box. The `ask`
+   flags come from the server-threaded `ask_enabled`/`ask_keep_enabled` (llm on ∧
+   ask on ∧ not embed), default-false here so static builds/embeds stay
+   search-only. #}
+{% macro site_search(placeholder, max_results, ask=false, ask_keep=false, search=true) -%}
+<div class="dashdown-site-search{% if ask %} dashdown-site-search-omni{% endif %}" data-async-component="site-search"
+     data-config='{"max_results":{{ max_results | default(8) }},"search":{{ 'true' if search else 'false' }},"ask":{{ 'true' if ask else 'false' }},"ask_keep":{{ 'true' if ask_keep else 'false' }}}'>
   <div class="dashdown-site-search-box">
     <svg class="dashdown-site-search-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-    <input type="text" class="input input-sm dashdown-site-search-input" placeholder="{{ placeholder }}" aria-label="Search documentation" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
-    <kbd class="dashdown-site-search-hint" aria-hidden="true">/</kbd>
+    <input type="text" class="input input-sm dashdown-site-search-input" placeholder="{{ placeholder }}" aria-label="{% if ask and not search %}Ask a question about your data{% elif ask %}Search or ask your data{% else %}Search documentation{% endif %}" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
+    {% if search %}<kbd class="dashdown-site-search-hint" aria-hidden="true">/</kbd>{% endif %}
+    {% if ask %}<kbd class="dashdown-site-search-hint dashdown-site-search-hint-ask" aria-hidden="true">Ctrl K</kbd>{% endif %}
   </div>
   <div class="dashdown-site-search-results" role="listbox" hidden></div>
-</div>
-{%- endmacro %}
-{# Header ask box: an operator types a natural-language question and the answer
-   (provenance + chart + table + typewriter text) opens in a dropdown panel.
-   ask_box.js finds it by the .dashdown-ask-box class and POSTs to the runtime
-   ask endpoint. Emitted only when `ask_enabled` (llm on ∧ ask on ∧ not embed) —
-   the variable is threaded by the server and is default-false here, so static
-   builds and embeds omit it automatically. #}
-{% macro ask_box(placeholder) -%}
-<div class="dashdown-ask-box">
-  <div class="dashdown-ask-box-field">
-    <span class="dashdown-ask-box-icon" aria-hidden="true">✦</span>
-    <input type="text" class="input input-sm dashdown-ask-box-input" placeholder="{{ placeholder }}" aria-label="Ask a question about your data" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-autocomplete="list">
-    <kbd class="dashdown-site-search-hint dashdown-ask-box-hint" aria-hidden="true">Ctrl K</kbd>
-  </div>
-  <div class="dashdown-ask-box-panel" role="dialog" aria-label="Answer" hidden></div>
 </div>
 {%- endmacro %}
 <!doctype html>
@@ -199,20 +205,15 @@
         {%- if logo_url %}<img src="{{ logo_url }}" alt="" class="dashdown-brand-logo" />{% endif -%}
         <span class="dashdown-brand-title">{{ title }}</span></a>
     </div>
-    {# Centered full-text search (desktop), gated by the `search:` block in
-       dashdown.yaml (default on). Absolutely centered in the header so it stays
-       mid-bar regardless of brand/action widths; hidden on mobile, where it moves
-       to the top of the slide-in menu (see the aside). #}
-    {% if search_enabled | default(true) %}
-    <div class="dashdown-header-search">{{ site_search(search_placeholder | default('Search…'), search_max_results | default(8)) }}</div>
+    {# Centered omnibox (desktop): full-text search and — when the runtime ask
+       engine is on (`ask_enabled`) — the "ask your data" surface, in one field.
+       The slot shows when either is on. Absolutely centered in the header so it
+       stays mid-bar regardless of brand/action widths; hidden on mobile, where it
+       moves to the top of the slide-in menu (see the aside). #}
+    {% if omni_search or omni_ask %}
+    <div class="dashdown-header-search">{{ site_search(omni_placeholder, search_max_results | default(8), ask=omni_ask, ask_keep=omni_ask_keep, search=omni_search) }}</div>
     {% endif %}
     <div class="flex-none dashdown-header-actions">
-      {# Header ask box (runtime NL question → answer panel). Gated by the
-         server-threaded `ask_enabled` (default-false), so it's absent in embeds
-         and static builds. Hidden on mobile via CSS, like the header search. #}
-      {% if ask_enabled %}
-      <div class="dashdown-header-ask">{{ ask_box(ask_placeholder | default('Ask a question…')) }}</div>
-      {% endif %}
       {# Project-wide global date filter (global_filters.date): rendered into the
          sticky header so it's reachable from anywhere on a long page. Empty
          unless enabled; in embed mode it rides body_html as a page filter. #}
@@ -259,11 +260,11 @@
     {% if not embed and sidebar_shown %}
     <aside class="dashdown-sidebar bg-base-200 border-r border-base-300"
            :class="{ 'open': sidebarOpen }">
-      {# Search at the top of the slide-in menu — mobile only (the header search
-         is hidden there). CSS keeps this hidden on desktop, where the header box
-         is used instead. Same `search:` gate as the header. #}
-      {% if search_enabled | default(true) %}
-      <div class="dashdown-sidebar-search">{{ site_search(search_placeholder | default('Search…'), search_max_results | default(8)) }}</div>
+      {# Omnibox at the top of the slide-in menu — mobile only (the header box is
+         hidden there). CSS keeps this hidden on desktop, where the header box is
+         used instead. Same search+ask gate as the header, so ask works here too. #}
+      {% if omni_search or omni_ask %}
+      <div class="dashdown-sidebar-search">{{ site_search(omni_placeholder, search_max_results | default(8), ask=omni_ask, ask_keep=omni_ask_keep, search=omni_search) }}</div>
       {% endif %}
       <nav class="dashdown-sidenav">
         {{ _render_nav(nav_tree, current) }}

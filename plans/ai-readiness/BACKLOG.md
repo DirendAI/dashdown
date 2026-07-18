@@ -39,8 +39,11 @@ reviewed by the orchestrating session before merge.
 - User-facing docs pages (`docs/`) + `tooling/gen-agent-docs.py` re-run.
 - **Staged answers** (biggest perceived-latency win): stream resolution →
   provenance → data → answer over SSE instead of one blocking response.
-- **Answer permanence**: ask-history dropdown (the ask log already records
-  everything) + "keep this answer as a page" (generated pages, Track 3).
+- **Answer permanence** — partially shipped: **"Keep on this page"** appends a
+  re-validated live section to the current page (`build_kept_markdown` +
+  `POST /_dashdown/api/ask/keep`, dev-server-only). Remaining: an ask-history
+  dropdown (the ask log already records everything) and full generated pages
+  (Track 3).
 - Semantic-metric refs + delta conditions in triggers; Slack interactive app;
   in-app trigger status surface (armed / last fired).
 - Auto-drafted `semantic/*.yml` from schema introspection.

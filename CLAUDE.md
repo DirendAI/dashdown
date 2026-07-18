@@ -334,10 +334,19 @@ Every answer carries a `provenance` line (the trust surface) and appends to
 `<project>/.dashdown/ask_log.jsonl` (telemetry seed; best-effort). Config: `ask:` block
 (`AskConfig` in project.py — `enabled`/`allow_sql`/`max_rows`/`cache_ttl`/`log`/`rate_limit`); the
 box renders only when `llm:` is configured ∧ `ask.enabled` ∧ not embed (server threads
-`ask_enabled`; default-false in the template, so static builds omit it). Frontend:
-`static/components/ask_box.js` (answer-first panel — provenance → typed answer → chart → table —
-Ctrl/Cmd+K focus, `postJson` in core.js, reusing `updateChart`/`renderTableInto`/
-`setChartAnnotations` + helpers exported from ask.js). Cost control: the answer cache (bounded LRU,
+`ask_enabled`; default-false in the template, so static builds omit it). Frontend: the ask surface
+is **merged into the site-search omnibox** (one centered header field): site_search.js appends a
+selectable "✦ Ask the data" row (the only row on zero hits; ask-only mode skips the index
+entirely) and fires a `dashdown:ask` CustomEvent; `static/components/ask_box.js` listens and
+attaches the answer-first panel — provenance → typed answer → chart → table — under the same box
+(Ctrl/Cmd+K focus, `postJson` in core.js, reusing `updateChart`/`renderTableInto`/
+`setChartAnnotations` + helpers exported from ask.js; the two modules never import each other).
+**Keep on this page**: a dev-server-only panel button POSTs `{question, resolved, chart, path}` to
+`POST /_dashdown/api/ask/keep`, which **re-validates every name against the live catalog**
+(`build_kept_markdown` — client markdown is never trusted; semantic/query kinds only, dynamic
+`[slug]` pages refused) and appends a *live* section to the page's `.md` (heading + chart component
++ table + an authored `<Ask>` re-asking the question) — "a dashboard is an answer you kept",
+mechanically. Cost control: the answer cache (bounded LRU,
 keys on `(normalized question, frozen params)`; kind-`none` cached only briefly) plus a
 process-wide sliding-window **rate limit** on cache-miss asks (`ask.rate_limit`/min, default 60,
 0 disables → endpoint 429s) — every miss is two billable LLM calls. Extend

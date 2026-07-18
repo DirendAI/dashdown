@@ -63,29 +63,35 @@ Open <http://127.0.0.1:8000>.
 1. **Open the page.** The KPI row, the campaign bar chart, the weekly trend
    line, and the repeat-purchasers table are all live queries — no key
    needed for any of this.
-2. **Ask it.** Type into the header ask box (top of every page):
+2. **Ask it.** Type into the header search box (Ctrl/Cmd+K focuses it):
 
    > Which campaign drove repeat purchases this week?
 
-   The engine resolves the question onto the query library (never raw SQL —
-   `allow_sql: false` in `dashdown.yaml`), returns an answer with a chart,
-   the backing rows, and a provenance line describing exactly which query
-   answered it.
-3. **Same question from the CLI:**
+   Search matches pages as you type; the last row is always **✦ Ask the
+   data** — pick it (it's the only row when nothing matches) and the engine
+   resolves the question onto the query library (never raw SQL —
+   `allow_sql: false` in `dashdown.yaml`), answering under the same box with
+   a chart, the backing rows, and a provenance line describing exactly which
+   query answered it.
+3. **Keep it.** Like the answer? Click **Keep on this page** at the bottom of
+   the panel — the answer is appended to this page's markdown as a *live*
+   section (chart + table + a pinned `<Ask>` that re-answers with fresh data
+   on every visit). Dev server only; the page reloads with the new section.
+4. **Same question from the CLI:**
 
    ```bash
    uv run dashdown ask "Which campaign drove repeat purchases this week and what should we change today?" -p examples/growth-answers
    ```
-4. **Click explain.** Hover the "Orders vs. repeat orders by campaign" chart
+5. **Click explain.** Hover the "Orders vs. repeat orders by campaign" chart
    and click the ✨ sparkle — the model annotates the bar it thinks matters
    most, generated on demand.
-5. **The trigger.** `triggers/repeat-rate.yml` watches `kpi.repeat_rate` every
+6. **The trigger.** `triggers/repeat-rate.yml` watches `kpi.repeat_rate` every
    60 seconds and would fire a webhook when it drops below 20 (the query is
    scaled 0-100, a percentage) — the seeded data sits at ~21.6, close enough
    that trimming a few of the recent `Summer Referral Push` rows out of
    `data/orders.csv` (or adding a burst of `Viral Reels Blast` rows) trips it.
    See **Enable the trigger** below.
-6. **The ask log.** Every runtime question — resolution, query, answer —
+7. **The ask log.** Every runtime question — resolution, query, answer —
    appends a line to `.dashdown/ask_log.jsonl` in this project directory. It's
    plain JSON lines, so it's itself queryable by Dashdown later.
 

@@ -2192,38 +2192,92 @@ body {
   display: none;
 }
 
-/* ---- Header ask box --------------------------------------------------- *
-   An operator types a natural-language question; the answer opens in a wide
-   dropdown panel (provenance + chart + table + typewriter answer). The input
-   reuses the .dashdown-site-search-box/-input chrome; everything below is
-   hand-written against --dashdown-* tokens (no new vendor utility classes). */
-.dashdown-header-ask {
-  position: relative;
-  width: 16rem;
+/* ---- Omnibox ask surface ---------------------------------------------- *
+   The runtime ask surface is merged into the centered search box: an "Ask the
+   data" row in the results dropdown and an answer panel anchored under the same
+   box (built by ask_box.js). The answer panel reuses the chrome below;
+   everything is hand-written against --dashdown-* tokens (no vendor utilities). */
+
+/* The "Ask the data" result row: same row chrome as a search hit, with a ✦
+   accent and the echoed query. It's a <div> (not a link), so it leans on the
+   shared .dashdown-site-search-result rules for hover/selected states. */
+.dashdown-site-search-ask-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  cursor: pointer;
 }
-.dashdown-ask-box {
-  position: relative;
-  width: 100%;
-}
-.dashdown-ask-box-field {
-  width: 100%;
-}
-.dashdown-ask-box-icon {
+.dashdown-site-search-ask-icon {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.1rem;
-  font-size: 0.95rem;
-  line-height: 1;
+  font-size: 0.9rem;
+  line-height: 1.2;
   color: var(--fallback-p, oklch(var(--p) / 1));
 }
-/* Busy state: the sparkle pulses while the answer is in flight. */
-.dashdown-ask-box-busy .dashdown-ask-box-icon {
-  animation: dashdown-ask-box-pulse 1s ease-in-out infinite;
+.dashdown-site-search-ask-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@keyframes dashdown-ask-box-pulse {
-  50% { opacity: 0.35; }
+.dashdown-site-search-ask-q {
+  font-weight: 400;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+
+/* While an answer panel is open the search results dropdown stays hidden, so
+   the two never stack under the box (ask_box.js toggles the class). */
+.dashdown-ask-answer-open .dashdown-site-search-results {
+  display: none;
+}
+
+/* Anchor the answer panel to the full width of the omnibox (the shared
+   .dashdown-ask-box-panel rule right-aligns a narrower standalone box). Under
+   the 38rem header slot this fills the box; in the mobile menu it fills the
+   menu-width box. */
+.dashdown-ask-answer-panel.dashdown-ask-box-panel {
+  left: 0;
+  right: 0;
+  width: auto;
+}
+
+/* Keep footer: a button that pins the answer's chart onto the page's source. */
+.dashdown-ask-box-keep {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
+.dashdown-ask-box-keep-btn {
+  flex: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--fallback-p, oklch(var(--p) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  cursor: pointer;
+}
+.dashdown-ask-box-keep-btn:hover:not(:disabled) {
+  background: var(--fallback-p, oklch(var(--p) / 0.12));
+  color: var(--fallback-pc, oklch(var(--pc) / 1));
+}
+.dashdown-ask-box-keep-btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.dashdown-ask-box-keep-btn.dashdown-ask-box-keep-done {
+  border-color: var(--fallback-su, oklch(var(--su) / 1));
+  color: var(--fallback-su, oklch(var(--su) / 1));
+  opacity: 1;
+}
+.dashdown-ask-box-keep-error {
+  font-size: 0.75rem;
+  color: var(--fallback-er, oklch(var(--er) / 1));
 }
 
 /* The answer panel: a wide dropdown (it holds a chart), right-aligned under the
@@ -2310,14 +2364,6 @@ body {
 }
 .dashdown-ask-box-message {
   margin: 0;
-}
-
-/* Mobile: the header ask box hides below 768px (like the header search); the
-   box is a desktop operator affordance. */
-@media (max-width: 767px) {
-  .dashdown-header-ask {
-    display: none;
-  }
 }
 
 /* Multi-select: a dropdown button (the trigger) + a checkmark popover panel.
