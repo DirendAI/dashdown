@@ -890,6 +890,129 @@ def _log(
     )
 
 
+# --------------------------------------------------------------------------- #
+# "Keep on this page" — turn a liked runtime answer into authored markdown
+# --------------------------------------------------------------------------- #
+# The chart `type` the client inferred → the PascalCase component that renders it.
+_KEEP_CHART_COMPONENTS = {"line": "LineChart", "bar": "BarChart", "scatter": "ScatterChart"}
+
+
+def _attr_escape(value: Any) -> str:
+    """Make an arbitrary string safe as a double-quoted HTML/component attribute
+    value. Strips ``<``/``>`` (so a value can't open a tag) and escapes ``"`` →
+    ``&quot;`` (so it can't close the attribute) — the minimal defense the kept
+    section needs, since these strings land verbatim in an authored ``.md``."""
+    return str(value).replace("<", "").replace(">", "").replace('"', "&quot;")
+
+
+def build_kept_markdown(
+    project: "Project",
+    question: str,
+    resolved: dict[str, Any],
+    chart: dict[str, Any] | None,
+) -> str:
+    """Render a liked runtime answer as an authored, **live** markdown section.
+
+    The operator "keeps" an answer on a page: we append a ``## question`` section
+    whose components re-query on every visit (and whose ``<Ask>`` re-answers), so a
+    dashboard grows into "the answers you kept". The section is *authored markdown*,
+    not a data snapshot — nothing here is baked, it all re-runs.
+
+    **Trust model — the client is never trusted.** ``resolved`` is the response
+    payload's ``resolved`` object, but it came back through the browser, so every
+    name it carries is re-validated against the *live* catalog before it can land
+    in a file:
+
+    * ``semantic`` — the ``detail`` is rebuilt into the dict shape
+      :func:`_validate_semantic` consumes and re-validated against the current
+      semantic models; the *validated* :class:`Resolution` (not the client's
+      values) is what gets emitted.
+    * ``query`` — the name must still resolve to a real library or Python query.
+
+    Only those two rungs are keepable: a raw-``sql`` answer has no named artifact
+    to reference from markdown, so it's refused. Any validation failure — off-catalog
+    metric/dimension/query, unknown kind, sql — raises :class:`ValueError` with a
+    reason (the endpoint maps it to a 400). Free-form strings that reach an
+    attribute (the question title, inferred ``x``/``y`` columns) are run through
+    :func:`_attr_escape` so a crafted value can't break out of its attribute.
+
+    Returns just the section text (leading blank line + heading + components); the
+    caller owns file I/O and blank-line separation."""
+    kind = str((resolved or {}).get("kind", "")).strip().lower()
+    detail = (resolved or {}).get("detail") or {}
+    provenance = str((resolved or {}).get("provenance", "") or "").strip()
+
+    if kind not in ("semantic", "query"):
+        raise ValueError(
+            f"cannot keep a {kind or 'missing'!r} answer — only semantic and named-query "
+            "answers reference a re-runnable artifact (raw SQL has no named source)"
+        )
+
+    heading = " ".join(str(question or "").split())
+    if not heading:
+        raise ValueError("cannot keep an answer with an empty question")
+    q_attr = _attr_escape(heading)
+
+    components: list[str] = []
+
+    if kind == "semantic":
+        # Re-validate the client-supplied detail against the live catalog. A bad
+        # metric/dimension/grain degrades to kind "none" in _validate_semantic —
+        # we refuse to write it.
+        obj = {
+            "kind": "semantic",
+            "model": detail.get("model"),
+            "metric": detail.get("metric"),
+            "by": detail.get("by"),
+            "grain": detail.get("grain"),
+            "filters": detail.get("filters") or {},
+        }
+        res = _validate_semantic(obj, project)
+        if res.kind == "none":
+            raise ValueError(f"semantic answer failed re-validation: {res.reason}")
+        metric_ref = f"{res.model}.{res.metric}"
+        by_ref = f"{res.model}.{res.by}" if res.by else None
+
+        if chart is not None:
+            component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
+            attrs = [f"metric={{{metric_ref}}}"]
+            if by_ref:
+                attrs.append(f"by={{{by_ref}}}")
+            if res.grain:
+                attrs.append(f'grain="{res.grain}"')
+            attrs.append(f'title="{q_attr}"')
+            components.append(f"<{component} {' '.join(attrs)} />")
+
+        ask_attrs = [f"metric={{{metric_ref}}}"]
+        if by_ref:
+            ask_attrs.append(f"by={{{by_ref}}}")
+        ask_attrs.append(f'ask="{q_attr}"')
+        components.append(f"<Ask {' '.join(ask_attrs)} />")
+
+    else:  # kind == "query"
+        name = detail.get("name") or (resolved or {}).get("query_name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("query answer is missing a query name")
+        name = name.strip()
+        if name not in project.queries and name not in project.python_queries:
+            raise ValueError(f"query answer references unknown query {name!r}")
+
+        if chart is not None:
+            component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
+            x = _attr_escape(chart.get("x", ""))
+            y = _attr_escape(chart.get("y", ""))
+            components.append(
+                f'<{component} data={{{name}}} x="{x}" y="{y}" title="{q_attr}" />'
+            )
+        components.append(f"<Table data={{{name}}} />")
+        components.append(f'<Ask data={{{name}}} ask="{q_attr}" />')
+
+    date = datetime.now().strftime("%Y-%m-%d")
+    comment = f"<!-- kept from an ask answer · {provenance} · {date} -->"
+    parts = [f"## {heading}", comment, *components]
+    return "\n" + "\n".join(parts) + "\n"
+
+
 def ask_unavailable_notice(project: "Project") -> str | None:
     """Return a reader-facing notice when the runtime ask box is off, else ``None``.
 

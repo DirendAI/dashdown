@@ -892,6 +892,75 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
         return JSONResponse(payload)
 
+    @app.post("/_dashdown/api/ask/keep")
+    def post_ask_keep(request: Request, body: Any = Body(default=None)):
+        """Persist a liked runtime answer onto a page as a **live** markdown section.
+
+        The operator clicks "Keep on this page" on an answer they like; we append a
+        ``## question`` section (chart/table/`<Ask>` components) to that page's
+        ``.md``, so it re-queries on every visit — the dashboard grows into the
+        answers you kept. Distinct POST from ``/api/ask/{id}`` (GET-only), so no
+        route conflict.
+
+        **Dev-only.** Writing to source belongs to the authoring server; a
+        production process (``dev=False``) refuses with 403. The whole payload is
+        re-validated server-side (:func:`build_kept_markdown` re-checks every name
+        against the live catalog) — the client is never trusted to name an
+        artifact into a file.
+
+        403 when not a dev server; 400 on a malformed body / empty question /
+        unkeepable resolution; 404 when the target page doesn't resolve; a dynamic
+        ``[slug]`` page is refused (400) — a kept block would apply to every slug.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        from dashdown.ask_engine import build_kept_markdown
+
+        if not request.app.state.dev:
+            raise HTTPException(
+                status_code=403, detail="keeping answers is only available on the dev server"
+            )
+
+        proj: Project = request.app.state.project
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        question = body.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise HTTPException(status_code=400, detail="a non-empty 'question' is required")
+        resolved = body.get("resolved")
+        if not isinstance(resolved, dict):
+            raise HTTPException(status_code=400, detail="'resolved' must be an object")
+        chart = body.get("chart")
+        if chart is not None and not isinstance(chart, dict):
+            raise HTTPException(status_code=400, detail="'chart' must be an object or null")
+        path = body.get("path")
+        if not isinstance(path, str):
+            raise HTTPException(status_code=400, detail="a 'path' is required")
+
+        full = path.strip("/")
+        md_path, route_params = proj.page_path(full)
+        if md_path is None:
+            raise HTTPException(status_code=404, detail=f"No page for {path!r}")
+        if route_params:
+            raise HTTPException(
+                status_code=400,
+                detail="cannot keep an answer on a dynamic [slug] page (it would apply to every slug)",
+            )
+
+        try:
+            section = build_kept_markdown(proj, question.strip(), resolved, chart)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        # Append with exactly one blank line separating the new section from the
+        # existing body (the section already starts with a newline).
+        existing = md_path.read_text(encoding="utf-8")
+        md_path.write_text(existing.rstrip("\n") + "\n" + section, encoding="utf-8")
+
+        return JSONResponse({"ok": True, "path": ("/" + full).rstrip("/") or "/"})
+
     @app.get("/_dashdown/api/pdf")
     def export_page_pdf(request: Request):
         """Render the current page to a presentation PDF with headless Chromium —
@@ -1153,6 +1222,17 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 proj.config.llm.enabled
                 and proj.config.ask.enabled
                 and not embed_on
+            ),
+            # "Keep on this page" turns a liked answer into an authored markdown
+            # section — it writes to source, so it's gated to the dev server and
+            # only on a static (non-`[slug]`) page (a kept block on a dynamic
+            # template would apply to every slug). Requires the ask box itself.
+            ask_keep_enabled=(
+                proj.config.llm.enabled
+                and proj.config.ask.enabled
+                and not embed_on
+                and request.app.state.dev
+                and not params
             ),
             # Desktop sidebar collapse: `collapsed` seeds the first-visit state (a
             # saved localStorage choice overrides it); `toggle` gates the control.
