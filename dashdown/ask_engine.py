@@ -1740,13 +1740,15 @@ def build_kept_markdown(
       semantic models; the *validated* :class:`Resolution` (not the client's
       values) is what gets emitted.
     * ``query`` — the name must still resolve to a real library or Python query.
+    * ``list`` — the ``detail`` is re-validated by :func:`_validate_list` against
+      the live models and emitted as a ``<List />`` (the authored twin of the list
+      rung). Filters / date range are **not** carried into the file in v1 — when the
+      resolution held any, the kept-from comment notes "filters not carried over".
 
-    Only those two rungs are keepable: a raw-``sql`` answer has no named artifact
-    to reference from markdown, and a ``list`` answer has no authored component that
-    reconstructs an ordered, limited semantic projection — both are refused. Any
-    validation failure — off-catalog
-    metric/dimension/query, unknown kind, sql — raises :class:`ValueError` with a
-    reason (the endpoint maps it to a 400). Free-form strings that reach an
+    Only a raw-``sql`` answer stays unkeepable: it has no named artifact to
+    reference from markdown. Any validation failure — off-catalog
+    metric/dimension/query/column, unknown kind, sql — raises :class:`ValueError`
+    with a reason (the endpoint maps it to a 400). Free-form strings that reach an
     attribute (the question title, inferred ``x``/``y`` columns) are run through
     :func:`_attr_escape` so a crafted value can't break out of its attribute.
 
@@ -1756,16 +1758,15 @@ def build_kept_markdown(
     detail = (resolved or {}).get("detail") or {}
     provenance = str((resolved or {}).get("provenance", "") or "").strip()
 
-    if kind not in ("semantic", "query"):
-        detail = (
-            "list answers can't be kept yet — no authored component reconstructs an "
-            "ordered, limited semantic projection"
-            if kind == "list"
-            else "raw SQL has no named source"
+    if kind not in ("semantic", "query", "list"):
+        why = (
+            "raw SQL has no named source"
+            if kind == "sql"
+            else f"unknown kind {kind!r}"
         )
         raise ValueError(
-            f"cannot keep a {kind or 'missing'!r} answer — only semantic and named-query "
-            f"answers reference a re-runnable artifact ({detail})"
+            f"cannot keep a {kind or 'missing'!r} answer — only semantic, "
+            f"named-query, and list answers reference a re-runnable artifact ({why})"
         )
 
     heading = " ".join(str(question or "").split())
@@ -1774,6 +1775,9 @@ def build_kept_markdown(
     q_attr = _attr_escape(heading)
 
     components: list[str] = []
+    # Set by the list rung when the resolution carried filters/date range that v1
+    # doesn't emit into the file — noted in the kept-from comment.
+    filters_dropped = False
 
     if kind == "semantic":
         # Re-validate the client-supplied detail against the live catalog. A bad

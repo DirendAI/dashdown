@@ -13,6 +13,7 @@ from dashdown.components.builtin import line_chart  # noqa: F401
 from dashdown.components.builtin import bar_chart  # noqa: F401
 from dashdown.components.builtin import combo_chart  # noqa: F401
 from dashdown.components.builtin import table  # noqa: F401
+from dashdown.components.builtin import list_component  # noqa: F401
 from dashdown.components.builtin import dropdown  # noqa: F401
 from dashdown.components.builtin import value  # noqa: F401
 from dashdown.components.builtin import counter  # noqa: F401

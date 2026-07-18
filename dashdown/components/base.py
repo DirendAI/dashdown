@@ -83,6 +83,11 @@ class RenderContext:
         # SemanticRef. render_page compiles each into a PythonQuerySpec, registers
         # it, and surfaces it in the client query_defs.
         self.semantic_refs: dict[str, Any] = {}
+        # Semantic *list* references found on this page (the authored <List />):
+        # synthetic query name -> SemanticListRef. Mirrors semantic_refs — a
+        # dims-only, ordered, limited projection compiled by render_page into a
+        # synthetic PythonQuerySpec on the same _python_def_cache seam.
+        self.semantic_list_refs: dict[str, Any] = {}
 
     def get_query(self, name: str):
         if name not in self.queries:

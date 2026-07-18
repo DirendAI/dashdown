@@ -715,6 +715,21 @@ def render_page(
             spec = build_semantic_spec(semantic_models, ref, connectors)
             register_python_query_def(spec.name, spec.connector, spec)
 
+    # First-class semantic *list* references — the authored <List /> (the ask
+    # engine's list rung as a component). Each recorded a SemanticListRef on
+    # ctx.semantic_list_refs; compile each into a synthetic dims-only
+    # PythonQuerySpec and register it on the same `_python_def_cache` seam as a
+    # semantic metric, so the data API / poller / static build resolve it with no
+    # special-casing. Only the connector reaches `query_defs` below (the compiled
+    # SQL stays server-side, looked back up by name).
+    semantic_list_refs = list(ctx.semantic_list_refs.values())
+    if semantic_list_refs:
+        from dashdown.semantic import build_semantic_list_spec
+
+        for ref in semantic_list_refs:
+            spec = build_semantic_list_spec(semantic_models, ref, connectors)
+            register_python_query_def(spec.name, spec.connector, spec)
+
     # Register query definitions in the global cache so the separate data-API
     # request can look the SQL back up by name. Registered with **empty** default
     # params — even on a dynamic `[slug]` page. The route params (`${slug}` etc.)
@@ -760,10 +775,10 @@ def render_page(
         # A semantic chart whose model has a time_dimension also responds to the
         # date range (the compiler maps date_start/date_end onto it), so show the
         # control when the page has any such metric reference.
-        if not page_uses_date and semantic_refs:
+        if not page_uses_date and (semantic_refs or semantic_list_refs):
             page_uses_date = any(
                 getattr(semantic_models.get(ref.model), "time_dimension", None)
-                for ref in semantic_refs
+                for ref in (*semantic_refs, *semantic_list_refs)
             )
         if page_uses_date:
             control_html = _render_global_date_control(global_date, ctx, embed)
@@ -856,12 +871,22 @@ def render_page(
     # has a time dimension) — the keys `build_filters` matches on, so the
     # "filtered by" badge is accurate for semantic charts too. The model's SQL
     # still never ships, only these param names.
-    if semantic_refs:
+    if semantic_refs or semantic_list_refs:
         from dashdown.semantic import semantic_filter_params
 
         for ref in semantic_refs:
             d: dict[str, Any] = {"connector": ref.connector}
             handle = semantic_models.get(ref.model)
+            if handle is not None:
+                d["params"] = semantic_filter_params(handle)
+            query_defs[ref.query_name] = d
+        # Semantic list synthetic queries share the shape: only the connector
+        # reaches the client, plus the model's filterable params for the "filtered
+        # by" badge. A SemanticListRef carries no connector field (the model does),
+        # so read it off the model handle.
+        for ref in semantic_list_refs:
+            handle = semantic_models.get(ref.model)
+            d = {"connector": handle.connector if handle is not None else ""}
             if handle is not None:
                 d["params"] = semantic_filter_params(handle)
             query_defs[ref.query_name] = d
