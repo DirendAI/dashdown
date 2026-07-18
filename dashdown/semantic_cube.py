@@ -51,7 +51,7 @@ from dashdown.semantic_base import SemanticBackend, register_semantic_backend
 if TYPE_CHECKING:  # annotations only — avoid a runtime import cycle with dashdown.semantic
     from dashdown.data.base import Connector
     from dashdown.python_query import PythonQuerySpec
-    from dashdown.semantic import SemanticModelHandle, SemanticRef
+    from dashdown.semantic import SemanticListRef, SemanticModelHandle, SemanticRef
 
 log = logging.getLogger(__name__)
 
@@ -327,6 +327,74 @@ def build_cube_query(
     return query
 
 
+def build_cube_list_query(
+    handle: SemanticModelHandle,
+    list_ref: SemanticListRef,
+    filters: list[dict[str, Any]],
+    grain: str | None = None,
+) -> dict[str, Any]:
+    """Compile a **list** request (dims-only, ordered, limited) into a Cube query dict.
+
+    The list-rung sibling of :func:`build_cube_query`: ``list_ref.columns`` become
+    ``dimensions`` (time-type ones → ``timeDimensions`` with a granularity), there are
+    **no** ``measures`` (Cube returns distinct dimension rows), ``list_ref.order_by``
+    maps to Cube's native ``order`` (with the ``desc``/``asc`` direction), and
+    ``list_ref.limit`` to the native ``limit``. ``filters`` is the same generic IR
+    :func:`dashdown.semantic.build_filters` emits. Everything stays JSON data — no
+    string assembly, no ``_substitute_params``.
+    """
+    default_gran = handle.cube_meta.get("default_granularity", _DEFAULT_GRANULARITY)
+
+    dimensions: list[str] = []
+    time_dims: dict[str, dict[str, Any]] = {}
+    cube_filters: list[dict[str, Any]] = []
+
+    for d in list_ref.columns:
+        info = _member_info(handle, d)
+        member = info["member"]
+        if _is_time(info):
+            entry = time_dims.setdefault(member, {"dimension": member})
+            entry["granularity"] = _time_granularity(info, grain, default_gran)
+        else:
+            dimensions.append(member)
+
+    order: list[list[str]] = []
+    if list_ref.order_by:
+        oinfo = _member_info(handle, list_ref.order_by)
+        order.append([oinfo["member"], "desc" if list_ref.desc else "asc"])
+
+    for f in filters:
+        info = _member_info(handle, f.get("field"))
+        member = info["member"]
+        op = f.get("operator")
+        if op == "in":
+            values = [str(v) for v in (f.get("values") or []) if str(v) != ""]
+            if values:
+                cube_filters.append(
+                    {"member": member, "operator": "equals", "values": values}
+                )
+        elif op in (">=", "<="):
+            entry = time_dims.setdefault(member, {"dimension": member})
+            rng = entry.setdefault("dateRange", [None, None])
+            rng[0 if op == ">=" else 1] = str(f.get("value"))
+        else:
+            raise ValueError(f"cube backend: unsupported filter operator {op!r}")
+
+    time_dimensions = [_finalize_time_dim(e) for e in time_dims.values()]
+
+    query: dict[str, Any] = {}
+    if dimensions:
+        query["dimensions"] = dimensions
+    if time_dimensions:
+        query["timeDimensions"] = time_dimensions
+    if cube_filters:
+        query["filters"] = cube_filters
+    if order:
+        query["order"] = order
+    query["limit"] = int(list_ref.limit)
+    return query
+
+
 def _finalize_time_dim(entry: dict[str, Any]) -> dict[str, Any]:
     """Normalize a collected time-dimension entry for the wire.
 
@@ -480,6 +548,81 @@ class CubeBackend(SemanticBackend):
             description=f"semantic (cube): {', '.join(ref.metrics)} by {ref.by} "
                         f"({ref.model})",
         )
+
+    def build_list_spec(
+        self,
+        handle: SemanticModelHandle,
+        list_ref: SemanticListRef,
+        connectors: dict[str, Connector],
+    ) -> PythonQuerySpec:
+        # Cube expresses a dims-only ordered/limited projection natively (no
+        # measures) — the list rung compiles to `build_cube_list_query` and renames
+        # the member-keyed rows to the canonical `columns` the client reads.
+        from dashdown.data.base import QueryResult
+        from dashdown.python_query import PythonQuerySpec
+        from dashdown.semantic import build_filters
+
+        def fn(params: dict[str, str], _connect):
+            conn = connectors.get(handle.connector)
+            if conn is None:
+                raise KeyError(
+                    f"cube model {handle.name!r}: connector {handle.connector!r} "
+                    f"not available at query time"
+                )
+            query = build_cube_list_query(handle, list_ref, build_filters(handle, params))
+            payload = conn.load(query)
+            return _list_result_from_cube(handle, list_ref, payload, QueryResult)
+
+        return PythonQuerySpec(
+            name=list_ref.query_name,
+            connector=handle.connector,
+            fn=fn,
+            cache_ttl=None,
+            live=False,
+            interval=None,
+            description=f"semantic list (cube): {', '.join(list_ref.columns)} "
+                        f"({list_ref.model})",
+        )
+
+
+def _list_result_from_cube(
+    handle: SemanticModelHandle, list_ref: SemanticListRef, payload: dict[str, Any],
+    QueryResult,
+):
+    """Rename Cube's ``{data, annotation}`` rows to the canonical ``columns`` a list
+    request reads (member ids → the short dimension names), the dims-only sibling of
+    :func:`_result_from_cube`. Time columns are keyed ``member.granularity``.
+    """
+    data = payload.get("data") or []
+    canonical = list(list_ref.columns)
+    default_gran = handle.cube_meta.get("default_granularity", _DEFAULT_GRANULARITY)
+
+    keys: list[str] = []
+    for d in list_ref.columns:
+        info = _member_info(handle, d)
+        if _is_time(info):
+            keys.append(f"{info['member']}.{_time_granularity(info, None, default_gran)}")
+        else:
+            keys.append(info["member"])
+
+    if data and all(k in data[0] for k in keys):
+        rows = [[row.get(k) for k in keys] for row in data]
+        return QueryResult(columns=canonical, rows=rows)
+
+    # Positional fallback under a strict length guard, else raw rows unmodified.
+    if data and len(data[0]) == len(canonical):
+        first_keys = list(data[0].keys())
+        rows = [[row.get(k) for k in first_keys] for row in data]
+        return QueryResult(columns=canonical, rows=rows)
+
+    cols: list[str] = []
+    seen: set[str] = set()
+    for row in data:
+        for k in row:
+            if k not in seen:
+                seen.add(k)
+                cols.append(k)
+    return QueryResult(columns=cols, rows=[[row.get(c) for c in cols] for row in data])
 
 
 def _result_from_cube(

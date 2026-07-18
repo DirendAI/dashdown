@@ -223,3 +223,44 @@ def test_list_question_routes_to_recent_orders_table():
         assert payload["answer_text"]
     finally:
         proj.close()
+
+
+@needs_bsl
+def test_list_rung_resolves_over_growth_semantic_model():
+    """The generic "list" rung: a detail question routed onto the growth semantic
+    model (no author-curated query) comes back as an ordered, limited table —
+    newest first — compiled by the semantic backend, not LLM-written SQL."""
+    from dashdown import ask_engine
+
+    class _Fake:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, system, prompt):
+            self.calls.append((system, prompt))
+            if len(self.calls) == 1:
+                return (
+                    '{"kind": "list", "model": "orders", '
+                    '"columns": ["order_date", "campaign_id"], '
+                    '"order_by": "order_date", "desc": true, "limit": 10}'
+                )
+            return "The most recent orders, newest first."
+
+    proj = load_project(EXAMPLE)
+    proj.llm_adapter = _Fake()
+    try:
+        payload = ask_engine.answer_question(
+            proj, "show me the 10 most recent orders"
+        )
+        assert payload["resolved"]["kind"] == "list"
+        assert "list:" in payload["resolved"]["provenance"]
+        cols = payload["columns"]
+        rows = payload["rows"]
+        assert 0 < len(rows) <= 10
+        date_col = next(c for c in cols if c.split(".")[-1] == "order_date")
+        dates = [r[cols.index(date_col)] for r in rows]
+        assert dates[0] >= dates[-1]  # newest first
+        # A list answer never attaches the aggregate-editor chips.
+        assert "semantic_options" not in payload
+    finally:
+        proj.close()

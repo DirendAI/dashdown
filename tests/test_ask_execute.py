@@ -613,6 +613,205 @@ class TestSelfRepair:
         assert len(fake.calls) == 1
 
 
+# --------------------------------------------------------------------------- #
+# The "list" resolution rung — detail/list questions off a semantic model
+# --------------------------------------------------------------------------- #
+def _list_reply(**over) -> str:
+    import json
+
+    obj = {
+        "kind": "list",
+        "model": "sales",
+        "columns": ["region", "status", "order_date"],
+        "order_by": "order_date",
+        "desc": True,
+        "limit": 10,
+    }
+    obj.update(over)
+    return json.dumps(obj)
+
+
+@needs_bsl
+class TestListResolution:
+    def test_routes_executes_and_newest_first(self, tmp_path):
+        fake = FakeAdapter(_list_reply(limit=10), "Recent orders shown.")
+        client = _semantic_client(tmp_path, fake)
+        r = client.post(
+            "/_dashdown/api/ask", json={"question": "show me the last 10 orders"}
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved"]["kind"] == "list"
+        assert "list:" in body["resolved"]["provenance"]
+        assert "newest first" in body["resolved"]["provenance"]
+        rows = body["rows"]
+        cols = body["columns"]
+        assert 0 < len(rows) <= 10
+        # order_date column resolves to a canonical `sales.order_date` spelling.
+        date_col = next(c for c in cols if c.split(".")[-1] == "order_date")
+        dates = [row[cols.index(date_col)] for row in rows]
+        assert dates[0] >= dates[-1]  # desc by the time dimension
+        # The answer prose rides along (the table is the deliverable).
+        assert body["answer_text"]
+
+    def test_no_semantic_options_on_list(self, tmp_path):
+        # Chips are the aggregate editor — a list answer omits semantic_options.
+        fake = FakeAdapter(_list_reply(), "Answer.")
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["kind"] == "list"
+        assert "semantic_options" not in body
+
+    def test_columns_comma_joined_coerces(self, tmp_path):
+        # A single comma-joined `columns` entry splits into both dimensions.
+        fake = FakeAdapter(
+            _list_reply(columns=["region,status"], order_by="region"), "Answer."
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list region and status"}
+        ).json()
+        assert body["resolved"]["kind"] == "list"
+        assert body["resolved"]["detail"]["columns"] == ["region", "status"]
+
+    def test_all_unknown_columns_degrades_to_none(self, tmp_path):
+        # No valid column left → none (and, self-repair exhausted, stays none).
+        fake = FakeAdapter(
+            _list_reply(columns=["ghost", "phantom"], order_by="ghost"),
+            _list_reply(columns=["ghost", "phantom"], order_by="ghost"),
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list ghosts"}
+        ).json()
+        assert body["resolved"]["kind"] == "none"
+
+    def test_order_by_falls_back_to_time_dimension(self, tmp_path):
+        # An invalid order_by soft-falls-back to the model's time dimension when
+        # it's among the selected columns.
+        fake = FakeAdapter(_list_reply(order_by="not_a_dim"), "Answer.")
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["kind"] == "list"
+        assert body["resolved"]["detail"]["order_by"] == "order_date"
+
+    def test_limit_clamped_low(self, tmp_path):
+        fake = FakeAdapter(_list_reply(limit=0), "Answer.")
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["detail"]["limit"] == 1
+
+    def test_limit_clamped_high(self, tmp_path):
+        fake = FakeAdapter(_list_reply(limit=10_000), "Answer.")
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["detail"]["limit"] == 500
+
+    def test_joined_dimension_in_columns(self, tmp_path):
+        # `manager` lives in the joined geo model — a list can project it.
+        fake = FakeAdapter(
+            _list_reply(columns=["manager", "order_date"], order_by="order_date"),
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "which managers, recently"}
+        ).json()
+        assert body["resolved"]["kind"] == "list", body["resolved"]
+        cols = body["columns"]
+        assert any(c.split(".")[-1] == "manager" for c in cols)
+        assert len(body["rows"]) > 0
+
+    def test_filters_shrink_rows(self, tmp_path):
+        # A status filter narrows the row set vs. the unfiltered list.
+        fake = FakeAdapter(
+            _list_reply(limit=500), "a",
+            _list_reply(limit=500, filters={"status": ["Won"]}), "b",
+        )
+        client = _semantic_client(tmp_path, fake)
+        unfiltered = client.post(
+            "/_dashdown/api/ask", json={"question": "all orders"}
+        ).json()
+        filtered = client.post(
+            "/_dashdown/api/ask", json={"question": "won orders"}
+        ).json()
+        assert filtered["resolved"]["detail"]["filters"] == {"status": ["Won"]}
+        assert 0 < len(filtered["rows"]) < len(unfiltered["rows"])
+
+    def test_self_repair_on_invalid_model(self, tmp_path):
+        # A bad model is invalid → one corrective retry → valid list → answered.
+        fake = FakeAdapter(
+            _list_reply(model="ghost_model"),
+            _list_reply(),
+            "Repaired answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["kind"] == "list"
+        assert len(fake.calls) == 3
+        assert "previous response was invalid" in fake.calls[1][1]
+
+    def test_backend_without_list_support_degrades_to_none(self, tmp_path, monkeypatch):
+        # A backend whose build_list_spec raises NotImplementedError degrades the
+        # answer to none (never a 500) — no billable answer call.
+        from dashdown.semantic import IbisBackend
+
+        def _unsupported(self, *a, **k):
+            raise NotImplementedError(
+                "the 'ibis' semantic backend does not support list queries yet"
+            )
+
+        monkeypatch.setattr(IbisBackend, "build_list_spec", _unsupported)
+        fake = FakeAdapter(_list_reply())
+        client = _semantic_client(tmp_path, fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "list orders"}
+        ).json()
+        assert body["resolved"]["kind"] == "none"
+        assert "does not support list" in body["answer_text"]
+        assert len(fake.calls) == 1  # resolve only, no answer call
+
+    def test_keep_refuses_list(self, tmp_path):
+        # A list answer can't be kept in v1 — the keep endpoint 400s with a clear
+        # message (the frontend button already gates on semantic|query).
+        client = _semantic_client(tmp_path, FakeAdapter())
+        (client.app.state.project.root / "pages" / "keep_here.md").write_text(
+            "# Keep\n", encoding="utf-8"
+        )
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "last 10 orders",
+                "resolved": {
+                    "kind": "list",
+                    "provenance": "list: sales — region",
+                    "detail": {
+                        "model": "sales",
+                        "columns": ["region"],
+                        "order_by": "region",
+                        "desc": True,
+                        "limit": 10,
+                        "filters": {},
+                    },
+                },
+                "chart": None,
+                "path": "/keep_here",
+            },
+        )
+        assert r.status_code == 400
+        assert "list answers can't be kept" in r.json()["detail"]
+
+
 @needs_bsl
 def test_keep_markdown_emits_series(tmp_path):
     from dashdown.ask_engine import build_kept_markdown

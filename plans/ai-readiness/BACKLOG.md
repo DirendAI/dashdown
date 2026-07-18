@@ -43,12 +43,11 @@ reviewed by the orchestrating session before merge.
   session trail — shipped): model-suggested follow-up chips riding the answer
   call (annotation-fence-style protocol); dimension *value* options for filter
   chips (needs a semantic values API).
-- **Semantic "list" rung**: detail/list questions ("last 10 customers that
-  ordered") currently route only to author-written library queries — a
-  constrained list spec (dimensions + order_by + limit, compiled by the
-  semantic backends themselves, never LLM SQL) would answer them generically
-  from the model's dims/joins. Until then: list-shaped library queries with
-  routing-friendly descriptions are the supported answer.
+- **Semantic "list" rung — shipped** (kind `list`: dims + order_by + limit,
+  full backend pushdown via BSL dims-only queries / native Cube order+limit;
+  distinct-rows semantics documented). Remaining niceties: a `<List>`/table
+  component syntax so kept pages can reconstruct a list answer (keep refuses
+  lists today); chips for list answers (columns/order/limit editor).
 - **Answer permanence** — partially shipped: **"Keep on this page"** appends a
   re-validated live section to the current page (`build_kept_markdown` +
   `POST /_dashdown/api/ask/keep`, dev-server-only). Remaining: an ask-history

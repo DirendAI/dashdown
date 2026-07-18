@@ -50,6 +50,8 @@ exclusive.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -571,6 +573,50 @@ def semantic_query_name(
     return ".".join(parts)
 
 
+@dataclass(frozen=True)
+class SemanticListRef:
+    """A resolved detail/list request over one model — the runtime ask engine's
+    "list" rung (``show the last N orders``).
+
+    Unlike :class:`SemanticRef` (an aggregate: a measure grouped by dimensions), a
+    list has **no measures** — it's a projection of ``columns`` (all dimensions of
+    ``model``), optionally ordered by one dimension and capped at ``limit``. Because
+    the semantic layer has no primary-key/detail-row concept, each backend returns
+    **distinct rows** over ``columns`` (a group-by with no aggregate), not raw table
+    rows. ``columns``/``order_by`` are **canonical** dimension names (already
+    resolved through the model's ``dim_lookup``); ``query_name`` is the synthetic
+    ``_python_def_cache`` key (see :func:`semantic_list_query_name`).
+    """
+
+    model: str
+    columns: tuple[str, ...]
+    order_by: str | None
+    desc: bool
+    limit: int
+    query_name: str = field(default="")
+
+
+def semantic_list_query_name(
+    model: str,
+    columns: tuple[str, ...] | list[str],
+    order_by: str | None,
+    desc: bool,
+    limit: int,
+) -> str:
+    """Deterministic synthetic query name for a list request (``_semlist``-namespaced).
+
+    The columns/order/limit are folded into one short hash segment so the whole name
+    stays a single safe cache-key spelling (``_semlist.<model>.<hash>``) regardless
+    of how many columns or which order the request carries — stable per
+    ``(model, columns, order_by, desc, limit)`` so repeats reuse one cache entry.
+    """
+    sig = json.dumps(
+        {"c": list(columns), "o": order_by, "d": bool(desc), "l": int(limit)},
+        sort_keys=True,
+    )
+    return f"_semlist.{model}.{hashlib.sha1(sig.encode()).hexdigest()[:12]}"
+
+
 def _resolve_dim(
     handle: SemanticModelHandle, model_name: str, ref: str, attr: str = "by"
 ) -> str:
@@ -863,6 +909,51 @@ class IbisBackend(SemanticBackend):
             description=f"semantic: {', '.join(ref.metrics)} by {ref.by} ({ref.model})",
         )
 
+    def build_list_spec(
+        self,
+        handle: SemanticModelHandle,
+        list_ref: SemanticListRef,
+        connectors: dict[str, Connector],
+    ) -> PythonQuerySpec:
+        # A dims-only BSL query: `measures=None` makes BSL group-by the selected
+        # dimensions with no aggregate (distinct-rows semantics — the honest form of
+        # "a list" for a model with no detail-row/primary-key concept). `order_by` +
+        # `limit` are BSL-native and **pushed down** to the warehouse, so the ordering
+        # and the row cap run in DuckDB/Postgres/…, not in Python. Filters ride the
+        # same `build_filters` path aggregate queries use.
+        def fn(params: dict[str, str], _connect: Callable[..., QueryResult]):
+            order_by = (
+                [(list_ref.order_by, "desc" if list_ref.desc else "asc")]
+                if list_ref.order_by
+                else None
+            )
+            with ExitStack() as stack:
+                if handle.profile is None:
+                    for cname in sorted(set(handle.table_connectors.values())):
+                        conn = connectors.get(cname)
+                        lock = getattr(conn, "_lock", None) if conn is not None else None
+                        if lock is not None:
+                            stack.enter_context(lock)
+                model = handle.build(connectors, ensure_setup=False)
+                q = model.query(
+                    dimensions=list(list_ref.columns),
+                    measures=None,
+                    filters=build_filters(handle, params),
+                    order_by=order_by,
+                    limit=list_ref.limit,
+                )
+                return q.to_pyarrow()
+
+        return PythonQuerySpec(
+            name=list_ref.query_name,
+            connector=handle.connector,
+            fn=fn,
+            cache_ttl=None,
+            live=False,
+            interval=None,
+            description=f"semantic list: {', '.join(list_ref.columns)} ({list_ref.model})",
+        )
+
 
 def build_semantic_spec(
     models: dict[str, SemanticModelHandle],
@@ -882,6 +973,25 @@ def build_semantic_spec(
     """
     handle = models[ref.model]
     return get_semantic_backend(handle.backend).build_spec(handle, ref, connectors)
+
+
+def build_semantic_list_spec(
+    models: dict[str, SemanticModelHandle],
+    ref: SemanticListRef,
+    connectors: dict[str, Connector],
+) -> PythonQuerySpec:
+    """Wrap a resolved :class:`SemanticListRef` as a synthetic :class:`PythonQuerySpec`.
+
+    Dispatches to the model's backend's
+    :meth:`~dashdown.semantic_base.SemanticBackend.build_list_spec`. Like
+    :func:`build_semantic_spec` the returned spec rides the shared
+    ``_python_def_cache`` path — but ``build_list_spec`` is **optional**: a backend
+    that can't express an ordered, limited, dims-only projection raises
+    ``NotImplementedError`` (the runtime ask engine degrades that request to kind
+    ``none``, never a 500).
+    """
+    handle = models[ref.model]
+    return get_semantic_backend(handle.backend).build_list_spec(handle, ref, connectors)
 
 
 # Register the built-in Cube backend (its ``@register_semantic_backend(...)``

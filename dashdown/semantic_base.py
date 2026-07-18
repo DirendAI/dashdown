@@ -11,7 +11,10 @@ Fabric), or any third-party engine a package contributes. A backend implements
   :class:`~dashdown.semantic.SemanticRef` into a synthetic
   :class:`~dashdown.python_query.PythonQuerySpec`
 
-— plus an optional :meth:`SemanticBackend.claims_connector` for auto-detection.
+— plus an optional :meth:`SemanticBackend.claims_connector` for auto-detection and an
+optional :meth:`SemanticBackend.build_list_spec` (a dims-only, ordered, limited
+projection — the runtime ask engine's "list" rung; a backend that can't express it
+leaves it unimplemented and the engine degrades that request to kind ``none``).
 **Everything else stays backend-agnostic** and lives in :mod:`dashdown.semantic`:
 ``resolve_ref``, ``build_filters`` (the generic typed-filter list every backend
 consumes — the layer's IR), ``semantic_filter_params``, and the synthetic-query →
@@ -37,7 +40,7 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:  # annotations only — avoid an import cycle with dashdown.semantic
     from dashdown.data.base import Connector
     from dashdown.python_query import PythonQuerySpec
-    from dashdown.semantic import SemanticModelHandle, SemanticRef
+    from dashdown.semantic import SemanticListRef, SemanticModelHandle, SemanticRef
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +102,25 @@ class SemanticBackend(ABC):
         future HTTP backend (e.g. Cube) owns its own transport — the protocol
         assumes none of them in particular.
         """
+
+    def build_list_spec(
+        self,
+        handle: SemanticModelHandle,
+        list_ref: SemanticListRef,
+        connectors: dict[str, Connector],
+    ) -> PythonQuerySpec:
+        """Compile a resolved :class:`~dashdown.semantic.SemanticListRef` — a
+        dims-only, ordered, limited projection — into a synthetic ``PythonQuerySpec``.
+
+        **Optional.** This is the runtime ask engine's "list" rung (detail/list
+        questions like *show the last N orders*). A backend that can't express an
+        ordered, limited, dims-only projection leaves this default in place; it raises
+        :class:`NotImplementedError`, which the ask engine catches and degrades to kind
+        ``none`` with the backend's reason — **never a 500**.
+        """
+        raise NotImplementedError(
+            f"the {self.name!r} semantic backend does not support list queries yet"
+        )
 
 
 _REGISTRY: dict[str, SemanticBackend] = {}

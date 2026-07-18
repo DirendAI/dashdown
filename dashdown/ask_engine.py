@@ -71,8 +71,11 @@ from dashdown.semantic import (
     DATE_END_PARAM,
     DATE_START_PARAM,
     GRAIN_TOKENS,
+    SemanticListRef,
+    build_semantic_list_spec,
     build_semantic_spec,
     resolve_ref,
+    semantic_list_query_name,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids an import cycle)
@@ -122,7 +125,16 @@ def rate_limited(limit: int) -> bool:
         return False
 
 # The valid resolution kinds the parser recognizes; anything else degrades to none.
-_KINDS = frozenset({"semantic", "query", "sql", "none"})
+_KINDS = frozenset({"semantic", "list", "query", "sql", "none"})
+
+# Bounds for the list rung's row cap — a hallucinated/absent limit is clamped here
+# (the request feeds both the model payload and the wire).
+MIN_LIST_LIMIT = 1
+MAX_LIST_LIMIT = 500
+DEFAULT_LIST_LIMIT = 50
+# Cap on how many dimension columns one list request may project (a runaway
+# `columns` list is trimmed to this many valid dimensions).
+MAX_LIST_COLUMNS = 8
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +150,15 @@ class AskQueryError(RuntimeError):
 
 class AskRateLimitError(RuntimeError):
     """The process-wide ask rate limit was hit — the endpoint maps this to 429."""
+
+
+class AskListUnsupported(RuntimeError):
+    """A ``list`` resolution targeted a semantic backend without ``build_list_spec``.
+
+    Raised out of :func:`_execute_list` (the backend's ``NotImplementedError``) and
+    caught by :func:`answer_question`, which degrades it to a kind ``none`` payload —
+    so a routed-but-unsupported list request is never a 500, and never bills the
+    second (answer) LLM call."""
 
 
 # --------------------------------------------------------------------------- #
@@ -212,6 +233,9 @@ RESOLVER_SYSTEM_PROMPT = (
     '"by": "<dimension or empty>", "series": "<second dimension or empty>", '
     '"grain": "<grain or empty>", '
     '"filters": {"<dimension>": ["value", ...]}, "date_start": "", "date_end": ""}\n'
+    '  {"kind": "list", "model": "<model>", "columns": ["<dimension>", ...], '
+    '"order_by": "<dimension or empty>", "desc": true, "limit": 10, '
+    '"filters": {"<dimension>": ["value", ...]}, "date_start": "", "date_end": ""}\n'
     '  {"kind": "query", "name": "<query name>", "params": {"<param>": "<value>"}}\n'
     '  {"kind": "none", "reason": "<why the catalog cannot answer this>"}\n\n'
     "Rules: `metric`, `by`, and `series` must be names listed under the chosen "
@@ -223,11 +247,18 @@ RESOLVER_SYSTEM_PROMPT = (
     "listed in the catalog.\n\n"
     "Semantic models answer AGGREGATE questions only — a measure grouped by "
     "dimensions. A detail/list question ('show/list the last N orders', 'which "
-    "customers ordered recently', 'give me the list of …') can NOT be a semantic "
-    "resolution: answer it with a catalog query whose description matches the "
-    "requested rows. If nothing in the catalog can answer the question, "
-    'return kind "none" — and in `reason`, say what the catalog CAN answer that '
-    "comes closest, so the operator knows what to ask instead. Never invent names."
+    "customers ordered recently', 'give me the list of …') is NOT a semantic "
+    "resolution. Answer it EITHER with a catalog query whose description matches "
+    'the requested rows (prefer this when one fits — an author curated it), OR with '
+    'kind "list" over a semantic model when no query matches. For a `list`: '
+    "`columns` are the model's dimensions (1-8 of them, the fields to show); "
+    "`order_by` must be one of the SELECTED `columns` — for 'latest/most recent' "
+    "questions always include the model's time dimension in `columns` and order "
+    "by it, with `desc: true` for newest/largest first; `limit` is an integer "
+    "1-500 (default 50). A `list` never carries a `metric` — that's `semantic`. If "
+    'nothing in the catalog can answer the question, return kind "none" — and in '
+    "`reason`, say what the catalog CAN answer that comes closest, so the operator "
+    "knows what to ask instead. Never invent names."
 )
 
 # Appended to the system prompt only when ask.allow_sql is on (rung 3 opt-in).
@@ -309,6 +340,11 @@ class Resolution:
     filters: dict[str, list[str]] = field(default_factory=dict)
     date_start: str = ""
     date_end: str = ""
+    # list (reuses model / filters / date_start / date_end above)
+    columns: list[str] = field(default_factory=list)
+    order_by: str = ""
+    desc: bool = True
+    limit: int = DEFAULT_LIST_LIMIT
     # query
     name: str | None = None
     params: dict[str, str] = field(default_factory=dict)
@@ -410,6 +446,9 @@ def parse_resolution(
 
     if kind == "query":
         return _validate_query(obj, project)
+
+    if kind == "list":
+        return _validate_list(obj, project)
 
     return _validate_semantic(obj, project)
 
@@ -539,6 +578,118 @@ def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
     )
 
 
+def _validate_list(obj: dict[str, Any], project: "Project") -> Resolution:
+    """Validate a ``list`` resolution against the live catalog (same forgiveness
+    policy as :func:`_validate_semantic`).
+
+    A detail/list request over a semantic model: ``columns`` (1..8 dimensions to
+    show), ``order_by`` (one dimension), ``desc``, ``limit``. Coercion mirrors the
+    semantic path — comma-joined / list-valued fields are split, unknown names are
+    dropped rather than fatal, and only a request with **no valid column left**
+    degrades to ``none``. ``order_by`` soft-falls-back to the model's time dimension
+    (when it's among the selected columns) else the first column; ``limit`` is
+    clamped to ``[1, 500]``; ``filters``/``date_start``/``date_end`` are handled
+    exactly like the semantic rung.
+
+    The backend's *capacity* to run a list (``build_list_spec``) is checked at
+    execution — a backend that lacks it degrades the answer to ``none`` there — so
+    validation only concerns names/shape."""
+    model = obj.get("model")
+    handle = project.semantic_models.get(model) if isinstance(model, str) else None
+    if handle is None:
+        return _none(f"unknown semantic model {model!r}")
+
+    # columns: split every entry (list or comma-joined), keep valid dims in order,
+    # dedupe on the canonical name, cap at MAX_LIST_COLUMNS.
+    raw_cols = obj.get("columns")
+    candidates: list[str] = []
+    if isinstance(raw_cols, list):
+        for entry in raw_cols:
+            candidates.extend(_candidate_names(entry))
+    else:
+        candidates = _candidate_names(raw_cols)
+    columns: list[str] = []
+    seen_canon: set[str] = set()
+    for c in candidates:
+        canon = handle.dim_lookup.get(c)
+        if canon is None or canon in seen_canon:
+            continue
+        seen_canon.add(canon)
+        columns.append(c)
+        if len(columns) >= MAX_LIST_COLUMNS:
+            break
+    if not columns:
+        return _none(f"no valid columns for a list on model {model!r}")
+
+    # order_by: a valid, in-scope (selected) dimension; else the model's time
+    # dimension when it's selected; else the first column.
+    time_short = (handle.time_dimension or "").split(".")[-1]
+    order_by = next(
+        (
+            o
+            for o in _candidate_names(obj.get("order_by"))
+            if handle.dim_lookup.get(o) in seen_canon
+        ),
+        None,
+    )
+    if order_by is None:
+        if handle.time_dimension and handle.time_dimension in seen_canon:
+            order_by = time_short
+        else:
+            order_by = columns[0]
+
+    # desc: coerce (default true — newest/largest first).
+    raw_desc = obj.get("desc", True)
+    if isinstance(raw_desc, str):
+        desc = raw_desc.strip().lower() not in ("false", "0", "no", "")
+    else:
+        desc = bool(raw_desc)
+
+    # limit: coerce + clamp to [MIN, MAX] (default 50).
+    try:
+        limit = int(obj.get("limit", DEFAULT_LIST_LIMIT))
+    except (TypeError, ValueError):
+        limit = DEFAULT_LIST_LIMIT
+    limit = max(MIN_LIST_LIMIT, min(MAX_LIST_LIMIT, limit))
+
+    # filters + date range: identical to the semantic rung.
+    filters: dict[str, list[str]] = {}
+    raw_filters = obj.get("filters") or {}
+    if isinstance(raw_filters, dict):
+        for key, value in raw_filters.items():
+            if str(key) not in handle.dim_lookup:
+                continue
+            values = value if isinstance(value, list) else [value]
+            values = [_scalar(v) for v in values if _scalar(v) != ""]
+            if values:
+                filters[str(key)] = values
+
+    date_start = _scalar(obj.get("date_start"))
+    date_end = _scalar(obj.get("date_end"))
+
+    if order_by == time_short:
+        ord_txt = "newest first" if desc else "oldest first"
+    else:
+        ord_txt = f"by {order_by} {'desc' if desc else 'asc'}"
+    prov = f"list: {model} — {', '.join(columns)} · {ord_txt} · limit {limit}"
+    if filters:
+        prov += " · where " + ", ".join(
+            f"{k} in {v}" for k, v in sorted(filters.items())
+        )
+    return Resolution(
+        kind="list",
+        model=model,
+        columns=columns,
+        order_by=order_by,
+        desc=desc,
+        limit=limit,
+        filters=filters,
+        date_start=date_start,
+        date_end=date_end,
+        provenance=prov,
+    )
+
+
 def _scalar(v: Any) -> str:
     """A single filter/param value as a string (list values are comma-joined)."""
     if v is None:
@@ -563,11 +714,16 @@ def execute_resolution(
     try:
         if resolution.kind == "semantic":
             return _execute_semantic(resolution, project, params)
+        if resolution.kind == "list":
+            return _execute_list(resolution, project, params)
         if resolution.kind == "query":
             return _execute_query(resolution, project, params)
         if resolution.kind == "sql":
             return _execute_sql(resolution, project)
-    except AskQueryError:
+    except (AskQueryError, AskListUnsupported):
+        # AskListUnsupported is a *routing* outcome (this backend can't run a list),
+        # not a failure — answer_question degrades it to none. Let it through
+        # unwrapped so it isn't masked as a 500.
         raise
     except Exception as e:  # noqa: BLE001 - any backend failure becomes a 500
         raise AskQueryError(f"{type(e).__name__}: {e}") from e
@@ -604,6 +760,58 @@ def _execute_semantic(
     # comma-joined multi-value strings (the framework-wide Dropdown convention
     # build_filters splits on), so a single value that itself contains a comma
     # cannot ride this encoding.
+    exec_params = dict(params)
+    for dim, values in resolution.filters.items():
+        exec_params[dim] = ",".join(values)
+    if resolution.date_start:
+        exec_params[DATE_START_PARAM] = resolution.date_start
+    if resolution.date_end:
+        exec_params[DATE_END_PARAM] = resolution.date_end
+    return run_python_query(spec, exec_params, project.connectors)
+
+
+def _execute_list(
+    resolution: Resolution, project: "Project", params: dict[str, str]
+) -> QueryResult:
+    """Run a ``list`` resolution — a dims-only, ordered, limited projection compiled
+    by the model's semantic backend.
+
+    Mirrors :func:`_execute_semantic`: resolve the accepted column/order spellings to
+    canonical dimension names, build a :class:`SemanticListRef`, compile it through
+    the backend (``build_semantic_list_spec``), register the synthetic spec into the
+    shared ``_python_def_cache``, and run it with the resolution's filters/date range
+    overlaid on the live params. A backend without list support raises
+    ``NotImplementedError`` here → re-raised as :class:`AskListUnsupported` for
+    :func:`answer_question` to degrade to kind ``none``."""
+    handle = project.semantic_models.get(resolution.model)
+    if handle is None:
+        raise AskQueryError(f"unknown semantic model {resolution.model!r}")
+    columns = tuple(
+        handle.dim_lookup[c] for c in resolution.columns if c in handle.dim_lookup
+    )
+    order_by = (
+        handle.dim_lookup.get(resolution.order_by) if resolution.order_by else None
+    )
+    list_ref = SemanticListRef(
+        model=resolution.model,
+        columns=columns,
+        order_by=order_by,
+        desc=resolution.desc,
+        limit=resolution.limit,
+        query_name=semantic_list_query_name(
+            resolution.model, columns, order_by, resolution.desc, resolution.limit
+        ),
+    )
+    try:
+        spec = build_semantic_list_spec(project.semantic_models, list_ref, project.connectors)
+    except NotImplementedError as e:
+        raise AskListUnsupported(str(e)) from e
+
+    if get_python_query_def(spec.name, spec.connector) is None:
+        register_python_query_def(spec.name, spec.connector, spec)
+    resolution.query_name = spec.name
+    resolution.connector = spec.connector
+
     exec_params = dict(params)
     for dim, values in resolution.filters.items():
         exec_params[dim] = ",".join(values)
@@ -961,24 +1169,7 @@ def answer_question(
     # kind "none": the model couldn't route it. Carry the reason as the answer;
     # no data, no chart, no second (billable) LLM call.
     if resolution.kind == "none":
-        payload = {
-            "question": question,
-            "resolved": {
-                "kind": "none",
-                "provenance": resolution.provenance,
-                "query_name": None,
-                "connector": None,
-                "detail": {"reason": resolution.reason},
-            },
-            "columns": None,
-            "rows": None,
-            "chart": None,
-            "answer_html": render_markdown_text(resolution.reason),
-            "answer_text": resolution.reason,
-            "annotations": [],
-            "model": model,
-            "cached": False,
-        }
+        payload = _none_payload(question, resolution, model)
         # Short TTL: a "none" may be a transient resolver misroute, and the ask
         # box never sends refresh — caching it for the full cache_ttl would pin
         # a valid question as "unanswerable" for up to an hour.
@@ -989,8 +1180,18 @@ def answer_question(
         return payload
 
     # 2) Execute. Serialize once — the chart inference classifies the same
-    # browser-facing cells the payload ships.
-    result = execute_resolution(resolution, project, params)
+    # browser-facing cells the payload ships. A `list` routed onto a backend that
+    # can't run one degrades to none here (never a 500, no billable answer call).
+    try:
+        result = execute_resolution(resolution, project, params)
+    except AskListUnsupported as e:
+        resolution = _none(str(e), invalid=False)
+        payload = _none_payload(question, resolution, model)
+        cache_answer(
+            question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), hist_key
+        )
+        _log(project, question, resolution, 0, started, model, cfg, history=hist)
+        return payload
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
 
@@ -1054,6 +1255,32 @@ def answer_question(
     return payload
 
 
+def _none_payload(
+    question: str, resolution: Resolution, model: str
+) -> dict[str, Any]:
+    """The full response payload for a kind ``none`` outcome — the model's reason as
+    the answer, no data / chart / second LLM call. Shared by the resolver-none path
+    and the list-unsupported degrade path so both ship an identical shape."""
+    return {
+        "question": question,
+        "resolved": {
+            "kind": "none",
+            "provenance": resolution.provenance,
+            "query_name": None,
+            "connector": None,
+            "detail": {"reason": resolution.reason},
+        },
+        "columns": None,
+        "rows": None,
+        "chart": None,
+        "answer_html": render_markdown_text(resolution.reason),
+        "answer_text": resolution.reason,
+        "annotations": [],
+        "model": model,
+        "cached": False,
+    }
+
+
 def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
     """The rung-specific fields, for the response's ``resolved.detail``."""
     if resolution.kind == "semantic":
@@ -1063,6 +1290,17 @@ def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
             "by": resolution.by,
             "series": resolution.series,
             "grain": resolution.grain,
+            "filters": resolution.filters,
+            "date_start": resolution.date_start,
+            "date_end": resolution.date_end,
+        }
+    if resolution.kind == "list":
+        return {
+            "model": resolution.model,
+            "columns": resolution.columns,
+            "order_by": resolution.order_by,
+            "desc": resolution.desc,
+            "limit": resolution.limit,
             "filters": resolution.filters,
             "date_start": resolution.date_start,
             "date_end": resolution.date_end,
@@ -1379,7 +1617,9 @@ def build_kept_markdown(
     * ``query`` — the name must still resolve to a real library or Python query.
 
     Only those two rungs are keepable: a raw-``sql`` answer has no named artifact
-    to reference from markdown, so it's refused. Any validation failure — off-catalog
+    to reference from markdown, and a ``list`` answer has no authored component that
+    reconstructs an ordered, limited semantic projection — both are refused. Any
+    validation failure — off-catalog
     metric/dimension/query, unknown kind, sql — raises :class:`ValueError` with a
     reason (the endpoint maps it to a 400). Free-form strings that reach an
     attribute (the question title, inferred ``x``/``y`` columns) are run through
@@ -1392,9 +1632,15 @@ def build_kept_markdown(
     provenance = str((resolved or {}).get("provenance", "") or "").strip()
 
     if kind not in ("semantic", "query"):
+        detail = (
+            "list answers can't be kept yet — no authored component reconstructs an "
+            "ordered, limited semantic projection"
+            if kind == "list"
+            else "raw SQL has no named source"
+        )
         raise ValueError(
             f"cannot keep a {kind or 'missing'!r} answer — only semantic and named-query "
-            "answers reference a re-runnable artifact (raw SQL has no named source)"
+            f"answers reference a re-runnable artifact ({detail})"
         )
 
     heading = " ".join(str(question or "").split())

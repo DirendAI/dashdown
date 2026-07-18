@@ -322,8 +322,12 @@ never fatal. Started on app startup, restarted by `reload_project`, `triggers/` 
 The author-pinned `<Ask />` answers a *fixed* prompt; `dashdown/ask_engine.py` is its runtime
 sibling: an operator types a free-form question (header **ask box**, `POST /_dashdown/api/ask`, or
 `dashdown ask` CLI) and one constrained LLM call routes it onto an existing source via the
-**resolution ladder** — (1) a semantic metric ref (pure-JSON values, no injection surface), (2) a
-named library/python query (params through the one blessed `_substitute_params`), (3) raw SQL **only**
+**resolution ladder** — (1) a semantic metric ref (pure-JSON values, no injection surface), (1b) a
+semantic **list** (`kind: list` — dimensions + order_by + limit compiled by the semantic backends
+themselves, dims-only group-by pushed down with order/limit; detail questions like "last 10
+customers that ordered" need no authored query), (2) a
+named library/python query (params through the one blessed `_substitute_params`; an author-curated
+list query still outranks the generic list rung when its description matches), (3) raw SQL **only**
 behind `ask: allow_sql: true` (default false). The LLM chooses from a **catalog**
 (`build_ask_catalog`: semantic measures/dims + query names/descriptions/params) — never a raw schema;
 an invalid/hallucinated resolution degrades to kind `none` with a reason, **never a 500**. The result
