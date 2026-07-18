@@ -469,7 +469,9 @@ function initOne(el) {
     const resolved = payload.resolved || {};
     if (resolved.kind === "semantic" && payload.semantic_options) {
       renderChips(payload);
-    } else if (resolved.provenance) {
+    } else if (resolved.provenance && resolved.kind !== "none") {
+      // An unresolved answer's provenance is "unresolved: <reason>" — the exact
+      // text the body already shows. Skip the redundant line.
       const prov = document.createElement("div");
       prov.className = "dashdown-ask-box-provenance";
       prov.textContent = resolved.provenance;

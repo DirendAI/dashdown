@@ -16,6 +16,10 @@ orders:
 
   dimensions:
     campaign_id: _.campaign_id
+    # Row-level amount doubles as a dimension so *list* questions can show and
+    # order by it ("the largest orders") — a list rung only speaks dimensions.
+    # Numeric dimensions are legitimate order-grain attributes.
+    amount: _.amount
     order_date:
       expr: _.order_date
       is_time_dimension: true
@@ -28,6 +32,11 @@ orders:
     orders: _.count()
     avg_order_value:
       expr: _.amount.mean()
+      metadata: { format: currency, currency: "$" }
+    # The superlative as an aggregate: "what was the largest order last week"
+    # answers directly as a semantic metric (with the date filter).
+    largest_order:
+      expr: _.amount.max()
       metadata: { format: currency, currency: "$" }
 
   # Joins to campaigns (campaign name/channel) and customers (city) so a chart

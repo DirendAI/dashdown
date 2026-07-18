@@ -218,6 +218,45 @@ def build_ask_catalog(project: "Project") -> dict[str, Any]:
     }
 
 
+# Bounds for the sql_tables schema hint: enough for a real project's core
+# tables, small enough to not swamp the resolver prompt.
+_SCHEMA_HINT_MAX_TABLES = 40
+_SCHEMA_HINT_MAX_COLUMNS = 400
+
+
+def sql_schema_hint(project: "Project") -> dict[str, list[str]] | None:
+    """Best-effort ``{table: [columns...]}`` for the default connector.
+
+    Only ever attached to the catalog when ``ask.allow_sql`` is on: the sql rung
+    is useless blind (a model that can't see table/column names guesses them),
+    and a project that enabled raw SQL has already granted the operator full
+    read access, so showing the schema reveals nothing the flag didn't. Speaks
+    ``information_schema`` (DuckDB-family, postgres, mysql, …); any failure —
+    no default connector, a dialect without information_schema — returns
+    ``None`` and the rung simply stays schema-blind rather than erroring."""
+    connector_name = project.default_connector or ""
+    conn = project.connectors.get(connector_name)
+    if conn is None:
+        return None
+    try:
+        result = conn.query(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "ORDER BY table_name, ordinal_position "
+            f"LIMIT {_SCHEMA_HINT_MAX_COLUMNS}"
+        )
+    except Exception:  # noqa: BLE001 - a hint, never a failure
+        return None
+    tables: dict[str, list[str]] = {}
+    for row in result.rows:
+        if len(row) < 2:
+            continue
+        table, column = str(row[0]), str(row[1])
+        if table not in tables and len(tables) >= _SCHEMA_HINT_MAX_TABLES:
+            continue
+        tables.setdefault(table, []).append(column)
+    return tables or None
+
+
 # --------------------------------------------------------------------------- #
 # Resolver prompt
 # --------------------------------------------------------------------------- #
@@ -255,17 +294,22 @@ RESOLVER_SYSTEM_PROMPT = (
     "`order_by` must be one of the SELECTED `columns` — for 'latest/most recent' "
     "questions always include the model's time dimension in `columns` and order "
     "by it, with `desc: true` for newest/largest first; `limit` is an integer "
-    "1-500 (default 50). A `list` never carries a `metric` — that's `semantic`. If "
-    'nothing in the catalog can answer the question, return kind "none" — and in '
+    "1-500 (default 50). A `list` never carries a `metric` — that's `semantic`. "
+    'Only when NO capability offered here can answer the question, return kind '
+    '"none" — and in '
     "`reason`, say what the catalog CAN answer that comes closest, so the operator "
     "knows what to ask instead. Never invent names."
 )
 
 # Appended to the system prompt only when ask.allow_sql is on (rung 3 opt-in).
 _ALLOW_SQL_CLAUSE = (
-    "\n\nRaw SQL is also permitted for this project when no catalog source fits: "
+    "\n\nRaw SQL is also permitted for this project: "
     '{"kind": "sql", "sql": "SELECT ..."}. Prefer a catalog source whenever one '
-    "answers the question; only reach for raw SQL as a last resort."
+    "answers the question — but when none of them can EXPRESS the question (a "
+    "superlative single row, an ad-hoc join or calculation), PREFER a sql "
+    'resolution over kind "none". The catalog\'s `sql_tables` lists the tables '
+    "and columns raw SQL can reference on the default connector. SELECT/WITH "
+    "statements only."
 )
 
 
@@ -438,9 +482,15 @@ def parse_resolution(
         sql = obj.get("sql")
         if not isinstance(sql, str) or not sql.strip():
             return _none("sql resolution missing a sql string")
+        sql = sql.strip()
+        # Read-only guard (defense in depth on top of the connector's own
+        # permissions): the rung answers questions, it never mutates. A
+        # non-SELECT statement is a validation failure → self-repair applies.
+        if not re.match(r"(?is)^\s*(select|with)\b", sql):
+            return _none("sql resolutions must be a single SELECT/WITH statement")
         return Resolution(
             kind="sql",
-            sql=sql.strip(),
+            sql=sql,
             provenance="raw SQL (ask.allow_sql)",
         )
 
@@ -1141,6 +1191,12 @@ def answer_question(
 
     # 1) Resolve.
     catalog = build_ask_catalog(project)
+    if cfg.allow_sql:
+        # The sql rung is useless blind — arm it with the default connector's
+        # table/column names (only ever shown when the project opted into SQL).
+        schema = sql_schema_hint(project)
+        if schema:
+            catalog["sql_tables"] = schema
     system, user = build_resolver_prompt(catalog, question, cfg.allow_sql, hist)
     try:
         raw = adapter.complete(system, user)

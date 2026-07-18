@@ -849,3 +849,50 @@ def test_keep_markdown_emits_series(tmp_path):
     assert "series={sales.status}" in md
     assert "by={sales.region}" in md
     assert "<Ask metric={sales.revenue} by={sales.region} series={sales.status}" in md
+
+
+# --------------------------------------------------------------------------- #
+# SQL rung: schema hint + SELECT-only guard
+# --------------------------------------------------------------------------- #
+class TestSqlRungArming:
+    def test_schema_hint_in_prompt_only_when_allow_sql(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "A.",
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  allow_sql: true\n")
+        client.post("/_dashdown/api/ask", json={"question": "schema probe on"})
+        assert "sql_tables" in fake.calls[0][1]
+        # The CSV project's DuckDB view shows up with its columns.
+        assert "sales" in fake.calls[0][1]
+
+    def test_no_schema_hint_when_sql_disabled(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "A.",
+        )
+        client = _client(tmp_path, fake=fake)
+        client.post("/_dashdown/api/ask", json={"question": "schema probe off"})
+        assert "sql_tables" not in fake.calls[0][1]
+
+    def test_non_select_sql_is_rejected_with_repair(self, tmp_path):
+        # A mutating statement is a validation failure: one self-repair retry,
+        # then none. Nothing executes.
+        fake = FakeAdapter(
+            '{"kind": "sql", "sql": "DROP TABLE sales"}',
+            '{"kind": "sql", "sql": "DELETE FROM sales"}',
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  allow_sql: true\n")
+        body = client.post("/_dashdown/api/ask", json={"question": "drop it"}).json()
+        assert body["resolved"]["kind"] == "none"
+        assert "SELECT" in body["answer_text"]
+        # The data survived: an honest query still answers.
+        fake2 = FakeAdapter(
+            '{"kind": "sql", "sql": "WITH t AS (SELECT region FROM sales) '
+            'SELECT * FROM t"}',
+            "Fine.",
+        )
+        second = tmp_path / "second"
+        second.mkdir()
+        client2 = _client(second, fake=fake2, extra_yaml="ask:\n  allow_sql: true\n")
+        body2 = client2.post("/_dashdown/api/ask", json={"question": "regions raw"}).json()
+        assert body2["resolved"]["kind"] == "sql"
+        assert len(body2["rows"]) == 3
