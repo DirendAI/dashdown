@@ -127,6 +127,12 @@ def rate_limited(limit: int) -> bool:
 # The valid resolution kinds the parser recognizes; anything else degrades to none.
 _KINDS = frozenset({"semantic", "list", "query", "sql", "none"})
 
+# Chart types an operator may explicitly ask for ("as a funnel", "pie chart
+# of…"). All of them consume the same {x: label, y: value} config the panel
+# chart already speaks (chart.js buildChartOption), so honoring a preference
+# is a type override — applied only when the result's shape supports it.
+CHART_PREFS = frozenset({"line", "bar", "scatter", "pie", "funnel", "treemap"})
+
 # Bounds for the list rung's row cap — a hallucinated/absent limit is clamped here
 # (the request feeds both the model payload and the wire).
 MIN_LIST_LIMIT = 1
@@ -295,6 +301,12 @@ RESOLVER_SYSTEM_PROMPT = (
     "questions always include the model's time dimension in `columns` and order "
     "by it, with `desc: true` for newest/largest first; `limit` is an integer "
     "1-500 (default 50). A `list` never carries a `metric` — that's `semantic`. "
+    "Any routed resolution may additionally carry "
+    '"chart": one of line|bar|scatter|pie|funnel|treemap — set it ONLY when the '
+    "operator asked for a specific chart type ('as a funnel', 'pie chart of…'); "
+    "otherwise omit it and a sensible chart is inferred. A chart wish is never a "
+    "reason to refuse: resolve the DATA the question needs and let `chart` carry "
+    "the presentation. "
     'Only when NO capability offered here can answer the question, return kind '
     '"none" — and in '
     "`reason`, say what the catalog CAN answer that comes closest, so the operator "
@@ -380,6 +392,9 @@ class Resolution:
     metric: str | None = None
     by: str | None = None
     series: str | None = None
+    # Presentation wish ("as a funnel") — any kind may carry one; honored by
+    # resolution_chart_shape only when the result's shape supports it.
+    chart_pref: str | None = None
     grain: str | None = None
     filters: dict[str, list[str]] = field(default_factory=dict)
     date_start: str = ""
@@ -488,19 +503,29 @@ def parse_resolution(
         # non-SELECT statement is a validation failure → self-repair applies.
         if not re.match(r"(?is)^\s*(select|with)\b", sql):
             return _none("sql resolutions must be a single SELECT/WITH statement")
-        return Resolution(
+        res = Resolution(
             kind="sql",
             sql=sql,
             provenance="raw SQL (ask.allow_sql)",
         )
+    elif kind == "query":
+        res = _validate_query(obj, project)
+    elif kind == "list":
+        res = _validate_list(obj, project)
+    else:
+        res = _validate_semantic(obj, project)
 
-    if kind == "query":
-        return _validate_query(obj, project)
+    # Presentation wish, valid on every routed kind ("pie chart of…", "as a
+    # funnel"). Soft: an off-list value is dropped, never fatal.
+    if res.kind != "none":
+        res.chart_pref = _parse_chart_pref(obj)
+    return res
 
-    if kind == "list":
-        return _validate_list(obj, project)
 
-    return _validate_semantic(obj, project)
+def _parse_chart_pref(obj: dict[str, Any]) -> str | None:
+    pref = obj.get("chart")
+    pref = pref.strip().lower() if isinstance(pref, str) and pref.strip() else None
+    return pref if pref in CHART_PREFS else None
 
 
 def _validate_query(obj: dict[str, Any], project: "Project") -> Resolution:
@@ -1026,14 +1051,20 @@ def resolution_chart_shape(
     middle one and draw duplicate x categories. Here the resolution *names* the
     roles, so the shape carries ``series_by`` (the client config key that splits
     one metric into a colored series per value) and the annotation context gets
-    the same split. Everything else falls through to ``infer_chart_shape``."""
+    the same split. Everything else falls through to ``infer_chart_shape``.
+
+    An explicit operator chart wish (``resolution.chart_pref`` — "as a funnel")
+    overrides the inferred *type* when the shape supports it: every pref speaks
+    the same ``{x, y}`` config, but pie/funnel/treemap need a single unsplit
+    category+value pairing, so a preference is dropped (never an error) when a
+    ``series_by`` split is present or no chartable shape exists at all."""
     if (
         resolution.kind != "semantic"
         or not resolution.series
         or not resolution.by
         or not resolution.metric
     ):
-        return infer_chart_shape(payload)
+        return _apply_chart_pref(infer_chart_shape(payload), resolution.chart_pref)
     columns = payload["columns"]
     rows = payload["rows"]
     if len(rows) <= 1 or not columns:
@@ -1042,12 +1073,35 @@ def resolution_chart_shape(
     series_col = _find_col(columns, resolution.series)
     y = _find_col(columns, resolution.metric)
     if not (x and series_col and y) or len({x, series_col, y}) != 3:
-        return infer_chart_shape(payload)
+        return _apply_chart_pref(infer_chart_shape(payload), resolution.chart_pref)
     x_idx = columns.index(x)
     x_kind = _classify([row[x_idx] if x_idx < len(row) else None for row in rows[:50]])
     if x_kind == "temporal":
-        return {"type": "line", "x": x, "y": y, "series_by": series_col, "sort_by": x}
-    return {"type": "bar", "x": x, "y": y, "series_by": series_col}
+        shape = {"type": "line", "x": x, "y": y, "series_by": series_col, "sort_by": x}
+    else:
+        shape = {"type": "bar", "x": x, "y": y, "series_by": series_col}
+    # Pie + series is the one split-compatible pref (faceted small multiples);
+    # line/bar swap freely; funnel/treemap can't express a split — dropped.
+    pref = resolution.chart_pref
+    if pref in ("line", "bar", "pie"):
+        shape["type"] = pref
+    return shape
+
+
+def _apply_chart_pref(
+    shape: dict[str, str] | None, pref: str | None
+) -> dict[str, str] | None:
+    """Overlay an operator chart wish on an inferred shape (soft — a pref that
+    the shape can't express leaves the inference untouched)."""
+    if shape is None or pref is None or pref == shape.get("type"):
+        return shape
+    out = dict(shape)
+    out["type"] = pref
+    if pref in ("pie", "funnel", "treemap"):
+        # Category+value charts: an ordering hint is meaningless (funnel sorts
+        # itself; pie shows shares).
+        out.pop("sort_by", None)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -1340,7 +1394,7 @@ def _none_payload(
 def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
     """The rung-specific fields, for the response's ``resolved.detail``."""
     if resolution.kind == "semantic":
-        return {
+        detail: dict[str, Any] = {
             "model": resolution.model,
             "metric": resolution.metric,
             "by": resolution.by,
@@ -1350,8 +1404,8 @@ def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
             "date_start": resolution.date_start,
             "date_end": resolution.date_end,
         }
-    if resolution.kind == "list":
-        return {
+    elif resolution.kind == "list":
+        detail = {
             "model": resolution.model,
             "columns": resolution.columns,
             "order_by": resolution.order_by,
@@ -1361,11 +1415,15 @@ def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
             "date_start": resolution.date_start,
             "date_end": resolution.date_end,
         }
-    if resolution.kind == "query":
-        return {"name": resolution.name, "params": resolution.params}
-    if resolution.kind == "sql":
-        return {"sql": resolution.sql}
-    return {}
+    elif resolution.kind == "query":
+        detail = {"name": resolution.name, "params": resolution.params}
+    elif resolution.kind == "sql":
+        detail = {"sql": resolution.sql}
+    else:
+        return {}
+    if resolution.chart_pref:
+        detail["chart"] = resolution.chart_pref
+    return detail
 
 
 def _log(
@@ -1483,6 +1541,9 @@ def _spec_fingerprint(resolution: Resolution) -> str:
             "series": resolution.series,
             "grain": resolution.grain,
             "filters": resolution.filters,
+            # A different chart = different annotations, so a different cached
+            # commentary is correct, not a collision.
+            "chart": resolution.chart_pref,
         },
         sort_keys=True,
         default=str,
@@ -1540,6 +1601,7 @@ def execute_spec(
     resolution = _validate_semantic(obj, project)
     if resolution.kind == "none":
         raise ValueError(f"invalid semantic spec: {resolution.reason}")
+    resolution.chart_pref = _parse_chart_pref({"chart": spec.get("chart")})
 
     spec_key = _spec_fingerprint(resolution)
 
@@ -1637,7 +1699,14 @@ def execute_spec(
 # "Keep on this page" — turn a liked runtime answer into authored markdown
 # --------------------------------------------------------------------------- #
 # The chart `type` the client inferred → the PascalCase component that renders it.
-_KEEP_CHART_COMPONENTS = {"line": "LineChart", "bar": "BarChart", "scatter": "ScatterChart"}
+_KEEP_CHART_COMPONENTS = {
+    "line": "LineChart",
+    "bar": "BarChart",
+    "scatter": "ScatterChart",
+    "pie": "PieChart",
+    "funnel": "FunnelChart",
+    "treemap": "TreemapChart",
+}
 
 
 def _attr_escape(value: Any) -> str:

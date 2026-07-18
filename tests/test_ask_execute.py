@@ -896,3 +896,107 @@ class TestSqlRungArming:
         body2 = client2.post("/_dashdown/api/ask", json={"question": "regions raw"}).json()
         assert body2["resolved"]["kind"] == "sql"
         assert len(body2["rows"]) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Chart preference: "as a funnel" is presentation, never a refusal
+# --------------------------------------------------------------------------- #
+class TestChartPref:
+    def test_funnel_pref_overrides_inferred_bar(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}, "chart": "funnel"}',
+            "Regions as a funnel.",
+        )
+        client = _client(tmp_path, fake=fake)
+        body = client.post(
+            "/_dashdown/api/ask", json={"question": "funnel of revenue by region"}
+        ).json()
+        assert body["resolved"]["kind"] == "query"
+        assert body["resolved"]["detail"]["chart"] == "funnel"
+        assert body["chart"]["type"] == "funnel"
+        # Same x/y roles; ordering hint dropped (funnel sorts itself).
+        assert body["chart"]["x"] == "region" and body["chart"]["y"] == "total"
+        assert "sort_by" not in body["chart"]
+
+    def test_invalid_pref_is_soft_dropped(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}, "chart": "hologram"}',
+            "A.",
+        )
+        client = _client(tmp_path, fake=fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "hologram pls"}).json()
+        assert body["chart"]["type"] == "bar"  # inference kept
+        assert "chart" not in body["resolved"]["detail"]
+
+    @needs_bsl
+    def test_funnel_pref_dropped_on_series_split(self, tmp_path):
+        # funnel can't express a split — the pref is dropped, pie would be kept.
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "series": "status", "chart": "funnel"}',
+            "Split.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "x"}).json()
+        assert body["chart"]["type"] == "bar"
+        assert body["chart"]["series_by"]
+
+    @needs_bsl
+    def test_pie_pref_survives_series_as_facets(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "series": "status", "chart": "pie"}',
+            "Facets.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "pies"}).json()
+        assert body["chart"]["type"] == "pie"
+
+    @needs_bsl
+    def test_execute_spec_chart_pref_round_trip(self, tmp_path):
+        fake = FakeAdapter("never")
+        client = _semantic_client(tmp_path, fake)
+        spec = dict(_SEMANTIC_SPEC, chart="pie")
+        body = client.post(
+            "/_dashdown/api/ask/execute",
+            json={"question": "q", "spec": spec, "commentary": False},
+        ).json()
+        assert body["chart"]["type"] == "pie"
+        assert body["resolved"]["detail"]["chart"] == "pie"
+        assert fake.calls == []
+
+    @needs_bsl
+    def test_keep_maps_funnel_component(self, tmp_path):
+        import shutil as _sh
+
+        from dashdown.ask_engine import build_kept_markdown
+        from dashdown.project import load_project
+
+        dst = tmp_path / "sem_proj"
+        _sh.copytree(
+            _SEMANTIC_EXAMPLE, dst,
+            ignore=_sh.ignore_patterns("__pycache__", "*.duckdb*", "sources.yaml"),
+        )
+        (dst / "sources.yaml").write_text("main:\n  type: csv\n  directory: data\n")
+        proj = load_project(dst)
+        try:
+            md = build_kept_markdown(
+                proj,
+                "Revenue funnel by region?",
+                {
+                    "kind": "semantic",
+                    "provenance": "semantic: sales.revenue by region",
+                    "detail": {"model": "sales", "metric": "revenue", "by": "region",
+                               "grain": None, "filters": {}},
+                },
+                {"type": "funnel", "x": "sales.region", "y": "sales.revenue"},
+            )
+        finally:
+            proj.close()
+        assert "<FunnelChart " in md
+
+    def test_prompt_offers_chart_pref(self):
+        from dashdown.ask_engine import RESOLVER_SYSTEM_PROMPT
+
+        assert "funnel" in RESOLVER_SYSTEM_PROMPT
+        assert "never a reason to refuse" in RESOLVER_SYSTEM_PROMPT

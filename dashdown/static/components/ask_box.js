@@ -617,6 +617,7 @@ function initOne(el) {
       by: detail.by || null,
       series: detail.series || null,
       grain: detail.grain || null,
+      chart: detail.chart || "",
       filters: {},
     };
     const rawFilters = detail.filters || {};
@@ -698,6 +699,23 @@ function initOne(el) {
       }
     }
 
+    // chart — the presentation wish ("as a funnel"). "auto" clears it and the
+    // server re-infers; an incompatible wish is soft-dropped server-side.
+    const chartTypes = ["line", "bar", "scatter", "pie", "funnel", "treemap"];
+    row.appendChild(
+      makeChipSelect(
+        "chart",
+        [{ value: "", text: "auto" }].concat(
+          chartTypes.map((t) => ({ value: t, text: t }))
+        ),
+        chipState.chart || "",
+        (v) => {
+          chipState.chart = v || "";
+          onChipChange();
+        }
+      )
+    );
+
     // Existing filters as removable chips.
     for (const dim of Object.keys(chipState.filters)) {
       row.appendChild(makeFilterChip(dim, chipState.filters[dim]));
@@ -734,6 +752,7 @@ function initOne(el) {
       // A series without a primary grouping is meaningless — dropped with by.
       series: chipState.by ? chipState.series || null : null,
       grain: byIsTime ? chipState.grain || null : null,
+      chart: chipState.chart || null,
       filters: chipState.filters || {},
     };
   }
