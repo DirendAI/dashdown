@@ -481,3 +481,172 @@ class TestHistorySanitization:
         assert "q0" not in user and "q1" not in user and "q2" not in user
         for i in range(3, 9):
             assert f"q{i}" in user
+
+
+# --------------------------------------------------------------------------- #
+# Forgiving coercion + series (the "by: 'name,channel'" bug) and self-repair
+# --------------------------------------------------------------------------- #
+@needs_bsl
+class TestByCoercionAndSeries:
+    def test_comma_joined_by_splits_into_by_and_series(self, tmp_path):
+        # The real-world Mistral failure: two groupings packed into `by`.
+        # The route must survive: first valid dim → by, second → series.
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region,status", "filters": {}}',
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        r = client.post("/_dashdown/api/ask", json={"question": "revenue by region and status"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved"]["kind"] == "semantic"
+        assert body["resolved"]["detail"]["by"] == "region"
+        assert body["resolved"]["detail"]["series"] == "status"
+        assert "per status" in body["resolved"]["provenance"]
+        # The chart carries the series split for the client + annotations.
+        if body["chart"] is not None:
+            assert body["chart"]["series_by"].split(".")[-1] == "status"
+
+    def test_list_valued_by_splits_too(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": ["region", "status"], "filters": {}}',
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        r = client.post("/_dashdown/api/ask", json={"question": "split it"})
+        body = r.json()
+        assert body["resolved"]["detail"]["by"] == "region"
+        assert body["resolved"]["detail"]["series"] == "status"
+
+    def test_explicit_series_field(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "series": "status", "filters": {}}',
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "by region per status"}).json()
+        assert body["resolved"]["detail"]["by"] == "region"
+        assert body["resolved"]["detail"]["series"] == "status"
+
+    def test_invalid_series_is_dropped_not_fatal(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "series": "ghost", "filters": {}}',
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "x"}).json()
+        assert body["resolved"]["kind"] == "semantic"
+        assert body["resolved"]["detail"]["series"] is None
+
+    def test_metric_comma_takes_first_valid(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue,orders", '
+            '"by": "region", "filters": {}}',
+            "Answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "x"}).json()
+        assert body["resolved"]["detail"]["metric"] == "revenue"
+
+    def test_all_unknown_by_is_still_none(self, tmp_path):
+        # Forgiveness has a floor: when NOTHING in `by` is a real dimension the
+        # route degrades (and, with the fallback exhausted, stays none).
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "ghost,phantom", "filters": {}}',
+        )
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "x"}).json()
+        assert body["resolved"]["kind"] == "none"
+
+    def test_execute_spec_accepts_series(self, tmp_path):
+        fake = FakeAdapter("never called")
+        client = _semantic_client(tmp_path, fake)
+        spec = dict(_SEMANTIC_SPEC, series="status")
+        r = client.post(
+            "/_dashdown/api/ask/execute",
+            json={"question": "q", "spec": spec, "commentary": False},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved"]["detail"]["series"] == "status"
+        assert fake.calls == []
+
+
+@needs_bsl
+class TestSelfRepair:
+    def test_invalid_resolution_gets_one_retry(self, tmp_path):
+        # First resolver reply is off-catalog → one corrective retry (with the
+        # error quoted back) → valid → answered. 3 calls total.
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "ghost_metric"}',
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "filters": {}}',
+            "Repaired answer.",
+        )
+        client = _semantic_client(tmp_path, fake)
+        r = client.post("/_dashdown/api/ask", json={"question": "revenue by region"})
+        body = r.json()
+        assert body["resolved"]["kind"] == "semantic"
+        assert len(fake.calls) == 3
+        # The repair prompt quotes the validation error.
+        assert "previous response was invalid" in fake.calls[1][1]
+        assert "ghost_metric" in fake.calls[1][1]
+
+    def test_still_invalid_after_retry_degrades_to_none(self, tmp_path):
+        fake = FakeAdapter("garbage one", "garbage two")
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "x"}).json()
+        assert body["resolved"]["kind"] == "none"
+        assert len(fake.calls) == 2  # resolve + one repair, no answer call
+
+    def test_explicit_none_is_not_retried(self, tmp_path):
+        # An honest "I can't answer this" must not be re-billed.
+        fake = FakeAdapter('{"kind": "none", "reason": "not in catalog"}')
+        client = _semantic_client(tmp_path, fake)
+        body = client.post("/_dashdown/api/ask", json={"question": "weather?"}).json()
+        assert body["resolved"]["kind"] == "none"
+        assert len(fake.calls) == 1
+
+
+@needs_bsl
+def test_keep_markdown_emits_series(tmp_path):
+    from dashdown.ask_engine import build_kept_markdown
+    from dashdown.project import load_project
+
+    dst = tmp_path / "sem_proj"
+    shutil.copytree(
+        _SEMANTIC_EXAMPLE,
+        dst,
+        ignore=shutil.ignore_patterns("__pycache__", "*.duckdb*", "sources.yaml"),
+    )
+    (dst / "sources.yaml").write_text("main:\n  type: csv\n  directory: data\n")
+    proj = load_project(dst)
+    try:
+        md = build_kept_markdown(
+            proj,
+            "Revenue by region per status?",
+            {
+                "kind": "semantic",
+                "provenance": "semantic: sales.revenue by region per status",
+                "detail": {
+                    "model": "sales",
+                    "metric": "revenue",
+                    "by": "region",
+                    "series": "status",
+                    "grain": None,
+                    "filters": {},
+                },
+            },
+            {"type": "bar", "x": "sales.region", "y": "sales.revenue",
+             "series_by": "sales.status"},
+        )
+    finally:
+        proj.close()
+    assert "series={sales.status}" in md
+    assert "by={sales.region}" in md
+    assert "<Ask metric={sales.revenue} by={sales.region} series={sales.status}" in md

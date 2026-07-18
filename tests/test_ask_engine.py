@@ -306,7 +306,12 @@ class TestAskEndpoint:
         assert len(body["rows"]) == 3
 
     def test_allow_sql_off_rejects_sql_kind(self, tmp_path):
-        fake = FakeAdapter('{"kind": "sql", "sql": "SELECT 1"}')
+        # Both replies pick the forbidden sql rung: the validation failure gets
+        # ONE self-repair retry (quoting the error), then degrades to none.
+        fake = FakeAdapter(
+            '{"kind": "sql", "sql": "SELECT 1"}',
+            '{"kind": "sql", "sql": "SELECT 1"}',
+        )
         client = _client(tmp_path, fake=fake)
         r = client.post("/_dashdown/api/ask", json={"question": "raw please"})
         assert r.status_code == 200
@@ -315,8 +320,9 @@ class TestAskEndpoint:
         assert body["columns"] is None
         assert body["chart"] is None
         assert "allow_sql" in body["answer_html"] or "allow_sql" in body["answer_text"]
-        # No second (answer) LLM call for a `none` resolution.
-        assert len(fake.calls) == 1
+        # Resolve + one repair retry; never an answer call for a `none`.
+        assert len(fake.calls) == 2
+        assert "previous response was invalid" in fake.calls[1][1]
 
     def test_allow_sql_on_runs_raw_sql(self, tmp_path):
         fake = FakeAdapter(
@@ -333,14 +339,19 @@ class TestAskEndpoint:
         assert len(fake.calls) == 2
 
     def test_invalid_json_degrades_to_none(self, tmp_path):
-        fake = FakeAdapter("Sorry, I cannot help with that.")
+        # Non-JSON output is a validation failure → one self-repair retry, then
+        # (still non-JSON) degrades to none. Two resolver calls, no answer call.
+        fake = FakeAdapter(
+            "Sorry, I cannot help with that.",
+            "Still not JSON, sorry.",
+        )
         client = _client(tmp_path, fake=fake)
         r = client.post("/_dashdown/api/ask", json={"question": "??"})
         assert r.status_code == 200
         body = r.json()
         assert body["resolved"]["kind"] == "none"
         assert body["answer_text"]  # the model's reason rides in the answer
-        assert len(fake.calls) == 1
+        assert len(fake.calls) == 2
 
     def test_none_is_cached_only_briefly(self, tmp_path):
         # A "none" may be a transient resolver misroute; caching it for the full
@@ -573,8 +584,11 @@ class TestSemanticResolution:
         assert body["resolved"]["detail"]["grain"] is None
 
     def test_unknown_metric_is_none(self, tmp_path):
+        # An off-catalog metric is a validation failure → one self-repair retry
+        # (both replies hallucinate here), then none. Two resolver calls.
         fake = FakeAdapter(
-            '{"kind": "semantic", "model": "sales", "metric": "ghost", "by": "region"}'
+            '{"kind": "semantic", "model": "sales", "metric": "ghost", "by": "region"}',
+            '{"kind": "semantic", "model": "sales", "metric": "ghost", "by": "region"}',
         )
         app = create_app(_semantic_project(tmp_path))
         app.state.project.llm_adapter = fake
@@ -582,7 +596,7 @@ class TestSemanticResolution:
         r = client.post("/_dashdown/api/ask", json={"question": "ghost metric"})
         assert r.status_code == 200
         assert r.json()["resolved"]["kind"] == "none"
-        assert len(fake.calls) == 1
+        assert len(fake.calls) == 2
 
 
 # --------------------------------------------------------------------------- #

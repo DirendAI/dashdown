@@ -209,11 +209,15 @@ RESOLVER_SYSTEM_PROMPT = (
     "Output ONLY the JSON object — no prose, no explanation, no markdown code "
     "fences. Use one of these shapes:\n\n"
     '  {"kind": "semantic", "model": "<model>", "metric": "<measure>", '
-    '"by": "<dimension or empty>", "grain": "<grain or empty>", '
+    '"by": "<dimension or empty>", "series": "<second dimension or empty>", '
+    '"grain": "<grain or empty>", '
     '"filters": {"<dimension>": ["value", ...]}, "date_start": "", "date_end": ""}\n'
     '  {"kind": "query", "name": "<query name>", "params": {"<param>": "<value>"}}\n'
     '  {"kind": "none", "reason": "<why the catalog cannot answer this>"}\n\n'
-    "Rules: `metric` and `by` must be names listed under the chosen model; `grain` "
+    "Rules: `metric`, `by`, and `series` must be names listed under the chosen "
+    "model. `by` is exactly ONE dimension — when the question needs a second "
+    "grouping (e.g. revenue by week split per channel), put the second dimension "
+    "in `series`, never a comma-joined pair. `grain` "
     "must be one of the model's grains and only makes sense with a time-dimension "
     "`by`; `filters` keys must be the model's dimensions. `name` must be a query "
     "listed in the catalog. If nothing in the catalog can answer the question, "
@@ -286,10 +290,15 @@ class Resolution:
     kind: str
     provenance: str = ""
     reason: str = ""
+    # True when this "none" came from a *validation failure* of a non-none
+    # resolution (vs the model explicitly declaring it can't answer) — the
+    # signal the one-shot self-repair retry keys on.
+    invalid: bool = False
     # semantic
     model: str | None = None
     metric: str | None = None
     by: str | None = None
+    series: str | None = None
     grain: str | None = None
     filters: dict[str, list[str]] = field(default_factory=dict)
     date_start: str = ""
@@ -349,8 +358,14 @@ def _json_candidates(text: str):
                     break
 
 
-def _none(reason: str) -> Resolution:
-    return Resolution(kind="none", reason=reason, provenance=f"unresolved: {reason}")
+def _none(reason: str, *, invalid: bool = True) -> Resolution:
+    """An unresolved outcome. ``invalid=True`` (the default — every validation
+    failure) marks it retryable by the self-repair pass; the model *explicitly*
+    answering kind "none" passes ``invalid=False`` (retrying an honest "I can't
+    answer this" would just re-bill for the same answer)."""
+    return Resolution(
+        kind="none", reason=reason, provenance=f"unresolved: {reason}", invalid=invalid
+    )
 
 
 def parse_resolution(
@@ -371,7 +386,9 @@ def parse_resolution(
         return _none(f"unknown resolution kind {kind!r}")
 
     if kind == "none":
-        return _none(str(obj.get("reason", "") or "no matching data source"))
+        return _none(
+            str(obj.get("reason", "") or "no matching data source"), invalid=False
+        )
 
     if kind == "sql":
         if not allow_sql:
@@ -408,21 +425,57 @@ def _validate_query(obj: dict[str, Any], project: "Project") -> Resolution:
     return Resolution(kind="query", name=name, params=params, provenance=prov)
 
 
+def _candidate_names(value: Any) -> list[str]:
+    """Normalize a possibly list-valued / comma-joined field into name candidates.
+
+    Real models routinely return ``"name,channel"`` or ``["name", "channel"]``
+    for a single-name field when the question implies two of something. The
+    grammar says one name — but throwing the whole route away over packaging is
+    exactly the kind of rigidity the forgiveness policy exists to avoid, so the
+    validator splits and picks rather than failing."""
+    if isinstance(value, list):
+        parts = [str(v) for v in value]
+    elif isinstance(value, str):
+        parts = value.split(",")
+    else:
+        return []
+    return [p.strip() for p in parts if p.strip()]
+
+
 def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
     model = obj.get("model")
     handle = project.semantic_models.get(model) if isinstance(model, str) else None
     if handle is None:
         return _none(f"unknown semantic model {model!r}")
 
-    metric = obj.get("metric")
-    if not isinstance(metric, str) or metric.strip() not in handle.measure_lookup:
-        return _none(f"unknown metric {metric!r} on model {model!r}")
-    metric = metric.strip()
+    # Metric: first candidate that exists on the model (a comma/list-valued
+    # metric keeps its first valid name — multi-metric asks are a follow-up).
+    metric_candidates = _candidate_names(obj.get("metric"))
+    metric = next(
+        (m for m in metric_candidates if m in handle.measure_lookup), None
+    )
+    if metric is None:
+        return _none(f"unknown metric {obj.get('metric')!r} on model {model!r}")
 
-    by = obj.get("by")
-    by = by.strip() if isinstance(by, str) and by.strip() else None
-    if by is not None and by not in handle.dim_lookup:
-        return _none(f"unknown dimension {by!r} on model {model!r}")
+    # by / series: the grammar wants ONE dimension in `by` and an optional
+    # second in `series` — but a model asking for two groupings often packs
+    # them into `by` ("name,channel"). Split: first valid dimension → by,
+    # next distinct valid one → series (unless an explicit valid `series`
+    # was given); anything unknown is reported only if NOTHING valid remains.
+    by_candidates = _candidate_names(obj.get("by"))
+    dims = [d for d in by_candidates if d in handle.dim_lookup]
+    if by_candidates and not dims:
+        return _none(
+            f"unknown dimension {obj.get('by')!r} on model {model!r}"
+        )
+    by = dims[0] if dims else None
+
+    series_candidates = _candidate_names(obj.get("series"))
+    series = next(
+        (s for s in series_candidates if s in handle.dim_lookup and s != by), None
+    )
+    if series is None and len(dims) > 1:
+        series = next((d for d in dims[1:] if d != by), None)
 
     grain = obj.get("grain")
     grain = grain.strip().lower() if isinstance(grain, str) and grain.strip() else None
@@ -458,6 +511,8 @@ def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
     prov = f"semantic: {model}.{metric}"
     if by:
         prov += f" by {by}"
+    if series:
+        prov += f" per {series}"
     if grain:
         prov += f" ({grain})"
     if filters:
@@ -469,6 +524,7 @@ def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
         model=model,
         metric=metric,
         by=by,
+        series=series,
         grain=grain,
         filters=filters,
         date_start=date_start,
@@ -517,8 +573,15 @@ def _execute_semantic(
 ) -> QueryResult:
     metric_ref = f"{resolution.model}.{resolution.metric}"
     by_ref = f"{resolution.model}.{resolution.by}" if resolution.by else None
+    series_ref = (
+        f"{resolution.model}.{resolution.series}" if resolution.series else None
+    )
     ref = resolve_ref(
-        project.semantic_models, metric_ref, by_ref, grain=resolution.grain
+        project.semantic_models,
+        metric_ref,
+        by_ref,
+        series_ref,
+        grain=resolution.grain,
     )
     spec = build_semantic_spec(project.semantic_models, ref, project.connectors)
     # Register so a follow-up data fetch by the synthetic name resolves too (same
@@ -679,6 +742,50 @@ def infer_chart_shape(payload: dict[str, Any]) -> dict[str, str] | None:
     return {"type": "bar", "x": x, "y": y}
 
 
+def _find_col(columns: list[str], name: str) -> str | None:
+    """Match a semantic name to a result column (exact, else by last segment —
+    semantic results emit prefixed columns like ``orders.campaign_id``)."""
+    short = name.split(".")[-1]
+    for c in columns:
+        if c == name or c.split(".")[-1] == short:
+            return c
+    return None
+
+
+def resolution_chart_shape(
+    resolution: Resolution, payload: dict[str, Any]
+) -> dict[str, str] | None:
+    """Chart shape for an executed resolution — series-aware for semantic ones.
+
+    A semantic resolution with a ``series`` dimension yields three columns
+    (by, series, metric); the generic ``infer_chart_shape`` would ignore the
+    middle one and draw duplicate x categories. Here the resolution *names* the
+    roles, so the shape carries ``series_by`` (the client config key that splits
+    one metric into a colored series per value) and the annotation context gets
+    the same split. Everything else falls through to ``infer_chart_shape``."""
+    if (
+        resolution.kind != "semantic"
+        or not resolution.series
+        or not resolution.by
+        or not resolution.metric
+    ):
+        return infer_chart_shape(payload)
+    columns = payload["columns"]
+    rows = payload["rows"]
+    if len(rows) <= 1 or not columns:
+        return None
+    x = _find_col(columns, resolution.by)
+    series_col = _find_col(columns, resolution.series)
+    y = _find_col(columns, resolution.metric)
+    if not (x and series_col and y) or len({x, series_col, y}) != 3:
+        return infer_chart_shape(payload)
+    x_idx = columns.index(x)
+    x_kind = _classify([row[x_idx] if x_idx < len(row) else None for row in rows[:50]])
+    if x_kind == "temporal":
+        return {"type": "line", "x": x, "y": y, "series_by": series_col, "sort_by": x}
+    return {"type": "bar", "x": x, "y": y, "series_by": series_col}
+
+
 # --------------------------------------------------------------------------- #
 # Answer cache: (normalized question, frozen params) -> full response payload
 # --------------------------------------------------------------------------- #
@@ -827,6 +934,24 @@ def answer_question(
         raise AskLLMError(f"{type(e).__name__}: {e}") from e
     resolution = parse_resolution(raw, project, cfg.allow_sql)
 
+    # One-shot self-repair: a resolution that *failed validation* (an off-catalog
+    # name, malformed JSON — `invalid`, as opposed to the model explicitly
+    # declaring it can't answer) gets exactly one corrective retry with the
+    # validation error quoted back. Small models misformat far more often than
+    # they misunderstand; one extra call only on failures beats pinning the
+    # question as "unanswerable".
+    if resolution.kind == "none" and resolution.invalid:
+        repair_user = (
+            user
+            + f"\n\nYour previous response was invalid: {resolution.reason}. "
+            "Return a corrected JSON resolution using only names from the catalog."
+        )
+        try:
+            raw = adapter.complete(system, repair_user)
+        except Exception as e:  # noqa: BLE001
+            raise AskLLMError(f"{type(e).__name__}: {e}") from e
+        resolution = parse_resolution(raw, project, cfg.allow_sql)
+
     # kind "none": the model couldn't route it. Carry the reason as the answer;
     # no data, no chart, no second (billable) LLM call.
     if resolution.kind == "none":
@@ -861,13 +986,18 @@ def answer_question(
     # browser-facing cells the payload ships.
     result = execute_resolution(resolution, project, params)
     serialized = serialize_result(result)
-    chart = infer_chart_shape(serialized)
+    chart = resolution_chart_shape(resolution, serialized)
 
     # 3) Answer — reuse the exact <Ask /> generation path. A chart shape means a
     # ChartContext, so generate_answer runs the annotation protocol for it.
     chart_ctx: ChartContext | None = None
     if chart is not None:
-        chart_ctx = build_chart_context(chart["type"], x=chart["x"], y=chart["y"])
+        chart_ctx = build_chart_context(
+            chart["type"],
+            x=chart["x"],
+            y=chart["y"],
+            series_by=chart.get("series_by"),
+        )
     # When this ask continues a session, fold the prior *questions* (only — no
     # resolutions, to keep tokens down) into the answer prompt so the commentary
     # reads in context. Rides through build_ask_prompt unchanged (llm.py untouched).
@@ -925,6 +1055,7 @@ def _resolution_detail(resolution: Resolution) -> dict[str, Any]:
             "model": resolution.model,
             "metric": resolution.metric,
             "by": resolution.by,
+            "series": resolution.series,
             "grain": resolution.grain,
             "filters": resolution.filters,
             "date_start": resolution.date_start,
@@ -1049,6 +1180,7 @@ def _spec_fingerprint(resolution: Resolution) -> str:
             "model": resolution.model,
             "metric": resolution.metric,
             "by": resolution.by,
+            "series": resolution.series,
             "grain": resolution.grain,
             "filters": resolution.filters,
         },
@@ -1101,6 +1233,7 @@ def execute_spec(
         "model": spec.get("model"),
         "metric": spec.get("metric"),
         "by": spec.get("by"),
+        "series": spec.get("series"),
         "grain": spec.get("grain"),
         "filters": spec.get("filters") or {},
     }
@@ -1129,7 +1262,7 @@ def execute_spec(
     started = time.monotonic()
     result = execute_resolution(resolution, project, params)
     serialized = serialize_result(result)
-    chart = infer_chart_shape(serialized)
+    chart = resolution_chart_shape(resolution, serialized)
 
     resolved = {
         "kind": resolution.kind,
@@ -1160,7 +1293,12 @@ def execute_spec(
     # commentary=True: one LLM call, same generation path as answer_question step 3.
     chart_ctx: ChartContext | None = None
     if chart is not None:
-        chart_ctx = build_chart_context(chart["type"], x=chart["x"], y=chart["y"])
+        chart_ctx = build_chart_context(
+            chart["type"],
+            x=chart["x"],
+            y=chart["y"],
+            series_by=chart.get("series_by"),
+        )
     synthetic = AskDef(
         id="_ask_runtime",
         queries=((resolution.query_name or "result", resolution.connector or ""),),
@@ -1269,6 +1407,7 @@ def build_kept_markdown(
             "model": detail.get("model"),
             "metric": detail.get("metric"),
             "by": detail.get("by"),
+            "series": detail.get("series"),
             "grain": detail.get("grain"),
             "filters": detail.get("filters") or {},
         }
@@ -1277,12 +1416,15 @@ def build_kept_markdown(
             raise ValueError(f"semantic answer failed re-validation: {res.reason}")
         metric_ref = f"{res.model}.{res.metric}"
         by_ref = f"{res.model}.{res.by}" if res.by else None
+        series_ref = f"{res.model}.{res.series}" if res.series else None
 
         if chart is not None:
             component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
             attrs = [f"metric={{{metric_ref}}}"]
             if by_ref:
                 attrs.append(f"by={{{by_ref}}}")
+            if series_ref:
+                attrs.append(f"series={{{series_ref}}}")
             if res.grain:
                 attrs.append(f'grain="{res.grain}"')
             attrs.append(f'title="{q_attr}"')
@@ -1291,6 +1433,8 @@ def build_kept_markdown(
         ask_attrs = [f"metric={{{metric_ref}}}"]
         if by_ref:
             ask_attrs.append(f"by={{{by_ref}}}")
+        if series_ref:
+            ask_attrs.append(f"series={{{series_ref}}}")
         ask_attrs.append(f'ask="{q_attr}"')
         components.append(f"<Ask {' '.join(ask_attrs)} />")
 
