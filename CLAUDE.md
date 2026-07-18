@@ -347,8 +347,12 @@ a chip edit POSTs the edited spec to `POST /_dashdown/api/ask/execute` with `com
 validated by the *same* `_validate_semantic` as LLM output, **zero LLM calls, no rate-limit
 consumption** — repainting chart+table instantly and marking the prose stale (dimmed + "↻ Update
 commentary" = one billed call, cached under a spec-fingerprinted key). A follow-up input at the
-panel bottom re-asks with `previous: {question, resolved}` context (sanitized, prompt-only; folded
-into the cache key so same-text follow-ups under different contexts never collide).
+panel bottom re-asks with the **whole session** as context (`history`: a bounded oldest-first list
+of `{question, resolved}` — sanitized, prompt-only, fingerprinted into the cache key so same-text
+follow-ups under different sessions never collide); the trail renders as clickable pills whose
+older entries restore instantly client-side. Resolutions support a second grouping dimension
+(`series` — "revenue by week *per channel*"; comma-joined/list-valued `by`/`metric` from the model
+are split-coerced, and a validation failure gets one self-repair retry before degrading to none).
 **Keep on this page**: a dev-server-only panel button POSTs `{question, resolved, chart, path}` to
 `POST /_dashdown/api/ask/keep`, which **re-validates every name against the live catalog**
 (`build_kept_markdown` — client markdown is never trusted; semantic/query kinds only, dynamic

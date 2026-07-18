@@ -346,6 +346,9 @@ function initOne(el) {
     // x. So thread the server's sort hint through (temporal charts set sort_by=x)
     // or a time series renders in row order instead of by time.
     if (spec.sort_by) config.sort_by = spec.sort_by;
+    // A series-split answer (by + series, e.g. "revenue by week per channel")
+    // carries the splitting column — chart.js's series_by config key.
+    if (spec.series_by) config.series_by = spec.series_by;
     const card = document.createElement("div");
     card.className = "dashdown-chart dashdown-ask-box-chart";
     card.innerHTML = '<div class="dashdown-chart-container dashdown-ask-box-chart-container"></div>';
@@ -610,6 +613,7 @@ function initOne(el) {
       model: opts.model || detail.model || "",
       metric: detail.metric || "",
       by: detail.by || null,
+      series: detail.series || null,
       grain: detail.grain || null,
       filters: {},
     };
@@ -651,6 +655,23 @@ function initOne(el) {
         onChipChange();
       })
     );
+
+    // series — a second grouping dimension ("per channel"), splitting the
+    // metric into one colored series per value. Only offered once a primary
+    // `by` exists, and never the same dimension as `by`.
+    if (chipState.by) {
+      const seriesOptions = [{ value: "", text: "—" }].concat(
+        dims
+          .filter((d) => d !== chipState.by)
+          .map((d) => ({ value: d, text: d }))
+      );
+      row.appendChild(
+        makeChipSelect("per", seriesOptions, chipState.series || "", (v) => {
+          chipState.series = v || null;
+          onChipChange();
+        })
+      );
+    }
 
     // grain — only meaningful (and only rendered) when `by` is the time
     // dimension. A grain on a categorical dimension is meaningless.
@@ -708,6 +729,8 @@ function initOne(el) {
       model: chipState.model,
       metric: chipState.metric,
       by: chipState.by || null,
+      // A series without a primary grouping is meaningless — dropped with by.
+      series: chipState.by ? chipState.series || null : null,
       grain: byIsTime ? chipState.grain || null : null,
       filters: chipState.filters || {},
     };
@@ -815,7 +838,7 @@ function initOne(el) {
   // "semantic"/"query") — a raw-SQL answer has no stable, re-runnable reference to
   // embed. Gated by the box's `ask_keep` config flag (server: `ask_keep_enabled`).
   // Rebuilt on every render/refine so it always keeps the *current* edited spec
-  // (it posts `lastPayload.resolved`, which the server re-validates).
+  // (it posts the current trail entry's `resolved`, which the server re-validates).
   function renderKeepFooter(payload) {
     slots.keep.innerHTML = "";
     if (!config.ask_keep) return;
