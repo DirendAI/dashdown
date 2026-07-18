@@ -2365,6 +2365,259 @@ body {
 .dashdown-ask-box-message {
   margin: 0;
 }
+/* Inline (non-destructive) refine error — a 429/rate-limit or invalid-spec 400
+   shows here without blowing away the answer. */
+.dashdown-ask-box-inline-error {
+  margin: 0 0 0.5rem;
+}
+.dashdown-ask-box-inline-error[hidden] { display: none; }
+
+/* --- Semantic answer refinement -------------------------------------------
+   The interactive provenance chip row replaces the static provenance line for
+   semantic answers: metric / by / grain selects, removable filter chips, and a
+   "+ filter" popover. Editing a chip is editing a query, not chatting — so the
+   chips read as compact, token-styled controls, not a form. */
+.dashdown-ask-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+.dashdown-ask-chips-spark {
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  font-size: 0.8125rem;
+  line-height: 1;
+}
+/* Base chip: a small pill with a hairline border, in the b2 tint. */
+.dashdown-ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: var(--fallback-b2, oklch(var(--b2) / 0.6));
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  max-width: 100%;
+}
+.dashdown-ask-chip-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+/* Native <select> styled flat so the chip is the visible control. */
+.dashdown-ask-chip-control {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0 0.9rem 0 0.1rem;
+  margin: 0;
+  cursor: pointer;
+  max-width: 11rem;
+  text-overflow: ellipsis;
+  /* Chevron affordance drawn as a background so no extra markup is needed. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 0.35rem center, right 0.15rem center;
+  background-size: 0.28rem 0.28rem, 0.28rem 0.28rem;
+  background-repeat: no-repeat;
+}
+.dashdown-ask-chip-control:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 0.5));
+  outline-offset: 1px;
+  border-radius: 0.2rem;
+}
+.dashdown-ask-chip-select:focus-within {
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+}
+/* Filter chip: value text + a × remove button. */
+.dashdown-ask-chip-filter-text {
+  font-weight: 600;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+.dashdown-ask-chip-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.dashdown-ask-chip-remove:hover {
+  background: var(--fallback-b3, oklch(var(--b3) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+/* "+ filter" chip is the popover anchor. */
+.dashdown-ask-chip-add {
+  position: relative;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.dashdown-ask-chip-add-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border: 1px dashed var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  cursor: pointer;
+}
+.dashdown-ask-chip-add-btn:hover {
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+  color: var(--fallback-p, oklch(var(--p) / 1));
+}
+/* Filter popover: a small raised card floating below the "+ filter" chip. */
+.dashdown-ask-filter-pop {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem;
+  min-width: 15rem;
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  box-shadow: var(--dashdown-shadow-raised, 0 4px 12px rgb(0 0 0 / 0.14));
+}
+.dashdown-ask-filter-pop[hidden] { display: none; }
+.dashdown-ask-filter-pop-dim,
+.dashdown-ask-filter-pop-val {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+.dashdown-ask-filter-pop-val {
+  flex: 1 1 6rem;
+  min-width: 0;
+}
+.dashdown-ask-filter-pop-add {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--fallback-p, oklch(var(--p) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  cursor: pointer;
+}
+.dashdown-ask-filter-pop-add:hover {
+  background: var(--fallback-p, oklch(var(--p) / 0.12));
+}
+/* The provenance text kept beneath the chips (the trust surface). */
+.dashdown-ask-chips-provenance {
+  margin-top: 0.15rem;
+}
+
+/* Stale commentary: after a chip edit the prose no longer matches the data, so
+   it dims (and a subtle left accent + "stale" badge flag it) until the operator
+   clicks "↻ Update commentary". pointer-events off so stale answer ref chips
+   can't drive the freshly repainted chart. */
+.dashdown-ask-box-body-stale {
+  opacity: 0.45;
+  pointer-events: none;
+  border-left: 2px solid oklch(var(--wa, 75% 0.16 75) / 0.6);
+  padding-left: 0.6rem;
+  position: relative;
+}
+.dashdown-ask-box-body-stale::before {
+  content: "stale";
+  position: absolute;
+  top: -0.9rem;
+  left: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: oklch(var(--wa, 75% 0.16 75) / 1);
+}
+.dashdown-ask-box-body-wrap {
+  position: relative;
+}
+/* "↻ Update commentary" — mirrors the authored ask card's ↻ refresh affordance,
+   but labelled inline since the panel has room. */
+.dashdown-ask-box-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  cursor: pointer;
+}
+.dashdown-ask-box-update:hover:not(:disabled) {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+.dashdown-ask-box-update:disabled { cursor: default; opacity: 0.7; }
+.dashdown-ask-box-update[hidden] { display: none; }
+
+/* Follow-up row: a full-width slim input at the panel bottom, set off by a
+   subtle top border. "Refining is editing a query" — one field, no thread. */
+.dashdown-ask-box-followup {
+  margin-top: 0.5rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
+.dashdown-ask-box-followup-input {
+  width: 100%;
+  font-size: 0.8125rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+.dashdown-ask-box-followup-input:focus {
+  outline: none;
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+}
+.dashdown-ask-box-followup-input::placeholder {
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+
+/* Motion: the stale dimming is an opacity change; honor reduced-motion by
+   pinning any transition off (there are no explicit transitions above, but keep
+   the guard so a future tweak can't sneak motion in). */
+@media (prefers-reduced-motion: reduce) {
+  .dashdown-ask-box-body-stale,
+  .dashdown-ask-box-update,
+  .dashdown-ask-chip-control { transition: none; }
+}
 
 /* Multi-select: a dropdown button (the trigger) + a checkmark popover panel.
    The button shows the picked values joined by ", " (or the "All" placeholder),

@@ -14,6 +14,16 @@
 // the same typewriter feel, the same chart-annotation ref chips, and the same
 // chart/table renderers, but the question is the operator's, not the author's.
 //
+// Answer refinement (semantic answers only): the static provenance line becomes
+// an *interactive chip row* — metric / by / grain selects, removable filter
+// chips, and a "+ filter" popover. Editing a chip is treated as editing a query
+// (not a chat): it POSTs to /_dashdown/api/ask/execute with the edited spec and
+// `commentary:false`, repaints the chart + table, and marks the answer prose
+// *stale* (dimmed, with an "↻ Update commentary" button) rather than re-writing
+// it on every twiddle. A slim follow-up input at the panel bottom re-asks with
+// the prior resolution as context (`previous`), and echoes the new question into
+// the header omnibox so a re-Enter re-asks it.
+//
 // Ask is gated server-side (the box's data-config `ask` flag comes from
 // `ask_enabled` — llm on ∧ ask on ∧ not embed), so this never wires up in static
 // builds or embeds. The panel is only built on user interaction, so a headless
@@ -22,7 +32,8 @@
 // The "Keep on this page" button (when `ask_keep` is on and the answer resolved
 // to a semantic metric or named query) POSTs to /_dashdown/api/ask/keep to append
 // the answer's chart to the current page's source markdown; the dev server's file
-// watcher then live-reloads the page.
+// watcher then live-reloads the page. It keeps the *current edited* spec — the
+// keep footer always reads the latest /ask or /ask/execute payload.
 
 "use strict";
 
@@ -45,6 +56,7 @@ import {
 } from "./ask.js";
 
 const _ASK_URL = "/_dashdown/api/ask";
+const _EXECUTE_URL = "/_dashdown/api/ask/execute";
 const _KEEP_URL = "/_dashdown/api/ask/keep";
 
 /** ✦ AI badge markup — mirrors the authored ask card's provenance sparkle. */
@@ -69,6 +81,12 @@ function prefersReducedMotion() {
     window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
+}
+
+function mkDiv(className) {
+  const d = document.createElement("div");
+  d.className = className;
+  return d;
 }
 
 /**
@@ -100,14 +118,27 @@ function initOne(el) {
   panel.hidden = true;
   el.appendChild(panel);
 
-  let requestSeq = 0; // drop responses a newer question superseded
+  let requestSeq = 0; // drop responses a newer question/execute superseded
   let abortController = null;
   let hasAnswer = false; // panel holds a rendered answer (for reopen)
   let lastQuestion = ""; // the question the current answer belongs to
-  let lastPayload = null; // the current answer payload (for the keep button)
+  let lastPayload = null; // the current answer payload (for keep + refinement)
   // The live panel chart, so a theme toggle can dispose + re-init it (it's not
   // in chart.js's registry, so onThemeChange there won't reach it).
   let chartState = null; // { card, container, config }
+
+  // Rebuilt on each answer render (buildAnswerSkeleton); the refinement paths
+  // target these stable slots instead of the whole panel.
+  let slots = null; // { prov, err, bodyWrap, chart, table, keep, followup }
+  let answerBody = null; // the .dashdown-ask-body that holds the typed prose
+  let updateBtn = null; // "↻ Update commentary" (revealed when prose is stale)
+  let followupInput = null; // the bottom "refine or follow-up" field
+
+  // Semantic-refinement state. `chipState` is the editable spec the chip row
+  // builds from; `semanticOptions` is the payload's option lists (measures,
+  // dimensions, grains, the time dimension). Both are reset by renderChips.
+  let chipState = null;
+  let semanticOptions = null;
 
   function setBusy(busy) {
     el.classList.toggle("dashdown-ask-answer-busy", busy);
@@ -151,10 +182,14 @@ function initOne(el) {
     disposeChart();
     panel.innerHTML = "";
     hasAnswer = false;
+    slots = null;
+    answerBody = null;
+    updateBtn = null;
+    followupInput = null;
   }
 
-  function panelShell() {
-    resetPanel();
+  // Topbar (badge + close) shared by the transient states and the full answer.
+  function buildTopbar() {
     const header = document.createElement("div");
     header.className = "dashdown-ask-box-topbar";
     header.innerHTML =
@@ -166,9 +201,51 @@ function initOne(el) {
         close();
         input.focus();
       });
-    panel.appendChild(header);
+    return header;
+  }
+
+  // Minimal shell for transient states (loading / error / notice): topbar only.
+  function panelShell() {
+    resetPanel();
+    panel.appendChild(buildTopbar());
     open();
     return panel;
+  }
+
+  // Full answer skeleton: topbar + the stable slots the refinement paths target.
+  function buildAnswerSkeleton() {
+    resetPanel();
+    panel.appendChild(buildTopbar());
+
+    slots = {};
+    slots.prov = mkDiv("dashdown-ask-box-prov");
+    slots.err = mkDiv("dashdown-ask-error dashdown-ask-box-message dashdown-ask-box-inline-error");
+    slots.err.hidden = true;
+
+    slots.bodyWrap = mkDiv("dashdown-ask-box-body-wrap");
+    updateBtn = document.createElement("button");
+    updateBtn.type = "button";
+    updateBtn.className = "dashdown-ask-box-update";
+    updateBtn.hidden = true;
+    updateBtn.textContent = "↻ Update commentary";
+    updateBtn.addEventListener("click", onUpdateCommentary);
+    answerBody = mkDiv("dashdown-ask-body dashdown-ask-box-body");
+    slots.bodyWrap.appendChild(updateBtn);
+    slots.bodyWrap.appendChild(answerBody);
+
+    slots.chart = mkDiv("dashdown-ask-box-chart-slot");
+    slots.table = mkDiv("dashdown-ask-box-table-slot");
+    slots.keep = mkDiv("dashdown-ask-box-keep-slot");
+    slots.followup = mkDiv("dashdown-ask-box-followup-slot");
+
+    panel.appendChild(slots.prov);
+    panel.appendChild(slots.err);
+    panel.appendChild(slots.bodyWrap);
+    panel.appendChild(slots.chart);
+    panel.appendChild(slots.table);
+    panel.appendChild(slots.keep);
+    panel.appendChild(slots.followup);
+    open();
   }
 
   function renderLoading() {
@@ -199,6 +276,19 @@ function initOne(el) {
     hasAnswer = true;
   }
 
+  // Inline (non-destructive) error for the refinement paths — a 429/rate-limit
+  // or an invalid-spec 400 shows here without blowing away the answer.
+  function showExecError(message) {
+    if (!slots || !slots.err) return;
+    slots.err.textContent = message || "Refine request failed";
+    slots.err.hidden = false;
+  }
+  function clearExecError() {
+    if (!slots || !slots.err) return;
+    slots.err.textContent = "";
+    slots.err.hidden = true;
+  }
+
   // Paint (or repaint) the panel chart, then suppress the y-axis name ECharts
   // draws above the axis: the compact panel has no headroom for it (it clips
   // against the provenance line) and the provenance + table header already name
@@ -214,8 +304,9 @@ function initOne(el) {
 
   // Build a chart host that speaks the same _chartConfig/_echarts_instance/
   // _chartInstance contract the annotation helpers expect, so setChartAnnotations
-  // + emphasizeChartAnnotation work unchanged against it.
-  function renderChart(payload) {
+  // + emphasizeChartAnnotation work unchanged against it. Appended to `parent`
+  // (a stable chart slot), so a repaint can clear the slot and rebuild.
+  function renderChart(payload, parent) {
     const records = recordsOf(payload);
     const spec = payload.chart || {};
     const config = {
@@ -232,7 +323,7 @@ function initOne(el) {
     const card = document.createElement("div");
     card.className = "dashdown-chart dashdown-ask-box-chart";
     card.innerHTML = '<div class="dashdown-chart-container dashdown-ask-box-chart-container"></div>';
-    panel.appendChild(card);
+    parent.appendChild(card);
     const container = card.querySelector(".dashdown-chart-container");
 
     const instance = echarts.init(container, currentEChartsTheme());
@@ -260,10 +351,10 @@ function initOne(el) {
     return card;
   }
 
-  function renderTable(payload) {
+  function renderTable(payload, parent) {
     const host = document.createElement("div");
     host.className = "dashdown-table dashdown-ask-box-table";
-    panel.appendChild(host);
+    parent.appendChild(host);
     renderTableInto(host, recordsOf(payload), {
       page_size: 10,
       export: false,
@@ -272,17 +363,42 @@ function initOne(el) {
     });
   }
 
-  // Type the answer out word-batched (the ask.js replay cadence), then swap in
-  // the sanitized answer_html and wire its ref chips. Reduced-motion skips
-  // straight to the final HTML.
-  function renderAnswer(payload, chartCard, seq) {
-    const body = document.createElement("div");
-    body.className = "dashdown-ask-body dashdown-ask-box-body";
-    panel.appendChild(body);
+  // Rebuild the chart + table slots from a payload. Returns the chart card (or
+  // null when the payload carries no chart / no data) so the answer's annotation
+  // ref chips can wire against it. Shared by the first render and every refine.
+  function repaintChartAndTable(payload) {
+    disposeChart();
+    slots.chart.innerHTML = "";
+    slots.table.innerHTML = "";
+    let chartCard = null;
+    const hasData = payload.columns && payload.rows && payload.rows.length;
+    if (payload.chart && hasData) {
+      try {
+        chartCard = renderChart(payload, slots.chart);
+      } catch (e) {
+        console.error("dashdown ask box: chart render failed", e);
+        chartCard = null;
+      }
+    }
+    if (hasData) {
+      try {
+        renderTable(payload, slots.table);
+      } catch (e) {
+        console.error("dashdown ask box: table render failed", e);
+      }
+    }
+    return chartCard;
+  }
+
+  // Type the answer out word-batched (the ask.js replay cadence) into `bodyEl`,
+  // then swap in the sanitized answer_html and wire its ref chips. Reduced-motion
+  // skips straight to the final HTML.
+  function renderAnswer(payload, chartCard, seq, bodyEl) {
+    bodyEl.innerHTML = "";
 
     const finish = () => {
-      body.innerHTML = payload.answer_html || esc(payload.answer_text || "");
-      wireAnnotationRefChips(body, chartCard);
+      bodyEl.innerHTML = payload.answer_html || esc(payload.answer_text || "");
+      wireAnnotationRefChips(bodyEl, chartCard);
     };
 
     const text = payload.answer_text || "";
@@ -297,7 +413,7 @@ function initOne(el) {
     );
     const streamEl = document.createElement("div");
     streamEl.className = "dashdown-ask-stream";
-    body.appendChild(streamEl);
+    bodyEl.appendChild(streamEl);
     let i = 0;
     const tick = () => {
       if (seq !== requestSeq) return; // superseded — stop typing
@@ -312,71 +428,372 @@ function initOne(el) {
     tick();
   }
 
-  function renderAnswerPayload(payload, seq) {
-    panelShell();
+  // ---- Semantic refinement: the interactive provenance chip row -----------
 
-    // Model attribution on the ✦ badge tooltip — the same trust affordance the
-    // authored ask cards carry (theirs hover-reveals a .dashdown-ask-model).
-    if (payload.model) {
-      const badge = panel.querySelector(".dashdown-ask-box-badge");
-      if (badge) {
-        badge.setAttribute("title", `AI-generated answer · ${payload.model}`);
+  // Provenance region: the interactive chip row for a semantic answer (when the
+  // payload carries `semantic_options`), else the static provenance text a query
+  // answer keeps as before.
+  function renderProvenance(payload) {
+    if (!slots) return;
+    slots.prov.innerHTML = "";
+    const resolved = payload.resolved || {};
+    if (resolved.kind === "semantic" && payload.semantic_options) {
+      renderChips(payload);
+    } else if (resolved.provenance) {
+      const prov = document.createElement("div");
+      prov.className = "dashdown-ask-box-provenance";
+      prov.textContent = resolved.provenance;
+      slots.prov.appendChild(prov);
+    }
+  }
+
+  // A native <select> styled chip-like (keyboard/a11y for free), captioned with
+  // the field it edits. `options` is [{value, text}]; `onChange(value)` fires.
+  function makeChipSelect(label, options, value, onChange) {
+    const wrap = document.createElement("label");
+    wrap.className = "dashdown-ask-chip dashdown-ask-chip-select";
+    const cap = document.createElement("span");
+    cap.className = "dashdown-ask-chip-label";
+    cap.textContent = label;
+    const sel = document.createElement("select");
+    sel.className = "dashdown-ask-chip-control";
+    sel.setAttribute("aria-label", label);
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.text;
+      if (opt.value === value) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => onChange(sel.value));
+    wrap.appendChild(cap);
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
+  // A removable filter chip: "dim: v1, v2 ×".
+  function makeFilterChip(dim, values) {
+    const chip = document.createElement("span");
+    chip.className = "dashdown-ask-chip dashdown-ask-chip-filter";
+    const txt = document.createElement("span");
+    txt.className = "dashdown-ask-chip-filter-text";
+    txt.textContent = `${dim}: ${values.join(", ")}`;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "dashdown-ask-chip-remove";
+    x.setAttribute("aria-label", `Remove filter ${dim}`);
+    x.textContent = "×";
+    x.addEventListener("click", () => {
+      delete chipState.filters[dim];
+      onChipChange();
+    });
+    chip.appendChild(txt);
+    chip.appendChild(x);
+    return chip;
+  }
+
+  // The "+ filter" chip: a button toggling a small popover with a dimension
+  // select, a comma-separated value input, and Add.
+  function makeAddFilterChip(dims) {
+    const wrap = document.createElement("span");
+    wrap.className = "dashdown-ask-chip dashdown-ask-chip-add";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dashdown-ask-chip-add-btn";
+    btn.textContent = "+ filter";
+    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-expanded", "false");
+
+    const pop = mkDiv("dashdown-ask-filter-pop");
+    pop.hidden = true;
+    const sel = document.createElement("select");
+    sel.className = "dashdown-ask-filter-pop-dim";
+    sel.setAttribute("aria-label", "Filter dimension");
+    for (const d of dims) {
+      const o = document.createElement("option");
+      o.value = d;
+      o.textContent = d;
+      sel.appendChild(o);
+    }
+    const val = document.createElement("input");
+    val.type = "text";
+    val.className = "dashdown-ask-filter-pop-val";
+    val.placeholder = "value, value…";
+    val.setAttribute("aria-label", "Filter values (comma-separated)");
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "dashdown-ask-filter-pop-add";
+    add.textContent = "Add";
+
+    const closePop = () => {
+      pop.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    };
+    const applyAdd = () => {
+      const dim = sel.value;
+      const values = val.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      closePop();
+      if (!dim || !values.length) return;
+      chipState.filters[dim] = values;
+      onChipChange();
+    };
+
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const show = pop.hidden;
+      pop.hidden = !show;
+      btn.setAttribute("aria-expanded", String(show));
+      if (show) val.focus();
+    });
+    add.addEventListener("click", applyAdd);
+    val.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyAdd();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closePop();
+        btn.focus();
+      }
+    });
+    // Clicks inside the popover stay inside it (don't reach the panel-close
+    // document handler, and don't count as an outside click).
+    pop.addEventListener("click", (ev) => ev.stopPropagation());
+
+    pop.appendChild(sel);
+    pop.appendChild(val);
+    pop.appendChild(add);
+    wrap.appendChild(btn);
+    wrap.appendChild(pop);
+    return wrap;
+  }
+
+  // Build the chip row from a semantic payload and seed `chipState` from its
+  // resolution detail. Also keeps the muted provenance text line beneath the
+  // chips (the trust surface) so the provenance node is always present.
+  function renderChips(payload) {
+    const opts = payload.semantic_options || {};
+    const detail = (payload.resolved && payload.resolved.detail) || {};
+    semanticOptions = opts;
+    chipState = {
+      model: opts.model || detail.model || "",
+      metric: detail.metric || "",
+      by: detail.by || null,
+      grain: detail.grain || null,
+      filters: {},
+    };
+    const rawFilters = detail.filters || {};
+    for (const k of Object.keys(rawFilters)) {
+      const v = rawFilters[k];
+      chipState.filters[k] = Array.isArray(v) ? v.slice() : [String(v)];
+    }
+
+    const row = mkDiv("dashdown-ask-chips");
+    const spark = document.createElement("span");
+    spark.className = "dashdown-ask-chips-spark";
+    spark.textContent = "✦";
+    spark.setAttribute("aria-hidden", "true");
+    row.appendChild(spark);
+
+    // metric — one of the model's measures.
+    const measures = opts.measures || [];
+    row.appendChild(
+      makeChipSelect(
+        "metric",
+        measures.map((m) => ({ value: m, text: m })),
+        chipState.metric,
+        (v) => {
+          chipState.metric = v;
+          onChipChange();
+        }
+      )
+    );
+
+    // by — a dimension, or "—" for none.
+    const dims = opts.dimensions || [];
+    const byOptions = [{ value: "", text: "—" }].concat(
+      dims.map((d) => ({ value: d, text: d }))
+    );
+    row.appendChild(
+      makeChipSelect("by", byOptions, chipState.by || "", (v) => {
+        chipState.by = v || null;
+        onChipChange();
+      })
+    );
+
+    // grain — only meaningful (and only rendered) when `by` is the time
+    // dimension. A grain on a categorical dimension is meaningless.
+    if (
+      chipState.by &&
+      opts.time_dimension &&
+      chipState.by === opts.time_dimension
+    ) {
+      const grains = opts.grains || [];
+      if (grains.length) {
+        row.appendChild(
+          makeChipSelect(
+            "grain",
+            grains.map((g) => ({ value: g, text: g })),
+            chipState.grain || grains[0],
+            (v) => {
+              chipState.grain = v || null;
+              onChipChange();
+            }
+          )
+        );
       }
     }
+
+    // Existing filters as removable chips.
+    for (const dim of Object.keys(chipState.filters)) {
+      row.appendChild(makeFilterChip(dim, chipState.filters[dim]));
+    }
+
+    // + filter.
+    row.appendChild(makeAddFilterChip(dims));
+
+    slots.prov.innerHTML = "";
+    slots.prov.appendChild(row);
 
     const resolved = payload.resolved || {};
     if (resolved.provenance) {
       const prov = document.createElement("div");
-      prov.className = "dashdown-ask-box-provenance";
+      prov.className =
+        "dashdown-ask-box-provenance dashdown-ask-chips-provenance";
       prov.textContent = resolved.provenance;
-      panel.appendChild(prov);
+      slots.prov.appendChild(prov);
     }
-
-    // Answer-first hierarchy: the operator asked a question, so the answer
-    // text is the headline — it types in at the top while the evidence (chart,
-    // then table) renders below it. With the panel's max-height scroll, what
-    // scrolls out of view is detail, never the answer. The chart is built
-    // before the answer only in DOM-insertion terms handled below: renderChart
-    // must run first so the answer's annotation ref chips have a chart host to
-    // wire against, but its card is inserted *after* the answer body.
-    let chartCard = null;
-    const hasData = payload.columns && payload.rows && payload.rows.length;
-    if (payload.chart && hasData) {
-      try {
-        chartCard = renderChart(payload);
-      } catch (e) {
-        console.error("dashdown ask box: chart render failed", e);
-        chartCard = null;
-      }
-    }
-
-    renderAnswer(payload, chartCard, seq);
-    if (chartCard) panel.appendChild(chartCard); // move below the answer body
-
-    if (hasData) {
-      try {
-        renderTable(payload);
-      } catch (e) {
-        console.error("dashdown ask box: table render failed", e);
-      }
-    }
-
-    renderKeepFooter(payload);
-    hasAnswer = true;
   }
+
+  // Build the /ask/execute spec from the live chip state. Grain rides only when
+  // `by` is the time dimension (mirrors the render gate).
+  function buildSpecFromChips() {
+    const byIsTime =
+      chipState.by &&
+      semanticOptions &&
+      chipState.by === semanticOptions.time_dimension;
+    return {
+      kind: "semantic",
+      model: chipState.model,
+      metric: chipState.metric,
+      by: chipState.by || null,
+      grain: byIsTime ? chipState.grain || null : null,
+      filters: chipState.filters || {},
+    };
+  }
+
+  function markCommentaryStale() {
+    if (answerBody) answerBody.classList.add("dashdown-ask-box-body-stale");
+    if (updateBtn) updateBtn.hidden = false;
+  }
+  function unmarkCommentaryStale() {
+    if (answerBody) answerBody.classList.remove("dashdown-ask-box-body-stale");
+    if (updateBtn) updateBtn.hidden = true;
+  }
+
+  // POST the edited spec to /ask/execute. Reuses the requestSeq/abort pattern so
+  // a stale execute response never paints over a newer one. Returns
+  // {data, seq} on success, {error, seq} on a handled failure (400/429/notice),
+  // or null when superseded/aborted (caller no-ops).
+  async function executeSpec(spec, commentary) {
+    const seq = ++requestSeq;
+    if (abortController) abortController.abort();
+    const controller = new AbortController();
+    abortController = controller;
+    setBusy(true);
+    try {
+      const response = await postJson(
+        _EXECUTE_URL,
+        {
+          question: lastQuestion,
+          spec,
+          params: gatherParams(),
+          commentary: !!commentary,
+          refresh: false,
+        },
+        { signal: controller.signal }
+      );
+      if (seq !== requestSeq) return null;
+      const data = await response.json().catch(() => null);
+      if (seq !== requestSeq) return null;
+      setBusy(false);
+      if (!data) return { error: `HTTP ${response.status}`, seq };
+      if (data.notice) return { error: data.notice, seq };
+      if (!response.ok || data.error) {
+        return {
+          error: data.error || data.detail || `HTTP ${response.status}`,
+          seq,
+        };
+      }
+      return { data, seq };
+    } catch (error) {
+      if (seq !== requestSeq || (error && error.name === "AbortError")) {
+        return null;
+      }
+      setBusy(false);
+      return { error: (error && error.message) || "Refine request failed", seq };
+    }
+  }
+
+  // A chip edit: re-run the spec with commentary OFF (fast, cheap), repaint the
+  // chart + table + chips, and mark the prose stale rather than re-writing it.
+  async function onChipChange() {
+    clearExecError();
+    const spec = buildSpecFromChips();
+    const res = await executeSpec(spec, false);
+    if (!res) return; // superseded / aborted
+    if (res.error) {
+      showExecError(res.error);
+      return;
+    }
+    lastPayload = res.data;
+    repaintChartAndTable(res.data);
+    renderChips(res.data); // repaint chips + provenance from the response
+    renderKeepFooter(res.data); // reset keep to the current edited spec
+    markCommentaryStale();
+  }
+
+  // "↻ Update commentary": re-run the current chip spec with commentary ON, then
+  // typewriter the fresh answer in and un-dim.
+  async function onUpdateCommentary() {
+    clearExecError();
+    if (updateBtn) updateBtn.disabled = true;
+    const spec = buildSpecFromChips();
+    const res = await executeSpec(spec, true);
+    if (updateBtn) updateBtn.disabled = false;
+    if (!res) return;
+    if (res.error) {
+      showExecError(res.error);
+      return;
+    }
+    lastPayload = res.data;
+    const chartCard = repaintChartAndTable(res.data);
+    renderChips(res.data);
+    renderKeepFooter(res.data);
+    renderAnswer(res.data, chartCard, res.seq, answerBody);
+    unmarkCommentaryStale();
+  }
+
+  // ---- Keep + follow-up ---------------------------------------------------
 
   // "Keep on this page": append this answer's chart to the current page's source
   // markdown, so the operator's ad-hoc question becomes a permanent card. Only
   // for answers that resolved to a semantic metric or a named query (`resolved.kind`
   // "semantic"/"query") — a raw-SQL answer has no stable, re-runnable reference to
   // embed. Gated by the box's `ask_keep` config flag (server: `ask_keep_enabled`).
+  // Rebuilt on every render/refine so it always keeps the *current* edited spec
+  // (it posts `lastPayload.resolved`, which the server re-validates).
   function renderKeepFooter(payload) {
+    slots.keep.innerHTML = "";
     if (!config.ask_keep) return;
     const resolved = payload.resolved || {};
     if (resolved.kind !== "semantic" && resolved.kind !== "query") return;
 
-    const footer = document.createElement("div");
-    footer.className = "dashdown-ask-box-keep";
+    const footer = mkDiv("dashdown-ask-box-keep");
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "dashdown-ask-box-keep-btn";
@@ -385,16 +802,19 @@ function initOne(el) {
     err.className = "dashdown-ask-box-keep-error";
     footer.appendChild(btn);
     footer.appendChild(err);
-    panel.appendChild(footer);
+    slots.keep.appendChild(footer);
 
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       err.textContent = "";
       try {
+        // Keep the CURRENT edited answer: lastPayload is the latest /ask or
+        // /ask/execute response, so chip edits are reflected.
+        const current = lastPayload || payload;
         const resp = await postJson(_KEEP_URL, {
           question: lastQuestion,
-          resolved: payload.resolved,
-          chart: payload.chart,
+          resolved: current.resolved,
+          chart: current.chart,
           path: window.location.pathname,
         });
         const data = await resp.json().catch(() => null);
@@ -415,7 +835,79 @@ function initOne(el) {
     });
   }
 
-  async function submit(question) {
+  // A slim follow-up field at the panel bottom. Enter re-asks via the normal
+  // submit flow, threading the prior resolution as `previous` context, and echoes
+  // the new question into the header omnibox so a re-Enter re-asks it.
+  function renderFollowUp() {
+    slots.followup.innerHTML = "";
+    const row = mkDiv("dashdown-ask-box-followup");
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.className = "dashdown-ask-box-followup-input";
+    inp.placeholder = "Refine or ask a follow-up…";
+    inp.setAttribute("aria-label", "Refine or ask a follow-up");
+    row.appendChild(inp);
+    slots.followup.appendChild(row);
+    followupInput = inp;
+
+    inp.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const q = inp.value.trim();
+        if (!q) return;
+        const prev = lastPayload
+          ? {
+              question: lastQuestion,
+              resolved: {
+                kind: (lastPayload.resolved || {}).kind,
+                detail: (lastPayload.resolved || {}).detail,
+              },
+            }
+          : null;
+        // Echo the new question into the header omnibox (programmatic value set
+        // fires no `input` event, so the panel isn't closed by the input handler).
+        input.value = q;
+        submit(q, { previous: prev });
+      } else if (ev.key === "Escape") {
+        // First Escape inside the follow-up field only steps out to panel scope
+        // (focus the omnibox input); a second Escape then closes the panel via
+        // the capture-phase handler on `el`.
+        ev.preventDefault();
+        ev.stopPropagation();
+        input.focus();
+      }
+    });
+  }
+
+  function applyModelTooltip(payload) {
+    // Model attribution on the ✦ badge tooltip — the same trust affordance the
+    // authored ask cards carry (theirs hover-reveals a .dashdown-ask-model).
+    if (payload.model) {
+      const badge = panel.querySelector(".dashdown-ask-box-badge");
+      if (badge) {
+        badge.setAttribute("title", `AI-generated answer · ${payload.model}`);
+      }
+    }
+  }
+
+  function renderAnswerPayload(payload, seq) {
+    buildAnswerSkeleton();
+    applyModelTooltip(payload);
+
+    // Answer-first hierarchy: the operator asked a question, so the answer text
+    // is the headline (it types in above the evidence). renderProvenance builds
+    // the interactive chip row (semantic) or the static provenance line; the
+    // chart must render before renderAnswer so the answer's annotation ref chips
+    // have a chart host to wire against.
+    renderProvenance(payload);
+    const chartCard = repaintChartAndTable(payload);
+    renderAnswer(payload, chartCard, seq, answerBody);
+    renderKeepFooter(payload);
+    renderFollowUp();
+    hasAnswer = true;
+  }
+
+  async function submit(question, opts = {}) {
     lastQuestion = question;
     const seq = ++requestSeq;
     if (abortController) abortController.abort();
@@ -425,14 +917,11 @@ function initOne(el) {
     renderLoading();
 
     try {
-      const response = await postJson(
-        _ASK_URL,
-        {
-          question,
-          params: gatherParams(),
-        },
-        { signal: controller.signal }
-      );
+      const reqBody = { question, params: gatherParams() };
+      if (opts.previous) reqBody.previous = opts.previous;
+      const response = await postJson(_ASK_URL, reqBody, {
+        signal: controller.signal,
+      });
       if (seq !== requestSeq) return; // a newer question took over
       const data = await response.json().catch(() => null);
       if (seq !== requestSeq) return;
@@ -461,7 +950,8 @@ function initOne(el) {
 
   // site_search.js fires this when the operator picks the "Ask the data" row
   // (or hits Enter in ask-only mode). The modules stay decoupled — no import
-  // either way, just the DOM event.
+  // either way, just the DOM event. A header ask is always a *fresh* question
+  // (no `previous` context) — refinement/follow-up carries context, not this.
   el.addEventListener("dashdown:ask", (ev) => {
     const q = ((ev.detail && ev.detail.question) || "").trim();
     if (q) submit(q);
@@ -470,15 +960,18 @@ function initOne(el) {
   // Escape closes the answer panel *first*, then falls through to search's own
   // Escape on a second press. Capture phase on `el` (an ancestor of the input)
   // fires before site_search.js's target-phase keydown, so stopPropagation keeps
-  // the first Escape from also closing/blurring search.
+  // the first Escape from also closing/blurring search. The follow-up field has
+  // its own layering (its Escape steps focus back to the omnibox input, then a
+  // second Escape lands here and closes).
   el.addEventListener(
     "keydown",
     (ev) => {
-      if (ev.key === "Escape" && !panel.hidden) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        close();
-      }
+      if (ev.key !== "Escape" || panel.hidden) return;
+      // A follow-up-field Escape handles its own step-out first; don't close.
+      if (followupInput && document.activeElement === followupInput) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      close();
     },
     true
   );

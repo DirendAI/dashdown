@@ -341,6 +341,14 @@ entirely) and fires a `dashdown:ask` CustomEvent; `static/components/ask_box.js`
 attaches the answer-first panel — provenance → typed answer → chart → table — under the same box
 (Ctrl/Cmd+K focus, `postJson` in core.js, reusing `updateChart`/`renderTableInto`/
 `setChartAnnotations` + helpers exported from ask.js; the two modules never import each other).
+**Refinement = editing a query, not chat**: a semantic answer's provenance becomes an interactive
+chip row (metric/by/grain selects + filter chips, options from the payload's `semantic_options`);
+a chip edit POSTs the edited spec to `POST /_dashdown/api/ask/execute` with `commentary:false` —
+validated by the *same* `_validate_semantic` as LLM output, **zero LLM calls, no rate-limit
+consumption** — repainting chart+table instantly and marking the prose stale (dimmed + "↻ Update
+commentary" = one billed call, cached under a spec-fingerprinted key). A follow-up input at the
+panel bottom re-asks with `previous: {question, resolved}` context (sanitized, prompt-only; folded
+into the cache key so same-text follow-ups under different contexts never collide).
 **Keep on this page**: a dev-server-only panel button POSTs `{question, resolved, chart, path}` to
 `POST /_dashdown/api/ask/keep`, which **re-validates every name against the live catalog**
 (`build_kept_markdown` — client markdown is never trusted; semantic/query kinds only, dynamic

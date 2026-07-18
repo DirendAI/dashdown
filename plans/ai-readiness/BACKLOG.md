@@ -39,6 +39,10 @@ reviewed by the orchestrating session before merge.
 - User-facing docs pages (`docs/`) + `tooling/gen-agent-docs.py` re-run.
 - **Staged answers** (biggest perceived-latency win): stream resolution →
   provenance → data → answer over SSE instead of one blocking response.
+- **Refinement Tier 2** (Tier 1 — provenance chips + contextual follow-up —
+  shipped): question-trail breadcrumb over cached answers; model-suggested
+  follow-up chips riding the answer call (annotation-fence-style protocol);
+  dimension *value* options for filter chips (needs a semantic values API).
 - **Answer permanence** — partially shipped: **"Keep on this page"** appends a
   re-validated live section to the current page (`build_kept_markdown` +
   `POST /_dashdown/api/ask/keep`, dev-server-only). Remaining: an ask-history
