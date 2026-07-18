@@ -1050,6 +1050,97 @@ function initOne(el) {
     hasAnswer = true;
   }
 
+  // A wait state for the answer body while the commentary streams in: the same
+  // blinking cursor the loading state uses, held below the already-painted
+  // provenance + chart + table until the `done` event arrives.
+  function renderAnswerWaiting(bodyEl) {
+    bodyEl.innerHTML =
+      '<span class="dashdown-ask-cursor" aria-hidden="true"></span>';
+  }
+
+  // Consume a staged SSE ask response (POST /api/ask with stream:true). Two
+  // events: `resolved` paints the full panel skeleton — provenance/chips, chart,
+  // table, keep footer, follow-up — with the answer body in a wait state; `done`
+  // merges the commentary into the trail entry, wires chart annotations, and
+  // typewriters the answer in. `error` shows the error card. The requestSeq guard
+  // is re-checked on every event so a superseded stream never paints. Modeled on
+  // ask.js::consumeStream (the authored-card SSE parser).
+  async function consumeAskStream(response, question, seq) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let entry = null; // this ask's trail entry (pushed on `resolved`)
+    let chartCard = null;
+
+    const onResolved = (payload) => {
+      if (seq !== requestSeq) return;
+      // New trail entry for this ask (a fresh header ask already cleared the
+      // trail; a follow-up appends). Refinement/keep/follow-up all read the
+      // current (last) entry, so this is what those paths edit in place.
+      entry = { question, payload };
+      trail.push(entry);
+      buildAnswerSkeleton();
+      applyModelTooltip(payload);
+      renderTrailPills();
+      renderProvenance(payload);
+      chartCard = repaintChartAndTable(payload);
+      renderAnswerWaiting(answerBody);
+      renderKeepFooter(payload);
+      renderFollowUp();
+      hasAnswer = true;
+    };
+
+    const onDone = (fields) => {
+      if (seq !== requestSeq || !entry) return;
+      setBusy(false);
+      // Merge the commentary into the (partial) resolved payload so the trail
+      // entry carries the full answer for keep / follow-up context.
+      const full = { ...entry.payload, ...fields };
+      entry.payload = full;
+      if (chartCard && Array.isArray(full.annotations) && full.annotations.length) {
+        setChartAnnotations(chartCard, full.annotations);
+      }
+      renderAnswer(full, chartCard, seq, answerBody);
+      renderKeepFooter(full);
+    };
+
+    const handleEvent = (raw) => {
+      let event = "message";
+      const dataLines = [];
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:"))
+          dataLines.push(line.slice(5).trimStart());
+      }
+      let data;
+      try {
+        data = JSON.parse(dataLines.join("\n"));
+      } catch {
+        return;
+      }
+      if (event === "resolved") onResolved(data);
+      else if (event === "done") onDone(data);
+      else if (event === "error") {
+        if (seq !== requestSeq) return;
+        setBusy(false);
+        renderError(data.detail || data.error || "Ask request failed");
+      }
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (seq !== requestSeq) return; // superseded — a newer request took over
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        if (raw.trim()) handleEvent(raw);
+      }
+    }
+  }
+
   async function submit(question, opts = {}) {
     // A fresh header ask starts a new session; a follow-up keeps the trail and
     // appends its answer on success.
@@ -1062,12 +1153,19 @@ function initOne(el) {
     renderLoading();
 
     try {
-      const reqBody = { question, params: gatherParams() };
+      const reqBody = { question, params: gatherParams(), stream: true };
       if (opts.history && opts.history.length) reqBody.history = opts.history;
       const response = await postJson(_ASK_URL, reqBody, {
         signal: controller.signal,
       });
       if (seq !== requestSeq) return; // a newer question took over
+      // Staged SSE (the normal cache-miss / cache-hit path) vs. plain JSON (a
+      // 429 / notice / disabled / proxy fallback — checked before streaming).
+      const contentType = response.headers.get("Content-Type") || "";
+      if (response.ok && contentType.includes("text/event-stream")) {
+        await consumeAskStream(response, question, seq);
+        return;
+      }
       const data = await response.json().catch(() => null);
       if (seq !== requestSeq) return;
       setBusy(false);
@@ -1083,6 +1181,8 @@ function initOne(el) {
         renderError(data.error || data.detail || `HTTP ${response.status}`);
         return;
       }
+      // A non-streaming JSON answer (shouldn't happen on the happy path, but stay
+      // robust): render it whole like the pre-staging client did.
       trail.push({ question, payload: data });
       renderAnswerPayload(data, seq);
     } catch (error) {

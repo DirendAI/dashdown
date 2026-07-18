@@ -853,6 +853,18 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         400 on a malformed body / empty question; 429 past the process-wide
         ask rate limit (cost control); 502 on an LLM failure; 500 on a
         query failure.
+
+        **Staged streaming (opt-in).** When the body carries ``"stream": true`` the
+        response is Server-Sent Events (``text/event-stream``): a ``resolved`` event
+        ships the full payload *minus* the LLM commentary (provenance + chart + table
+        the moment resolution and the query complete), then a ``done`` event carries
+        ``{answer_html, answer_text, annotations, cached}`` once the commentary is
+        written; an ``error`` event (``{detail}``) reports an LLM/query failure that
+        happens after headers are sent. The rate-limit and disabled-notice gates are
+        checked *before* the stream commits, so those still return plain-JSON 429 /
+        200-notice (the client falls back on the response content-type). Absent /
+        false ``stream`` keeps the byte-identical single-JSON behavior the CLI and
+        tests depend on.
         """
         from fastapi import HTTPException
         from fastapi.responses import JSONResponse
@@ -862,6 +874,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             AskQueryError,
             AskRateLimitError,
             answer_question,
+            answer_question_staged,
             ask_unavailable_notice,
         )
 
@@ -877,6 +890,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             raise HTTPException(status_code=400, detail="'params' must be an object")
         params = {str(k): str(v) for k, v in raw_params.items() if not str(k).startswith("_")}
         refresh = bool(body.get("refresh"))
+        stream = bool(body.get("stream"))
         # Optional session history: an oldest-first list of {question, resolved}
         # entries so a refinement ("only paid channels") resolves in the context of
         # the whole session. It is data for the resolver/answer prompts only
@@ -886,6 +900,39 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         notice = ask_unavailable_notice(proj)
         if notice is not None:
             return JSONResponse({"question": question, "answer_html": "", "notice": notice})
+
+        if stream:
+            # Eagerly run the cache/rate-limit gate (raises AskRateLimitError before
+            # any SSE headers), then relay each stage. The resolver + answer LLM
+            # calls stay inside the generator, so their failures arrive as `error`
+            # events rather than pre-header status codes.
+            try:
+                staged = answer_question_staged(
+                    proj, question.strip(), params, refresh=refresh, history=history
+                )
+            except AskRateLimitError as e:
+                raise HTTPException(status_code=429, detail=str(e))
+
+            def _sse(event: str, data: dict) -> str:
+                return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+            def event_stream():
+                try:
+                    for stage, data in staged:
+                        yield _sse(stage, data)
+                except AskLLMError as e:  # noqa: BLE001 — reported in-band
+                    yield _sse("error", {"detail": f"LLM request failed: {e}"})
+                except AskQueryError as e:  # noqa: BLE001
+                    yield _sse("error", {"detail": f"Query execution failed: {e}"})
+                except Exception as e:  # noqa: BLE001
+                    log.exception("runtime ask stream failed")
+                    yield _sse("error", {"detail": f"{type(e).__name__}: {e}"})
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         try:
             payload = answer_question(

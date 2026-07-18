@@ -307,6 +307,11 @@ RESOLVER_SYSTEM_PROMPT = (
     "otherwise omit it and a sensible chart is inferred. A chart wish is never a "
     "reason to refuse: resolve the DATA the question needs and let `chart` carry "
     "the presentation. "
+    "An OPEN or underspecified question ('show me something interesting', 'a "
+    "random chart', 'give me an overview of the data') is also never a refusal: "
+    "exercise judgment and pick a sensible resolution from the catalog yourself — "
+    "e.g. a headline measure over the time dimension, or by its most natural "
+    "grouping. Vague means CHOOSE, not refuse. "
     'Only when NO capability offered here can answer the question, return kind '
     '"none" — and in '
     "`reason`, say what the catalog CAN answer that comes closest, so the operator "
@@ -1202,6 +1207,12 @@ def answer_question(
 ) -> dict[str, Any]:
     """Resolve → execute → answer one runtime question, returning the full payload.
 
+    A thin driver over :func:`answer_question_staged`: it consumes both stages
+    (``resolved`` then ``done``) and merges them into the single payload every
+    non-streaming caller (the CLI, ``POST /api/ask`` without ``stream``) has always
+    received — so the cache / log / rate-limit / self-repair semantics all live in
+    the staged generator, in one place, and this stays byte-compatible.
+
     Assumes the caller already checked ``llm`` + ``ask`` are enabled (see
     :func:`ask_unavailable_notice`). Two LLM calls on a cache miss: resolve, then
     answer. Raises :class:`AskLLMError` (→ 502) on an LLM failure and
@@ -1214,6 +1225,67 @@ def answer_question(
     the answer-generation prompt as the prior questions, and fingerprinted into the
     cache key (so the same follow-up text asked under two different sessions — even
     ones differing only by a chip-edited resolution detail — doesn't collide)."""
+    resolved_payload: dict[str, Any] = {}
+    done_fields: dict[str, Any] = {}
+    for stage, data in answer_question_staged(
+        project, question, params, refresh=refresh, history=history
+    ):
+        if stage == "resolved":
+            resolved_payload = data
+        elif stage == "done":
+            done_fields = data
+    # The staged generator always yields exactly one `resolved` (the full payload
+    # minus commentary) then one `done` (the commentary fields), so merging them
+    # reconstructs the exact payload the pre-staging blocking path returned.
+    payload = dict(resolved_payload)
+    payload.update(done_fields)
+    return payload
+
+
+def _done_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """The ``done``-stage fields (the commentary + cache flag) pulled off a full
+    payload — shared by the cache-hit and kind-``none`` stagings, whose ``resolved``
+    payload already carries its final answer text."""
+    return {
+        "answer_html": payload.get("answer_html", ""),
+        "answer_text": payload.get("answer_text", ""),
+        "annotations": payload.get("annotations", []),
+        "cached": payload.get("cached", False),
+    }
+
+
+def answer_question_staged(
+    project: "Project",
+    question: str,
+    params: dict[str, str] | None = None,
+    *,
+    refresh: bool = False,
+    history: list[dict[str, Any]] | None = None,
+):
+    """Staged sibling of :func:`answer_question` — an iterator of two tuples,
+    ``("resolved", payload)`` then ``("done", fields)``.
+
+    The ``resolved`` payload is the complete response **minus the LLM commentary**
+    (``resolved``, ``columns``, ``rows``, ``chart``, ``semantic_options`` when
+    semantic, ``model``, ``cached``, and empty ``answer_html``/``answer_text``/
+    ``annotations``); the ``done`` fields are ``{answer_html, answer_text,
+    annotations, cached}``. The streaming ``/api/ask`` branch relays each stage as an
+    SSE event so the operator sees provenance + chart + table the moment resolution
+    and the query complete, while the commentary is still generating.
+
+    **Eager vs. lazy split (deliberate).** The cache lookup and the rate-limit check
+    run *eagerly*, when this function is called — before the returned iterator is
+    first advanced — so the streaming endpoint can still answer a cache-miss over
+    budget with a plain-JSON ``429`` *before* it commits to an SSE response. A
+    :class:`AskRateLimitError` therefore raises out of this call, not out of
+    iteration. Everything that can make a billable LLM call (resolve, self-repair,
+    answer) lives inside the returned generator, so those failures surface *during*
+    iteration — i.e. after SSE headers are sent — as an ``error`` event rather than
+    a pre-header status code. A cache hit returns a two-item iterator replaying the
+    stored payload (``cached: true``).
+
+    Logging and the answer-cache write happen exactly once per ask, inside the
+    generator (never per stage)."""
     params = dict(params or {})
     cfg = project.config.ask
     llm_cfg = project.config.llm
@@ -1230,9 +1302,12 @@ def answer_question(
         if cached is not None:
             hit = dict(cached)
             hit["cached"] = True
-            return hit
+            return iter(
+                [("resolved", hit), ("done", _done_fields(hit))]
+            )
 
     # Past the cache → LLM spend ahead; the rate limit guards exactly this line.
+    # Eager (pre-iteration) so the streaming endpoint can 429 before headers.
     if rate_limited(cfg.rate_limit):
         raise AskRateLimitError(
             "ask rate limit reached "
@@ -1240,6 +1315,23 @@ def answer_question(
             "try again shortly"
         )
 
+    return _answer_stages(project, question, params, cfg, model, hist, hist_key)
+
+
+def _answer_stages(
+    project: "Project",
+    question: str,
+    params: dict[str, str],
+    cfg: Any,
+    model: str,
+    hist: list[dict[str, Any]],
+    hist_key: str | None,
+):
+    """The live (cache-miss) staging generator: resolve → execute → answer, yielding
+    ``resolved`` before the (second, billable) answer call so the panel paints early.
+
+    Split out from :func:`answer_question_staged` so the cache/rate-limit gate there
+    stays eager while every LLM call here stays lazy (see that docstring)."""
     adapter = project.get_llm_adapter()
     started = time.monotonic()
 
@@ -1287,7 +1379,9 @@ def answer_question(
             question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), hist_key
         )
         _log(project, question, resolution, 0, started, model, cfg, history=hist)
-        return payload
+        yield ("resolved", payload)
+        yield ("done", _done_fields(payload))
+        return
 
     # 2) Execute. Serialize once — the chart inference classifies the same
     # browser-facing cells the payload ships. A `list` routed onto a backend that
@@ -1301,9 +1395,38 @@ def answer_question(
             question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), hist_key
         )
         _log(project, question, resolution, 0, started, model, cfg, history=hist)
-        return payload
+        yield ("resolved", payload)
+        yield ("done", _done_fields(payload))
+        return
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
+
+    # The `resolved` stage: the complete payload with the commentary slots still
+    # empty. It ships the instant data is in hand so the panel paints provenance +
+    # chart + table while the (second) answer call runs.
+    resolved_payload: dict[str, Any] = {
+        "question": question,
+        "resolved": {
+            "kind": resolution.kind,
+            "provenance": resolution.provenance,
+            "query_name": resolution.query_name,
+            "connector": resolution.connector,
+            "detail": _resolution_detail(resolution),
+        },
+        "columns": serialized["columns"],
+        "rows": serialized["rows"],
+        "chart": chart,
+        "answer_html": "",
+        "answer_text": "",
+        "annotations": [],
+        "model": model,
+        "cached": False,
+    }
+    if resolution.kind == "semantic":
+        resolved_payload["semantic_options"] = _semantic_options(
+            project, resolution.model
+        )
+    yield ("resolved", resolved_payload)
 
     # 3) Answer — reuse the exact <Ask /> generation path. A chart shape means a
     # ChartContext, so generate_answer runs the annotation protocol for it.
@@ -1340,29 +1463,23 @@ def answer_question(
     except Exception as e:  # noqa: BLE001
         raise AskLLMError(f"{type(e).__name__}: {e}") from e
 
-    payload = {
-        "question": question,
-        "resolved": {
-            "kind": resolution.kind,
-            "provenance": resolution.provenance,
-            "query_name": resolution.query_name,
-            "connector": resolution.connector,
-            "detail": _resolution_detail(resolution),
-        },
-        "columns": serialized["columns"],
-        "rows": serialized["rows"],
-        "chart": chart,
-        "answer_html": answer_html,
-        "answer_text": answer_text,
-        "annotations": annotations,
-        "model": model,
-        "cached": False,
-    }
-    if resolution.kind == "semantic":
-        payload["semantic_options"] = _semantic_options(project, resolution.model)
-    cache_answer(question, params, payload, cfg.cache_ttl, hist_key)
+    # Merge the commentary back into the full payload for the answer cache (so a
+    # later hit replays chart + table + answer identically), then emit `done`.
+    full_payload = dict(resolved_payload)
+    full_payload["answer_html"] = answer_html
+    full_payload["answer_text"] = answer_text
+    full_payload["annotations"] = annotations
+    cache_answer(question, params, full_payload, cfg.cache_ttl, hist_key)
     _log(project, question, resolution, len(result.rows), started, model, cfg, history=hist)
-    return payload
+    yield (
+        "done",
+        {
+            "answer_html": answer_html,
+            "answer_text": answer_text,
+            "annotations": annotations,
+            "cached": False,
+        },
+    )
 
 
 def _none_payload(
@@ -1819,6 +1936,42 @@ def build_kept_markdown(
         ask_attrs.append(f'ask="{q_attr}"')
         components.append(f"<Ask {' '.join(ask_attrs)} />")
 
+    elif kind == "list":
+        # Re-validate the client-supplied detail against the live catalog. A list
+        # with no valid column degrades to kind "none" in _validate_list — we refuse
+        # to write it. Only the validated names land in the file (same trust model
+        # as the semantic rung).
+        obj = {
+            "kind": "list",
+            "model": detail.get("model"),
+            "columns": detail.get("columns"),
+            "order_by": detail.get("order_by"),
+            "desc": detail.get("desc", True),
+            "limit": detail.get("limit", DEFAULT_LIST_LIMIT),
+            "filters": detail.get("filters") or {},
+            "date_start": detail.get("date_start", ""),
+            "date_end": detail.get("date_end", ""),
+        }
+        res = _validate_list(obj, project)
+        if res.kind == "none":
+            raise ValueError(f"list answer failed re-validation: {res.reason}")
+        # Filters / date range are not carried into the file in v1 — flag it for the
+        # kept-from comment when the validated resolution held any.
+        filters_dropped = bool(res.filters) or bool(res.date_start) or bool(res.date_end)
+
+        list_attrs = [
+            f'model="{_attr_escape(res.model)}"',
+            f'columns="{_attr_escape(", ".join(res.columns))}"',
+        ]
+        if res.order_by:
+            list_attrs.append(f'order_by="{_attr_escape(res.order_by)}"')
+        # The <List> default is desc=true, so an ascending list must say so
+        # explicitly (a bare flag can't express "off").
+        list_attrs.append("desc" if res.desc else "desc=false")
+        list_attrs.append(f"limit={res.limit}")
+        list_attrs.append(f'title="{q_attr}"')
+        components.append(f"<List {' '.join(list_attrs)} />")
+
     else:  # kind == "query"
         name = detail.get("name") or (resolved or {}).get("query_name")
         if not isinstance(name, str) or not name.strip():
@@ -1838,7 +1991,8 @@ def build_kept_markdown(
         components.append(f'<Ask data={{{name}}} ask="{q_attr}" />')
 
     date = datetime.now().strftime("%Y-%m-%d")
-    comment = f"<!-- kept from an ask answer · {provenance} · {date} -->"
+    note = " · filters not carried over" if filters_dropped else ""
+    comment = f"<!-- kept from an ask answer · {provenance} · {date}{note} -->"
     parts = [f"## {heading}", comment, *components]
     return "\n" + "\n".join(parts) + "\n"
 

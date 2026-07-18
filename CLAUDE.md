@@ -359,9 +359,11 @@ older entries restore instantly client-side. Resolutions support a second groupi
 are split-coerced, and a validation failure gets one self-repair retry before degrading to none).
 **Keep on this page**: a dev-server-only panel button POSTs `{question, resolved, chart, path}` to
 `POST /_dashdown/api/ask/keep`, which **re-validates every name against the live catalog**
-(`build_kept_markdown` — client markdown is never trusted; semantic/query kinds only, dynamic
-`[slug]` pages refused) and appends a *live* section to the page's `.md` (heading + chart component
-+ table + an authored `<Ask>` re-asking the question) — "a dashboard is an answer you kept",
+(`build_kept_markdown` — client markdown is never trusted; semantic/query/list kinds (only raw
+`sql` is refused), dynamic `[slug]` pages refused) and appends a *live* section to the page's `.md`
+(heading + chart component + table + an authored `<Ask>` re-asking the question; a kept **list**
+answer emits a `<List model= columns= …>` re-validated by `_validate_list`, with filters/date range
+not carried into the file in v1) — "a dashboard is an answer you kept",
 mechanically. Cost control: the answer cache (bounded LRU,
 keys on `(normalized question, frozen params)`; kind-`none` cached only briefly) plus a
 process-wide sliding-window **rate limit** on cache-miss asks (`ask.rate_limit`/min, default 60,

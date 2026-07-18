@@ -781,13 +781,12 @@ class TestListResolution:
         assert "does not support list" in body["answer_text"]
         assert len(fake.calls) == 1  # resolve only, no answer call
 
-    def test_keep_refuses_list(self, tmp_path):
-        # A list answer can't be kept in v1 — the keep endpoint 400s with a clear
-        # message (the frontend button already gates on semantic|query).
+    def test_keep_writes_list(self, tmp_path):
+        # A list answer is now keepable — the keep endpoint re-validates the detail
+        # and appends a `<List …>` section to the page (v1: no filters carried).
         client = _semantic_client(tmp_path, FakeAdapter())
-        (client.app.state.project.root / "pages" / "keep_here.md").write_text(
-            "# Keep\n", encoding="utf-8"
-        )
+        page = client.app.state.project.root / "pages" / "keep_here.md"
+        page.write_text("# Keep\n", encoding="utf-8")
         r = client.post(
             "/_dashdown/api/ask/keep",
             json={
@@ -797,8 +796,8 @@ class TestListResolution:
                     "provenance": "list: sales — region",
                     "detail": {
                         "model": "sales",
-                        "columns": ["region"],
-                        "order_by": "region",
+                        "columns": ["region", "order_date"],
+                        "order_by": "order_date",
                         "desc": True,
                         "limit": 10,
                         "filters": {},
@@ -808,8 +807,95 @@ class TestListResolution:
                 "path": "/keep_here",
             },
         )
+        assert r.status_code == 200, r.text
+        md = page.read_text(encoding="utf-8")
+        assert "## last 10 orders" in md
+        assert '<List model="sales"' in md
+        assert 'columns="region, order_date"' in md
+        assert 'order_by="order_date"' in md
+        assert "desc" in md
+        assert "limit=10" in md
+        # No filters were set → the comment carries no "filters not carried over".
+        assert "filters not carried over" not in md
+
+    def test_keep_list_notes_dropped_filters(self, tmp_path):
+        # A list answer that carried a filter is kept, but the comment flags that
+        # the filter isn't carried into the file (v1).
+        client = _semantic_client(tmp_path, FakeAdapter())
+        page = client.app.state.project.root / "pages" / "keep_filtered.md"
+        page.write_text("# Keep\n", encoding="utf-8")
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "won orders",
+                "resolved": {
+                    "kind": "list",
+                    "provenance": "list: sales — region",
+                    "detail": {
+                        "model": "sales",
+                        "columns": ["region", "status"],
+                        "order_by": "region",
+                        "desc": False,
+                        "limit": 10,
+                        "filters": {"status": ["Won"]},
+                    },
+                },
+                "chart": None,
+                "path": "/keep_filtered",
+            },
+        )
+        assert r.status_code == 200, r.text
+        md = page.read_text(encoding="utf-8")
+        assert '<List model="sales"' in md
+        assert "desc=false" in md  # descending default overridden explicitly
+        assert "filters not carried over" in md
+
+    def test_keep_list_off_catalog_columns_raise(self, tmp_path):
+        # A list whose columns are all off-catalog fails re-validation → 400.
+        client = _semantic_client(tmp_path, FakeAdapter())
+        (client.app.state.project.root / "pages" / "keep_bad.md").write_text(
+            "# Keep\n", encoding="utf-8"
+        )
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "ghosts",
+                "resolved": {
+                    "kind": "list",
+                    "provenance": "list: sales — ghost",
+                    "detail": {
+                        "model": "sales",
+                        "columns": ["ghost", "phantom"],
+                        "order_by": "ghost",
+                        "desc": True,
+                        "limit": 10,
+                        "filters": {},
+                    },
+                },
+                "chart": None,
+                "path": "/keep_bad",
+            },
+        )
         assert r.status_code == 400
-        assert "list answers can't be kept" in r.json()["detail"]
+        assert "re-validation" in r.json()["detail"]
+
+    def test_keep_still_refuses_sql(self, tmp_path):
+        # A raw-sql answer stays unkeepable (no named artifact).
+        client = _semantic_client(tmp_path, FakeAdapter())
+        (client.app.state.project.root / "pages" / "keep_sql.md").write_text(
+            "# Keep\n", encoding="utf-8"
+        )
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "raw",
+                "resolved": {"kind": "sql", "detail": {"sql": "SELECT 1"}},
+                "chart": None,
+                "path": "/keep_sql",
+            },
+        )
+        assert r.status_code == 400
+        assert "raw SQL has no named source" in r.json()["detail"]
 
 
 @needs_bsl
@@ -1000,3 +1086,190 @@ class TestChartPref:
 
         assert "funnel" in RESOLVER_SYSTEM_PROMPT
         assert "never a reason to refuse" in RESOLVER_SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------- #
+# Staged SSE streaming — POST /api/ask with stream:true
+# --------------------------------------------------------------------------- #
+class RaisingAdapter(LLMAdapter):
+    """An adapter whose every completion raises — to exercise the streamed
+    error path (an LLM failure after SSE headers are sent)."""
+
+    def __init__(self):
+        super().__init__(LLMConfig(provider="mistral", api_key="test"))
+        self.calls = 0
+
+    def complete(self, system: str, prompt: str) -> str:
+        self.calls += 1
+        raise RuntimeError("boom")
+
+
+def _parse_sse(text: str) -> list[tuple[str, dict | None]]:
+    """Parse an SSE body into an ordered list of ``(event, data)`` frames."""
+    import json as _json
+
+    events: list[tuple[str, dict | None]] = []
+    for frame in text.split("\n\n"):
+        frame = frame.strip()
+        if not frame:
+            continue
+        event = None
+        data_lines: list[str] = []
+        for line in frame.split("\n"):
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:") :].strip())
+        data = _json.loads("\n".join(data_lines)) if data_lines else None
+        events.append((event, data))
+    return events
+
+
+class TestStreaming:
+    def test_stream_yields_resolved_then_done(self, tmp_path):
+        # A cache-miss stream: `resolved` ships rows+chart with an empty answer;
+        # `done` carries the rendered commentary. (Query rung — no bsl needed.)
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}',
+            "**North** leads the regions.",
+        )
+        client = _client(tmp_path, fake=fake)
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "revenue by region", "stream": True},
+        ) as r:
+            assert r.status_code == 200
+            assert "text/event-stream" in r.headers["content-type"]
+            body = "".join(r.iter_text())
+        events = _parse_sse(body)
+        kinds = [e for e, _ in events]
+        assert kinds == ["resolved", "done"], kinds
+
+        _, resolved = events[0]
+        assert resolved["resolved"]["kind"] == "query"
+        assert len(resolved["rows"]) == 3  # North/South/West
+        assert resolved["chart"]["type"] == "bar"
+        assert resolved["answer_html"] == ""
+        assert resolved["answer_text"] == ""
+        assert resolved["annotations"] == []
+        assert resolved["cached"] is False
+
+        _, done = events[1]
+        assert "<strong>North</strong>" in done["answer_html"]
+        assert done["answer_text"] == "**North** leads the regions."
+        assert done["cached"] is False
+
+    def test_stream_cache_hit_carries_full_answer(self, tmp_path):
+        # Prime the cache with a non-stream ask, then stream the same question →
+        # `resolved` carries cached:true AND the full answer; no new LLM calls.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}',
+            "Cached commentary.",
+        )
+        client = _client(tmp_path, fake=fake)
+        first = client.post(
+            "/_dashdown/api/ask", json={"question": "revenue by region"}
+        )
+        assert first.status_code == 200
+        assert first.json()["cached"] is False
+        calls_after = len(fake.calls)
+
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "revenue by region", "stream": True},
+        ) as r:
+            assert "text/event-stream" in r.headers["content-type"]
+            body = "".join(r.iter_text())
+        events = _parse_sse(body)
+        assert [e for e, _ in events] == ["resolved", "done"]
+        _, resolved = events[0]
+        assert resolved["cached"] is True
+        assert "Cached commentary." == resolved["answer_text"]
+        _, done = events[1]
+        assert done["cached"] is True
+        assert "Cached commentary." == done["answer_text"]
+        assert len(fake.calls) == calls_after  # cache hit — no re-billing
+
+    def test_stream_kind_none(self, tmp_path):
+        # An explicit none → `resolved` carries the none payload (reason as the
+        # answer), then `done` follows immediately.
+        fake = FakeAdapter('{"kind": "none", "reason": "not in the catalog"}')
+        client = _client(tmp_path, fake=fake)
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "the weather?", "stream": True},
+        ) as r:
+            assert "text/event-stream" in r.headers["content-type"]
+            body = "".join(r.iter_text())
+        events = _parse_sse(body)
+        assert [e for e, _ in events] == ["resolved", "done"]
+        _, resolved = events[0]
+        assert resolved["resolved"]["kind"] == "none"
+        assert resolved["columns"] is None
+        assert resolved["chart"] is None
+        assert "not in the catalog" in resolved["answer_text"]
+        _, done = events[1]
+        assert "not in the catalog" in done["answer_text"]
+
+    def test_stream_absent_is_plain_json(self, tmp_path):
+        # No stream flag → byte-identical single-JSON behavior (the CLI/tests rely
+        # on this). Explicitly assert the content-type is JSON, not event-stream.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "Ans.",
+        )
+        client = _client(tmp_path, fake=fake)
+        r = client.post(
+            "/_dashdown/api/ask", json={"question": "revenue by region"}
+        )
+        assert r.status_code == 200
+        assert "application/json" in r.headers["content-type"]
+        body = r.json()
+        assert body["resolved"]["kind"] == "query"
+        assert body["answer_text"] == "Ans."
+
+    def test_stream_llm_failure_is_error_event(self, tmp_path):
+        # The resolver call raises *after* headers are sent → an `error` event
+        # (not a pre-header status code), and no `resolved` is emitted.
+        client = _client(tmp_path, fake=RaisingAdapter())
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "revenue by region", "stream": True},
+        ) as r:
+            assert r.status_code == 200
+            assert "text/event-stream" in r.headers["content-type"]
+            body = "".join(r.iter_text())
+        events = _parse_sse(body)
+        assert [e for e, _ in events] == ["error"], events
+        _, err = events[0]
+        assert "detail" in err
+        assert "LLM request failed" in err["detail"]
+
+    def test_stream_rate_limit_is_json_429_before_headers(self, tmp_path):
+        # Rate-limit is checked before the stream commits → a plain-JSON 429, not
+        # an SSE error (the client falls back on content-type).
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "A.",
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  rate_limit: 1\n")
+        # First (non-stream) ask burns the single-slot budget.
+        first = client.post("/_dashdown/api/ask", json={"question": "first q"})
+        assert first.status_code == 200
+        # A distinct streamed ask is refused before any SSE headers.
+        r = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "second q", "stream": True},
+        )
+        assert r.status_code == 429
+        assert "application/json" in r.headers["content-type"]
+
+    def test_prompt_demands_initiative_on_open_questions(self):
+        # "Show me some random chart" must trigger a choice, not a refusal —
+        # the disposition rule the strict-router prompt was missing.
+        from dashdown.ask_engine import RESOLVER_SYSTEM_PROMPT
+
+        assert "underspecified" in RESOLVER_SYSTEM_PROMPT
+        assert "CHOOSE, not refuse" in RESOLVER_SYSTEM_PROMPT
