@@ -17,11 +17,17 @@ behalf before anyone remembers to.
   `campaign`, `channel`, `city`, `order_date` dimensions) — the KPI row's
   revenue/order counters read straight from it.
 - `queries/kpi/repeat_rate.sql`, `queries/kpi/weekly_repeat_trend.sql`,
-  `queries/campaigns/performance.sql`, `queries/campaigns/repeat_purchasers.sql`
+  `queries/campaigns/performance.sql`, `queries/campaigns/repeat_purchasers.sql`,
+  `queries/customers/recent_orders.sql`
   — the shared query library the page, the header ask box, and the trigger all
   resolve by name. Repeat-purchase logic (an earlier order exists for that
   customer) needs a correlated subquery BSL can't express, so it lives here
-  rather than in the semantic model.
+  rather than in the semantic model. `recent_orders` is the **list-shaped**
+  query: the semantic model answers *aggregate* questions (a metric grouped by
+  dimensions), so detail questions like "show me the last 10 customers that
+  ordered" route to a library query whose description matches — write your
+  list queries with routing-friendly descriptions and the ask box answers
+  them with a table.
 - `pages/index.md` — the dashboard: KPI row, a campaign performance bar chart
   (`explain`-annotated), the weekly repeat-rate trend, the "who to call" table,
   a channel filter, and an authored `<Ask>`.

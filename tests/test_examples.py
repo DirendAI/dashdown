@@ -181,3 +181,45 @@ def test_trigger_spec_parses():
         assert trigger.actions == []
     finally:
         proj.close()
+
+
+def test_list_question_routes_to_recent_orders_table():
+    """The 'show me the last N customers that ordered' shape: a detail/list
+    question resolves to the customers.recent_orders library query and comes
+    back as a table (rows, newest first) — not a forced aggregate."""
+    from dashdown import ask_engine
+
+    class _Fake:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, system, prompt):
+            self.calls.append((system, prompt))
+            if len(self.calls) == 1:
+                return (
+                    '{"kind": "query", "name": "customers.recent_orders", '
+                    '"params": {}}'
+                )
+            return "The most recent orders came mostly from Summer Referral Push."
+
+    proj = load_project(EXAMPLE)
+    proj.llm_adapter = _Fake()
+    try:
+        assert "customers.recent_orders" in proj.queries
+        payload = ask_engine.answer_question(
+            proj, "show me the last 10 customers that ordered (routing smoke)"
+        )
+        assert payload["resolved"]["kind"] == "query"
+        assert payload["resolved"]["query_name"] == "customers.recent_orders"
+        cols = payload["columns"]
+        assert "customer" in cols and "order_date" in cols
+        rows = payload["rows"]
+        assert 0 < len(rows) <= 50
+        # Newest first.
+        dates = [r[cols.index("order_date")] for r in rows]
+        assert dates[0] >= dates[-1]
+        # The list answer renders even if a chart is inferred — the table is
+        # the deliverable; answer text rides along.
+        assert payload["answer_text"]
+    finally:
+        proj.close()

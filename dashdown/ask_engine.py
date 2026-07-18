@@ -220,8 +220,14 @@ RESOLVER_SYSTEM_PROMPT = (
     "in `series`, never a comma-joined pair. `grain` "
     "must be one of the model's grains and only makes sense with a time-dimension "
     "`by`; `filters` keys must be the model's dimensions. `name` must be a query "
-    "listed in the catalog. If nothing in the catalog can answer the question, "
-    'return kind "none" with a short reason. Never invent names.'
+    "listed in the catalog.\n\n"
+    "Semantic models answer AGGREGATE questions only — a measure grouped by "
+    "dimensions. A detail/list question ('show/list the last N orders', 'which "
+    "customers ordered recently', 'give me the list of …') can NOT be a semantic "
+    "resolution: answer it with a catalog query whose description matches the "
+    "requested rows. If nothing in the catalog can answer the question, "
+    'return kind "none" — and in `reason`, say what the catalog CAN answer that '
+    "comes closest, so the operator knows what to ask instead. Never invent names."
 )
 
 # Appended to the system prompt only when ask.allow_sql is on (rung 3 opt-in).
