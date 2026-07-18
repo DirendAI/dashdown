@@ -67,3 +67,6 @@ tooling/npm-debug.log*
 *.swo
 *~
 .python-version
+
+# --- dashdown project-local runtime state (ask log, caches) ---
+.dashdown/

@@ -1,2 +1,0 @@
-{"ts": "2026-07-18T14:49:53.443580+00:00", "question": "show me the last 10 customers that ordered (routing smoke)", "kind": "query", "via": "ask", "provenance": "named query 'customers.recent_orders'", "rows": 50, "duration_ms": 7.6, "model": "", "cached": false}
-{"ts": "2026-07-18T14:50:33.033656+00:00", "question": "show me the last 10 customers that ordered (routing smoke)", "kind": "query", "via": "ask", "provenance": "named query 'customers.recent_orders'", "rows": 50, "duration_ms": 4.6, "model": "", "cached": false}
