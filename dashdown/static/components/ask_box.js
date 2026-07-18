@@ -961,7 +961,13 @@ function initOne(el) {
         pill.className = "dashdown-ask-trail-pill";
         pill.textContent = short;
         pill.title = full;
-        pill.addEventListener("click", () => restoreTrailEntry(idx));
+        pill.addEventListener("click", (ev) => {
+          // The restore rebuilds the panel synchronously, detaching this pill;
+          // stop the click bubbling so the document click-away handler doesn't
+          // then see the detached target as "outside" and close the panel.
+          ev.stopPropagation();
+          restoreTrailEntry(idx);
+        });
         row.appendChild(pill);
       }
     });
