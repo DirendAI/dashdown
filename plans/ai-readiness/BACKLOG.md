@@ -37,8 +37,11 @@ reviewed by the orchestrating session before merge.
 ## Follow-ups (explicitly deferred)
 
 - User-facing docs pages (`docs/`) + `tooling/gen-agent-docs.py` re-run.
-- **Staged answers** (biggest perceived-latency win): stream resolution →
-  provenance → data → answer over SSE instead of one blocking response.
+- **Staged answers — shipped** (`stream: true` SSE: `resolved` paints
+  provenance/chart/table early, `done` delivers commentary; JSON path
+  unchanged). **`<List>` component + list keep — shipped.** **Direct-SQL
+  passthrough — shipped** (typed SQL skips the resolver, attempt-and-fallback
+  detection).
 - **Refinement Tier 2** (Tier 1 — provenance chips + contextual follow-up +
   session trail — shipped): model-suggested follow-up chips riding the answer
   call (annotation-fence-style protocol); dimension *value* options for filter

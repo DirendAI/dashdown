@@ -1273,3 +1273,63 @@ class TestStreaming:
 
         assert "underspecified" in RESOLVER_SYSTEM_PROMPT
         assert "CHOOSE, not refuse" in RESOLVER_SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------- #
+# Direct-SQL passthrough: typed SQL skips the resolver (attempt-and-fallback)
+# --------------------------------------------------------------------------- #
+class TestDirectSqlPassthrough:
+    def test_typed_sql_skips_resolver(self, tmp_path):
+        # Only ONE LLM call (the answer) — the resolver never runs.
+        fake = FakeAdapter("Three regions, South leads.")
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  allow_sql: true\n")
+        body = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "SELECT region, amount FROM sales ORDER BY amount DESC"},
+        ).json()
+        assert body["resolved"]["kind"] == "sql"
+        assert body["resolved"]["provenance"] == "raw SQL (typed directly)"
+        assert len(body["rows"]) == 3
+        assert len(fake.calls) == 1  # answer only, no resolver call
+
+    def test_english_starting_with_select_falls_back(self, tmp_path):
+        # "select the best region from our data" parses as SQL-ish but fails to
+        # execute → silently falls back to the normal resolver path.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}',
+            "North leads.",
+        )
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  allow_sql: true\n")
+        body = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "select the best region from our data please"},
+        ).json()
+        assert body["resolved"]["kind"] == "query"
+        assert len(fake.calls) == 2  # resolver + answer, as normal
+
+    def test_no_passthrough_when_sql_disabled(self, tmp_path):
+        # allow_sql off → typed SQL is just a question for the resolver.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "A.",
+        )
+        client = _client(tmp_path, fake=fake)
+        body = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "SELECT * FROM sales"},
+        ).json()
+        assert body["resolved"]["kind"] == "query"
+        assert len(fake.calls) == 2
+
+    def test_typed_sql_streams_staged(self, tmp_path):
+        # The passthrough rides the staged protocol like any answer.
+        fake = FakeAdapter("Streamed commentary.")
+        client = _client(tmp_path, fake=fake, extra_yaml="ask:\n  allow_sql: true\n")
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "SELECT region FROM sales", "stream": True},
+        ) as resp:
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            raw = b"".join(resp.iter_bytes()).decode("utf-8")
+        assert "event: resolved" in raw and "event: done" in raw
+        assert "typed directly" in raw

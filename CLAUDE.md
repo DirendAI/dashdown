@@ -364,7 +364,14 @@ are split-coerced, and a validation failure gets one self-repair retry before de
 (heading + chart component + table + an authored `<Ask>` re-asking the question; a kept **list**
 answer emits a `<List model= columns= …>` re-validated by `_validate_list`, with filters/date range
 not carried into the file in v1) — "a dashboard is an answer you kept",
-mechanically. Cost control: the answer cache (bounded LRU,
+mechanically. **Staged answers**: `POST /_dashdown/api/ask` with `stream: true` responds as SSE —
+an `resolved` event ships provenance+data+chart the moment the query lands (the panel paints
+early), `done` delivers the commentary; rate-limit/notice refuse as plain JSON *before* headers,
+LLM failures after headers become `error` events; `stream` absent stays byte-identical JSON (the
+CLI path). **Direct-SQL passthrough**: with `allow_sql` on, a question that *is* SQL
+(`SELECT`/`WITH`) skips the resolver call and runs as-is (provenance "raw SQL (typed directly)");
+detection is attempt-and-fallback — if it fails to execute it silently re-enters the normal
+resolver path as English. Cost control: the answer cache (bounded LRU,
 keys on `(normalized question, frozen params)`; kind-`none` cached only briefly) plus a
 process-wide sliding-window **rate limit** on cache-miss asks (`ask.rate_limit`/min, default 60,
 0 disables → endpoint 429s) — every miss is two billable LLM calls. Extend

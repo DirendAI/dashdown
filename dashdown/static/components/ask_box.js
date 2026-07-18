@@ -854,17 +854,20 @@ function initOne(el) {
   // ---- Keep + follow-up ---------------------------------------------------
 
   // "Keep on this page": append this answer's chart to the current page's source
-  // markdown, so the operator's ad-hoc question becomes a permanent card. Only
-  // for answers that resolved to a semantic metric or a named query (`resolved.kind`
-  // "semantic"/"query") — a raw-SQL answer has no stable, re-runnable reference to
-  // embed. Gated by the box's `ask_keep` config flag (server: `ask_keep_enabled`).
-  // Rebuilt on every render/refine so it always keeps the *current* edited spec
-  // (it posts the current trail entry's `resolved`, which the server re-validates).
+  // markdown, so the operator's ad-hoc question becomes a permanent card. For
+  // answers that resolved to a semantic metric, a named query, or a semantic
+  // list (kept as an authored <List>) — a raw-SQL answer has no stable,
+  // re-runnable reference to embed. Gated by the box's `ask_keep` config flag
+  // (server: `ask_keep_enabled`). Rebuilt on every render/refine so it always
+  // keeps the *current* edited spec (it posts the current trail entry's
+  // `resolved`, which the server re-validates).
+  const _KEEPABLE_KINDS = ["semantic", "query", "list"];
+
   function renderKeepFooter(payload) {
     slots.keep.innerHTML = "";
     if (!config.ask_keep) return;
     const resolved = payload.resolved || {};
-    if (resolved.kind !== "semantic" && resolved.kind !== "query") return;
+    if (!_KEEPABLE_KINDS.includes(resolved.kind)) return;
 
     const footer = mkDiv("dashdown-ask-box-keep");
     const btn = document.createElement("button");

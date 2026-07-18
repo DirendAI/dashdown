@@ -1335,6 +1335,30 @@ def _answer_stages(
     adapter = project.get_llm_adapter()
     started = time.monotonic()
 
+    # 0) Direct-SQL passthrough. An operator who TYPES SQL into the box (only
+    # meaningful with allow_sql on) shouldn't have it round-tripped through the
+    # resolver — skip that call and run it as-is (SELECT/WITH guard included,
+    # via parse_resolution). Detection is attempt-and-fallback: "select the
+    # best campaign from our list" is English that pattern-matches SQL, so a
+    # failed *parse/execution* silently falls through to the normal resolver
+    # path — a false positive costs one failed query, never a broken answer.
+    if cfg.allow_sql and re.match(r"(?is)^\s*(select|with)\b", question):
+        direct = parse_resolution(
+            json.dumps({"kind": "sql", "sql": question}), project, cfg.allow_sql
+        )
+        if direct.kind == "sql":
+            direct.provenance = "raw SQL (typed directly)"
+            try:
+                result = execute_resolution(direct, project, params)
+            except AskQueryError:
+                result = None  # not runnable SQL after all — treat as English
+            if result is not None:
+                yield from _stages_for_result(
+                    project, question, params, cfg, model, hist, hist_key,
+                    direct, result, adapter, started,
+                )
+                return
+
     # 1) Resolve.
     catalog = build_ask_catalog(project)
     if cfg.allow_sql:
@@ -1398,6 +1422,28 @@ def _answer_stages(
         yield ("resolved", payload)
         yield ("done", _done_fields(payload))
         return
+    yield from _stages_for_result(
+        project, question, params, cfg, model, hist, hist_key,
+        resolution, result, adapter, started,
+    )
+
+
+def _stages_for_result(
+    project: "Project",
+    question: str,
+    params: dict[str, str],
+    cfg: Any,
+    model: str,
+    hist: list[dict[str, Any]],
+    hist_key: str | None,
+    resolution: Resolution,
+    result: QueryResult,
+    adapter: Any,
+    started: float,
+):
+    """Serialize → yield ``resolved`` → generate commentary → cache/log → yield
+    ``done``, for an already-executed resolution. Shared by the normal resolver
+    path and the direct-SQL passthrough (which skips the resolver call)."""
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
 
