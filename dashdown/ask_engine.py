@@ -228,18 +228,41 @@ _ALLOW_SQL_CLAUSE = (
 
 
 def build_resolver_prompt(
-    catalog: dict[str, Any], question: str, allow_sql: bool
+    catalog: dict[str, Any],
+    question: str,
+    allow_sql: bool,
+    previous: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Return ``(system, user)`` for the resolution call.
 
     The ``sql`` rung is described in the system prompt **only** when ``allow_sql``
     — a model can't pick a rung it was never told about (belt to the validator's
-    braces, which reject ``sql`` regardless when the config is off)."""
+    braces, which reject ``sql`` regardless when the config is off).
+
+    When ``previous`` (a sanitized ``{question, resolved}`` from an earlier ask) is
+    supplied, a follow-up context block is inserted before the question so the model
+    can resolve a refinement ("only paid channels") against the prior resolution's
+    model/metric. The previous resolution is **data for the prompt only** — never
+    executed — so a refinement still routes through the same catalog validation."""
     system = RESOLVER_SYSTEM_PROMPT + (_ALLOW_SQL_CLAUSE if allow_sql else "")
+    context = ""
+    if previous:
+        prev_q = str(previous.get("question", ""))
+        prev_resolved = previous.get("resolved", {})
+        context = (
+            "The operator previously asked: " + prev_q + "\n"
+            "It was resolved as: " + json.dumps(prev_resolved, default=str) + "\n"
+            "The new question below may refine it (a changed dimension/filter/time "
+            "frame) or be a follow-up in its context — resolve the NEW question, "
+            "reusing the previous resolution's model/metric where the new question "
+            "implies it.\n\n"
+        )
     user = (
         "Catalog:\n"
         + json.dumps(catalog, indent=2, default=str)
-        + f"\n\nQuestion: {question}\n\nJSON:"
+        + "\n\n"
+        + context
+        + f"Question: {question}\n\nJSON:"
     )
     return system, user
 
@@ -657,9 +680,9 @@ def infer_chart_shape(payload: dict[str, Any]) -> dict[str, str] | None:
 # whole response payload so a hit replays chart + table + answer identically;
 # `refresh` (POST body) bypasses it — config can't disable runtime refresh,
 # cache_ttl bounds the cost instead.
-_answer_cache: OrderedDict[tuple[str, tuple], tuple[dict[str, Any], float]] = (
-    OrderedDict()
-)
+_answer_cache: OrderedDict[
+    tuple[str, tuple, str | None], tuple[dict[str, Any], float]
+] = OrderedDict()
 
 _WS_RE = re.compile(r"\s+")
 
@@ -670,16 +693,24 @@ def normalize_question(question: str) -> str:
     return _WS_RE.sub(" ", (question or "").strip().lower())
 
 
-def _cache_key(question: str, params: dict[str, str]) -> tuple[str, tuple]:
+def _cache_key(
+    question: str, params: dict[str, str], spec_key: str | None = None
+) -> tuple[str, tuple, str | None]:
     # _freeze_params is the same freezer the result cache keys on, so the two
-    # layers can never disagree about what "the same params" means.
-    return (normalize_question(question), _freeze_params(params))
+    # layers can never disagree about what "the same params" means. The optional
+    # third element is a discriminator that keeps entries with the *same*
+    # (question, params) from colliding when they mean different things: an edited
+    # semantic spec (execute_spec passes a canonical spec fingerprint) or a
+    # follow-up asked in a different context (answer_question passes the previous
+    # question). When None, the key is the plain (question, params) pair — so the
+    # default answer_question path keeps its original cache behavior.
+    return (normalize_question(question), _freeze_params(params), spec_key)
 
 
 def get_cached_answer(
-    question: str, params: dict[str, str]
+    question: str, params: dict[str, str], spec_key: str | None = None
 ) -> dict[str, Any] | None:
-    key = _cache_key(question, params)
+    key = _cache_key(question, params, spec_key)
     entry = _answer_cache.get(key)
     if entry is None:
         return None
@@ -692,9 +723,13 @@ def get_cached_answer(
 
 
 def cache_answer(
-    question: str, params: dict[str, str], payload: dict[str, Any], ttl: int
+    question: str,
+    params: dict[str, str],
+    payload: dict[str, Any],
+    ttl: int,
+    spec_key: str | None = None,
 ) -> None:
-    key = _cache_key(question, params)
+    key = _cache_key(question, params, spec_key)
     _answer_cache[key] = (payload, time.monotonic() + ttl)
     _answer_cache.move_to_end(key)
     while len(_answer_cache) > MAX_CACHED_ANSWERS:
@@ -728,6 +763,7 @@ def answer_question(
     params: dict[str, str] | None = None,
     *,
     refresh: bool = False,
+    previous: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve → execute → answer one runtime question, returning the full payload.
 
@@ -735,14 +771,24 @@ def answer_question(
     :func:`ask_unavailable_notice`). Two LLM calls on a cache miss: resolve, then
     answer. Raises :class:`AskLLMError` (→ 502) on an LLM failure and
     :class:`AskQueryError` (→ 500) on a query failure; a *bad resolution* is never
-    an error — it degrades to kind ``none`` in the payload."""
+    an error — it degrades to kind ``none`` in the payload.
+
+    ``previous`` is an optional ``{question, resolved}`` from an earlier ask (the
+    follow-up surface): it is sanitized to plain data, threaded into the resolver
+    prompt as context, and folded into the cache key (so the same follow-up text
+    asked in two different contexts doesn't collide)."""
     params = dict(params or {})
     cfg = project.config.ask
     llm_cfg = project.config.llm
     model = resolve_model_name(llm_cfg)
 
+    prev = _sanitize_previous(previous)
+    # A follow-up asked under different context must not share a cache entry with
+    # the same text asked cold, so the prior question discriminates the key.
+    prev_key = normalize_question(prev["question"]) if prev else None
+
     if not refresh:
-        cached = get_cached_answer(question, params)
+        cached = get_cached_answer(question, params, prev_key)
         if cached is not None:
             hit = dict(cached)
             hit["cached"] = True
@@ -761,7 +807,7 @@ def answer_question(
 
     # 1) Resolve.
     catalog = build_ask_catalog(project)
-    system, user = build_resolver_prompt(catalog, question, cfg.allow_sql)
+    system, user = build_resolver_prompt(catalog, question, cfg.allow_sql, prev)
     try:
         raw = adapter.complete(system, user)
     except Exception as e:  # noqa: BLE001
@@ -792,7 +838,9 @@ def answer_question(
         # Short TTL: a "none" may be a transient resolver misroute, and the ask
         # box never sends refresh — caching it for the full cache_ttl would pin
         # a valid question as "unanswerable" for up to an hour.
-        cache_answer(question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL))
+        cache_answer(
+            question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), prev_key
+        )
         _log(project, question, resolution, 0, started, model, cfg)
         return payload
 
@@ -840,7 +888,9 @@ def answer_question(
         "model": model,
         "cached": False,
     }
-    cache_answer(question, params, payload, cfg.cache_ttl)
+    if resolution.kind == "semantic":
+        payload["semantic_options"] = _semantic_options(project, resolution.model)
+    cache_answer(question, params, payload, cfg.cache_ttl, prev_key)
     _log(project, question, resolution, len(result.rows), started, model, cfg)
     return payload
 
@@ -872,6 +922,7 @@ def _log(
     started: float,
     model: str,
     cfg: Any,
+    via: str = "ask",
 ) -> None:
     if not cfg.log:
         return
@@ -881,6 +932,7 @@ def _log(
             "ts": datetime.now(timezone.utc).isoformat(),
             "question": question,
             "kind": resolution.kind,
+            "via": via,
             "provenance": resolution.provenance,
             "rows": rows,
             "duration_ms": round((time.monotonic() - started) * 1000, 1),
@@ -888,6 +940,214 @@ def _log(
             "cached": False,
         },
     )
+
+
+# --------------------------------------------------------------------------- #
+# Follow-up context + semantic-spec editing (Tier 1 answer refinement)
+# --------------------------------------------------------------------------- #
+def _sanitize_previous(previous: Any) -> dict[str, Any] | None:
+    """Coerce a client-supplied ``previous`` block to at most
+    ``{question: str, resolved: {kind, detail}}``.
+
+    It is **data for the resolver prompt only** — never executed — so this only
+    shapes/bounds it: the question is trimmed to ~500 chars, and ``resolved`` is
+    narrowed to a ``kind`` string + an opaque ``detail`` value. Anything malformed
+    → ``None`` (no context block)."""
+    if not isinstance(previous, dict):
+        return None
+    question = previous.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return None
+    out: dict[str, Any] = {"question": question.strip()[:500]}
+    resolved = previous.get("resolved")
+    if isinstance(resolved, dict):
+        clean: dict[str, Any] = {}
+        kind = resolved.get("kind")
+        if isinstance(kind, str):
+            clean["kind"] = kind
+        if "detail" in resolved:
+            clean["detail"] = resolved.get("detail")
+        if clean:
+            out["resolved"] = clean
+    return out
+
+
+def _semantic_options(
+    project: "Project", model_name: str | None
+) -> dict[str, Any] | None:
+    """The editable vocabulary of a semantic model, for the answer panel's chips.
+
+    Short (last-segment) names, sorted — built from the model handle exactly like
+    :func:`build_ask_catalog` does, so a chip references a name the resolver /
+    :func:`_validate_semantic` accepts. ``None`` when the model is unknown."""
+    handle = project.semantic_models.get(model_name) if model_name else None
+    if handle is None:
+        return None
+    return {
+        "model": model_name,
+        "measures": sorted({m.split(".")[-1] for m in handle.measures}),
+        "dimensions": sorted({d.split(".")[-1] for d in handle.dimensions}),
+        "time_dimension": (
+            handle.time_dimension.split(".")[-1] if handle.time_dimension else None
+        ),
+        "grains": list(GRAIN_TOKENS),
+    }
+
+
+def _spec_fingerprint(resolution: Resolution) -> str:
+    """A canonical, order-stable key for a validated semantic resolution.
+
+    Two edited specs that mean the same thing hash the same; an edited spec never
+    collides with the original answer to the same question text."""
+    return json.dumps(
+        {
+            "model": resolution.model,
+            "metric": resolution.metric,
+            "by": resolution.by,
+            "grain": resolution.grain,
+            "filters": resolution.filters,
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+def execute_spec(
+    project: "Project",
+    question: str,
+    spec: dict[str, Any],
+    params: dict[str, str],
+    *,
+    commentary: bool,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Re-execute a client-edited semantic spec, optionally with LLM commentary.
+
+    The answer panel's chips build a ``spec`` — ``{"kind": "semantic", "model",
+    "metric", "by", "grain", "filters"}`` — and POST it here to re-run *without* an
+    LLM resolution call. The spec is validated through the **same**
+    :func:`_validate_semantic` the LLM output goes through (semantic values are pure
+    JSON data — no injection surface); a non-semantic kind or a validation failure
+    raises :class:`ValueError` (the endpoint 400s: a client-built spec that fails
+    validation is a *client* error, unlike an LLM hallucination which degrades to
+    ``none``).
+
+    ``commentary=False`` (the chip path) executes + serializes + infers the chart
+    and returns the standard payload with empty ``answer_html``/``answer_text`` and
+    no annotations — **no LLM call, no rate-limit consumption, never cached**.
+    ``commentary=True`` adds exactly one LLM call via the same
+    :func:`generate_answer` path :func:`answer_question` uses (consuming the rate
+    limit, raising :class:`AskRateLimitError` when exhausted) and caches the full
+    payload under a key discriminated by the spec fingerprint (so an edited spec
+    never collides with the original answer to the same question). ``refresh=True``
+    bypasses the cache."""
+    if not isinstance(spec, dict) or str(spec.get("kind", "")).strip().lower() != "semantic":
+        raise ValueError(
+            "spec must be a semantic spec ({'kind': 'semantic', 'model', 'metric', …})"
+        )
+
+    params = dict(params or {})
+    cfg = project.config.ask
+    model = resolve_model_name(project.config.llm)
+
+    # Validate through the exact same catalog check the LLM output goes through.
+    obj = {
+        "kind": "semantic",
+        "model": spec.get("model"),
+        "metric": spec.get("metric"),
+        "by": spec.get("by"),
+        "grain": spec.get("grain"),
+        "filters": spec.get("filters") or {},
+    }
+    resolution = _validate_semantic(obj, project)
+    if resolution.kind == "none":
+        raise ValueError(f"invalid semantic spec: {resolution.reason}")
+
+    spec_key = _spec_fingerprint(resolution)
+
+    # commentary=True can replay from cache; commentary=False is a bare re-execute
+    # (no LLM cost to save), so it always runs fresh and reports cached: false.
+    if commentary and not refresh:
+        cached = get_cached_answer(question, params, spec_key)
+        if cached is not None:
+            hit = dict(cached)
+            hit["cached"] = True
+            return hit
+
+    if commentary and rate_limited(cfg.rate_limit):
+        raise AskRateLimitError(
+            "ask rate limit reached "
+            f"({cfg.rate_limit}/min — ask.rate_limit in dashdown.yaml); "
+            "try again shortly"
+        )
+
+    started = time.monotonic()
+    result = execute_resolution(resolution, project, params)
+    serialized = serialize_result(result)
+    chart = infer_chart_shape(serialized)
+
+    resolved = {
+        "kind": resolution.kind,
+        "provenance": resolution.provenance,
+        "query_name": resolution.query_name,
+        "connector": resolution.connector,
+        "detail": _resolution_detail(resolution),
+    }
+    semantic_options = _semantic_options(project, resolution.model)
+
+    if not commentary:
+        payload = {
+            "question": question,
+            "resolved": resolved,
+            "columns": serialized["columns"],
+            "rows": serialized["rows"],
+            "chart": chart,
+            "answer_html": "",
+            "answer_text": "",
+            "annotations": [],
+            "model": model,
+            "semantic_options": semantic_options,
+            "cached": False,
+        }
+        _log(project, question, resolution, len(result.rows), started, model, cfg, via="spec_edit")
+        return payload
+
+    # commentary=True: one LLM call, same generation path as answer_question step 3.
+    chart_ctx: ChartContext | None = None
+    if chart is not None:
+        chart_ctx = build_chart_context(chart["type"], x=chart["x"], y=chart["y"])
+    synthetic = AskDef(
+        id="_ask_runtime",
+        queries=((resolution.query_name or "result", resolution.connector or ""),),
+        prompt=question,
+        max_rows=cfg.max_rows,
+        page_title=project.config.title,
+        chart_context=chart_ctx,
+    )
+    adapter = project.get_llm_adapter()
+    try:
+        answer_html, answer_text, annotations = generate_answer(
+            synthetic, [result], adapter, params
+        )
+    except Exception as e:  # noqa: BLE001
+        raise AskLLMError(f"{type(e).__name__}: {e}") from e
+
+    payload = {
+        "question": question,
+        "resolved": resolved,
+        "columns": serialized["columns"],
+        "rows": serialized["rows"],
+        "chart": chart,
+        "answer_html": answer_html,
+        "answer_text": answer_text,
+        "annotations": annotations,
+        "model": model,
+        "semantic_options": semantic_options,
+        "cached": False,
+    }
+    cache_answer(question, params, payload, cfg.cache_ttl, spec_key)
+    _log(project, question, resolution, len(result.rows), started, model, cfg, via="spec_edit")
+    return payload
 
 
 # --------------------------------------------------------------------------- #

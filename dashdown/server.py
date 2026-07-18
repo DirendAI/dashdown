@@ -877,13 +877,85 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             raise HTTPException(status_code=400, detail="'params' must be an object")
         params = {str(k): str(v) for k, v in raw_params.items() if not str(k).startswith("_")}
         refresh = bool(body.get("refresh"))
+        # Optional follow-up context: the previous {question, resolved} so a
+        # refinement ("only paid channels") resolves as a delta. It is data for
+        # the resolver prompt only (answer_question sanitizes it), never executed.
+        previous = body.get("previous")
 
         notice = ask_unavailable_notice(proj)
         if notice is not None:
             return JSONResponse({"question": question, "answer_html": "", "notice": notice})
 
         try:
-            payload = answer_question(proj, question.strip(), params, refresh=refresh)
+            payload = answer_question(
+                proj, question.strip(), params, refresh=refresh, previous=previous
+            )
+        except AskRateLimitError as e:
+            raise HTTPException(status_code=429, detail=str(e))
+        except AskLLMError as e:
+            raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+        except AskQueryError as e:
+            raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
+        return JSONResponse(payload)
+
+    @app.post("/_dashdown/api/ask/execute")
+    def post_ask_execute(request: Request, body: Any = Body(default=None)):
+        """Re-execute a client-edited semantic spec (the answer-panel chips).
+
+        The answer panel grows interactive chips that let the operator swap the
+        measure / dimension / grain / filters of a **semantic** answer and re-run
+        it *without* an LLM resolution call. The client sends the edited ``spec``;
+        this validates it against the live catalog (the same check the LLM output
+        goes through — semantic values are pure JSON data, no injection surface)
+        and executes it. ``commentary=false`` (the default) returns data + chart
+        with no LLM call and no rate-limit consumption; ``commentary=true`` adds
+        one LLM call for the typed answer + chart annotations.
+
+        Same notice gate as ``POST /api/ask`` (the chips only live inside an answer
+        panel that already required the LLM). 400 on a malformed body / empty
+        question / missing-or-invalid spec (a client-built spec failing validation
+        is a client error, unlike an LLM hallucination); 429 past the rate limit;
+        502 on an LLM failure; 500 on a query failure.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        from dashdown.ask_engine import (
+            AskLLMError,
+            AskQueryError,
+            AskRateLimitError,
+            ask_unavailable_notice,
+            execute_spec,
+        )
+
+        proj: Project = request.app.state.project
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        question = body.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise HTTPException(status_code=400, detail="a non-empty 'question' is required")
+        spec = body.get("spec")
+        if not isinstance(spec, dict):
+            raise HTTPException(status_code=400, detail="a 'spec' object is required")
+        raw_params = body.get("params") or {}
+        if not isinstance(raw_params, dict):
+            raise HTTPException(status_code=400, detail="'params' must be an object")
+        params = {str(k): str(v) for k, v in raw_params.items() if not str(k).startswith("_")}
+        commentary = bool(body.get("commentary"))
+        refresh = bool(body.get("refresh"))
+
+        notice = ask_unavailable_notice(proj)
+        if notice is not None:
+            return JSONResponse({"question": question, "answer_html": "", "notice": notice})
+
+        try:
+            payload = execute_spec(
+                proj, question.strip(), spec, params,
+                commentary=commentary, refresh=refresh,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except AskRateLimitError as e:
             raise HTTPException(status_code=429, detail=str(e))
         except AskLLMError as e:
