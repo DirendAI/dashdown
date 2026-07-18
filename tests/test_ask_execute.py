@@ -3,8 +3,8 @@
   * ``execute_spec`` + ``POST /_dashdown/api/ask/execute`` — the answer-panel chips
     that re-run an *edited* semantic spec without an LLM resolution call, optionally
     with one LLM call for commentary.
-  * follow-up context — ``POST /_dashdown/api/ask`` with a ``previous`` block so a
-    refinement resolves as a delta of the prior resolution.
+  * session context — ``POST /_dashdown/api/ask`` with a ``history`` list so a
+    refinement resolves in the context of the whole session.
   * ``semantic_options`` on a semantic answer payload.
 
 Mirrors tests/test_ask_engine.py's patterns (scriptable ``FakeAdapter``, the
@@ -306,10 +306,12 @@ class TestExecuteSpec:
 
 
 # --------------------------------------------------------------------------- #
-# Follow-up context — POST /api/ask with a `previous` block
+# Session context — POST /api/ask with a `history` list
 # --------------------------------------------------------------------------- #
-class TestFollowUpContext:
-    def test_previous_block_reaches_resolver_prompt(self, tmp_path):
+class TestSessionContext:
+    def test_history_reaches_resolver_prompt(self, tmp_path):
+        # A two-entry history → both prior questions + the "session so far" block
+        # ride in the resolver call's user prompt.
         fake = FakeAdapter(
             '{"kind": "query", "name": "by_region", "params": {}}',
             "Only paid.",
@@ -319,30 +321,76 @@ class TestFollowUpContext:
             "/_dashdown/api/ask",
             json={
                 "question": "only paid channels",
-                "previous": {
-                    "question": "revenue by channel",
-                    "resolved": {"kind": "semantic", "detail": {"metric": "revenue"}},
-                },
+                "history": [
+                    {
+                        "question": "revenue by channel",
+                        "resolved": {"kind": "semantic", "detail": {"metric": "revenue"}},
+                    },
+                    {
+                        "question": "which channels grew",
+                        "resolved": {"kind": "semantic", "detail": {"metric": "revenue"}},
+                    },
+                ],
             },
         )
         assert r.status_code == 200, r.text
-        # The resolver call's user prompt carries the follow-up context.
+        # The resolver call's user prompt carries the session block + both questions.
         _system, user = fake.calls[0]
-        assert "previously asked" in user
+        assert "session so far" in user
         assert "revenue by channel" in user
+        assert "which channels grew" in user
 
-    def test_no_previous_omits_context(self, tmp_path):
+    def test_history_reaches_answer_prompt(self, tmp_path):
+        # The answer (2nd) call's prompt carries the "earlier questions in this
+        # session" parenthetical listing the prior questions.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}',
+            "Only paid.",
+        )
+        client = _client(tmp_path, fake=fake)
+        r = client.post(
+            "/_dashdown/api/ask",
+            json={
+                "question": "only paid channels",
+                "history": [
+                    {"question": "revenue by channel", "resolved": {"kind": "query"}},
+                    {"question": "which channels grew", "resolved": {"kind": "query"}},
+                ],
+            },
+        )
+        assert r.status_code == 200, r.text
+        _system, answer_prompt = fake.calls[1]
+        assert "earlier questions in this session" in answer_prompt
+        assert "revenue by channel" in answer_prompt
+        assert "which channels grew" in answer_prompt
+
+    def test_no_history_omits_context(self, tmp_path):
         fake = FakeAdapter(
             '{"kind": "query", "name": "by_region", "params": {}}', "Ans."
         )
         client = _client(tmp_path, fake=fake)
         client.post("/_dashdown/api/ask", json={"question": "revenue by region"})
         _system, user = fake.calls[0]
-        assert "previously asked" not in user
+        assert "session so far" not in user
+        _system, answer_prompt = fake.calls[1]
+        assert "earlier questions in this session" not in answer_prompt
 
-    def test_same_question_different_previous_are_distinct_cache_entries(self, tmp_path):
-        # Same new-question text under two different previous contexts must not
-        # collide — both are cache misses (2 LLM calls each → 4 total).
+    def test_no_history_shares_cache_with_fresh_ask(self, tmp_path):
+        # Two no-history asks of the same question → the second is a cache hit
+        # (the context discriminator is None both times, so the key is unchanged).
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "Ans."
+        )
+        client = _client(tmp_path, fake=fake)
+        r1 = client.post("/_dashdown/api/ask", json={"question": "revenue by region"})
+        assert r1.json()["cached"] is False
+        r2 = client.post("/_dashdown/api/ask", json={"question": "revenue by region"})
+        assert r2.json()["cached"] is True
+        assert len(fake.calls) == 2  # one resolve + one answer, no re-billing
+
+    def test_same_question_histories_differing_by_detail_are_distinct(self, tmp_path):
+        # Same follow-up text, histories differing ONLY in resolved.detail (a chip
+        # edit) → two distinct cache entries, both misses (2 LLM calls each → 4).
         fake = FakeAdapter(
             '{"kind": "query", "name": "by_region", "params": {}}', "A.",
             '{"kind": "query", "name": "by_region", "params": {}}', "B.",
@@ -350,12 +398,86 @@ class TestFollowUpContext:
         client = _client(tmp_path, fake=fake)
         r1 = client.post(
             "/_dashdown/api/ask",
-            json={"question": "same follow up", "previous": {"question": "first context"}},
+            json={
+                "question": "same follow up",
+                "history": [
+                    {
+                        "question": "revenue by channel",
+                        "resolved": {"kind": "semantic", "detail": {"by": "region"}},
+                    }
+                ],
+            },
         )
         assert r1.json()["cached"] is False
         r2 = client.post(
             "/_dashdown/api/ask",
-            json={"question": "same follow up", "previous": {"question": "second context"}},
+            json={
+                "question": "same follow up",
+                "history": [
+                    {
+                        "question": "revenue by channel",
+                        "resolved": {"kind": "semantic", "detail": {"by": "status"}},
+                    }
+                ],
+            },
         )
         assert r2.json()["cached"] is False
         assert len(fake.calls) == 4
+
+
+# --------------------------------------------------------------------------- #
+# History sanitization — bounding / narrowing (unit, no server)
+# --------------------------------------------------------------------------- #
+class TestHistorySanitization:
+    def test_keeps_only_last_six(self):
+        raw = [{"question": f"q{i}", "resolved": {}} for i in range(9)]
+        out = ask_engine._sanitize_history(raw)
+        assert [e["question"] for e in out] == ["q3", "q4", "q5", "q6", "q7", "q8"]
+
+    def test_drops_malformed_entries(self):
+        raw = [
+            {"question": "good", "resolved": {"kind": "query"}},
+            {"question": "   "},          # empty question
+            {"resolved": {"kind": "x"}},  # no question
+            "not a dict",                 # not a dict
+            {"question": 42},             # non-str question
+        ]
+        out = ask_engine._sanitize_history(raw)
+        assert len(out) == 1
+        assert out[0]["question"] == "good"
+
+    def test_truncates_long_question(self):
+        raw = [{"question": "x" * 900, "resolved": {}}]
+        out = ask_engine._sanitize_history(raw)
+        assert len(out[0]["question"]) == 400
+
+    def test_narrows_resolved_to_kind_and_detail(self):
+        raw = [
+            {
+                "question": "q",
+                "resolved": {"kind": "semantic", "detail": {"m": 1}, "extra": "drop me"},
+            }
+        ]
+        out = ask_engine._sanitize_history(raw)
+        assert out[0]["resolved"] == {"kind": "semantic", "detail": {"m": 1}}
+
+    def test_non_list_is_empty(self):
+        assert ask_engine._sanitize_history(None) == []
+        assert ask_engine._sanitize_history({"question": "q"}) == []
+
+    def test_more_than_six_only_last_six_in_prompt(self, tmp_path):
+        # Prompt-level: >6 entries → only the last 6 questions appear.
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "params": {}}', "Ans."
+        )
+        client = _client(tmp_path, fake=fake)
+        history = [{"question": f"q{i}", "resolved": {}} for i in range(9)]
+        r = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "latest", "history": history},
+        )
+        assert r.status_code == 200, r.text
+        _system, user = fake.calls[0]
+        assert "q0" not in user and "q1" not in user and "q2" not in user
+        for i in range(3, 9):
+            assert f"q{i}" in user

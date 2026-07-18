@@ -34,6 +34,7 @@ Dashdown.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -231,7 +232,7 @@ def build_resolver_prompt(
     catalog: dict[str, Any],
     question: str,
     allow_sql: bool,
-    previous: dict[str, Any] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     """Return ``(system, user)`` for the resolution call.
 
@@ -239,23 +240,30 @@ def build_resolver_prompt(
     — a model can't pick a rung it was never told about (belt to the validator's
     braces, which reject ``sql`` regardless when the config is off).
 
-    When ``previous`` (a sanitized ``{question, resolved}`` from an earlier ask) is
-    supplied, a follow-up context block is inserted before the question so the model
-    can resolve a refinement ("only paid channels") against the prior resolution's
-    model/metric. The previous resolution is **data for the prompt only** — never
+    When ``history`` (a sanitized, oldest-first list of ``{question, resolved}``
+    entries from the operator's session) is non-empty, a session context block is
+    inserted between the catalog and the question so the model can resolve a
+    refinement ("only paid channels") carrying forward the session's model / metric
+    / filters. The prior resolutions are **data for the prompt only** — never
     executed — so a refinement still routes through the same catalog validation."""
     system = RESOLVER_SYSTEM_PROMPT + (_ALLOW_SQL_CLAUSE if allow_sql else "")
     context = ""
-    if previous:
-        prev_q = str(previous.get("question", ""))
-        prev_resolved = previous.get("resolved", {})
+    if history:
+        lines = []
+        for i, entry in enumerate(history, start=1):
+            q = str(entry.get("question", ""))
+            resolved = entry.get("resolved", {})
+            lines.append(
+                f"{i}. asked: {q} — resolved as: {json.dumps(resolved, default=str)}"
+            )
         context = (
-            "The operator previously asked: " + prev_q + "\n"
-            "It was resolved as: " + json.dumps(prev_resolved, default=str) + "\n"
-            "The new question below may refine it (a changed dimension/filter/time "
-            "frame) or be a follow-up in its context — resolve the NEW question, "
-            "reusing the previous resolution's model/metric where the new question "
-            "implies it.\n\n"
+            "The operator's session so far, oldest first:\n"
+            + "\n".join(lines)
+            + "\nThe new question below continues this session — it may refine the "
+            "latest resolution (a changed dimension/filter/time frame) or ask a "
+            "follow-up in its context. Resolve the NEW question, carrying forward "
+            "the session's model/metric/filters where the new question implies "
+            "them.\n\n"
         )
     user = (
         "Catalog:\n"
@@ -694,23 +702,25 @@ def normalize_question(question: str) -> str:
 
 
 def _cache_key(
-    question: str, params: dict[str, str], spec_key: str | None = None
+    question: str, params: dict[str, str], context_key: str | None = None
 ) -> tuple[str, tuple, str | None]:
     # _freeze_params is the same freezer the result cache keys on, so the two
     # layers can never disagree about what "the same params" means. The optional
     # third element is a discriminator that keeps entries with the *same*
     # (question, params) from colliding when they mean different things: an edited
     # semantic spec (execute_spec passes a canonical spec fingerprint) or a
-    # follow-up asked in a different context (answer_question passes the previous
-    # question). When None, the key is the plain (question, params) pair — so the
-    # default answer_question path keeps its original cache behavior.
-    return (normalize_question(question), _freeze_params(params), spec_key)
+    # follow-up asked in a different session (answer_question passes a fingerprint
+    # of the entire sanitized history — so the same follow-up text under two
+    # histories that differ only in a chip-edited resolved.detail stays distinct).
+    # When None, the key is the plain (question, params) pair — so a cold, no-history
+    # ask keeps its original cache behavior.
+    return (normalize_question(question), _freeze_params(params), context_key)
 
 
 def get_cached_answer(
-    question: str, params: dict[str, str], spec_key: str | None = None
+    question: str, params: dict[str, str], context_key: str | None = None
 ) -> dict[str, Any] | None:
-    key = _cache_key(question, params, spec_key)
+    key = _cache_key(question, params, context_key)
     entry = _answer_cache.get(key)
     if entry is None:
         return None
@@ -727,9 +737,9 @@ def cache_answer(
     params: dict[str, str],
     payload: dict[str, Any],
     ttl: int,
-    spec_key: str | None = None,
+    context_key: str | None = None,
 ) -> None:
-    key = _cache_key(question, params, spec_key)
+    key = _cache_key(question, params, context_key)
     _answer_cache[key] = (payload, time.monotonic() + ttl)
     _answer_cache.move_to_end(key)
     while len(_answer_cache) > MAX_CACHED_ANSWERS:
@@ -763,7 +773,7 @@ def answer_question(
     params: dict[str, str] | None = None,
     *,
     refresh: bool = False,
-    previous: dict[str, Any] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Resolve → execute → answer one runtime question, returning the full payload.
 
@@ -773,22 +783,25 @@ def answer_question(
     :class:`AskQueryError` (→ 500) on a query failure; a *bad resolution* is never
     an error — it degrades to kind ``none`` in the payload.
 
-    ``previous`` is an optional ``{question, resolved}`` from an earlier ask (the
-    follow-up surface): it is sanitized to plain data, threaded into the resolver
-    prompt as context, and folded into the cache key (so the same follow-up text
-    asked in two different contexts doesn't collide)."""
+    ``history`` is an optional oldest-first list of ``{question, resolved}`` entries
+    (the operator's session, the follow-up surface): it is sanitized/bounded to
+    plain data, threaded into the resolver prompt as a session block, folded into
+    the answer-generation prompt as the prior questions, and fingerprinted into the
+    cache key (so the same follow-up text asked under two different sessions — even
+    ones differing only by a chip-edited resolution detail — doesn't collide)."""
     params = dict(params or {})
     cfg = project.config.ask
     llm_cfg = project.config.llm
     model = resolve_model_name(llm_cfg)
 
-    prev = _sanitize_previous(previous)
-    # A follow-up asked under different context must not share a cache entry with
-    # the same text asked cold, so the prior question discriminates the key.
-    prev_key = normalize_question(prev["question"]) if prev else None
+    hist = _sanitize_history(history)
+    # A follow-up asked under a different session must not share a cache entry with
+    # the same text asked cold, so a fingerprint of the whole history discriminates
+    # the key (histories differing only in a resolved.detail still fingerprint apart).
+    hist_key = _history_fingerprint(hist) if hist else None
 
     if not refresh:
-        cached = get_cached_answer(question, params, prev_key)
+        cached = get_cached_answer(question, params, hist_key)
         if cached is not None:
             hit = dict(cached)
             hit["cached"] = True
@@ -807,7 +820,7 @@ def answer_question(
 
     # 1) Resolve.
     catalog = build_ask_catalog(project)
-    system, user = build_resolver_prompt(catalog, question, cfg.allow_sql, prev)
+    system, user = build_resolver_prompt(catalog, question, cfg.allow_sql, hist)
     try:
         raw = adapter.complete(system, user)
     except Exception as e:  # noqa: BLE001
@@ -839,9 +852,9 @@ def answer_question(
         # box never sends refresh — caching it for the full cache_ttl would pin
         # a valid question as "unanswerable" for up to an hour.
         cache_answer(
-            question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), prev_key
+            question, params, payload, min(cfg.cache_ttl, NONE_ANSWER_TTL), hist_key
         )
-        _log(project, question, resolution, 0, started, model, cfg)
+        _log(project, question, resolution, 0, started, model, cfg, history=hist)
         return payload
 
     # 2) Execute. Serialize once — the chart inference classifies the same
@@ -855,10 +868,20 @@ def answer_question(
     chart_ctx: ChartContext | None = None
     if chart is not None:
         chart_ctx = build_chart_context(chart["type"], x=chart["x"], y=chart["y"])
+    # When this ask continues a session, fold the prior *questions* (only — no
+    # resolutions, to keep tokens down) into the answer prompt so the commentary
+    # reads in context. Rides through build_ask_prompt unchanged (llm.py untouched).
+    answer_prompt = question
+    if hist:
+        prior_questions = [h["question"] for h in hist]
+        answer_prompt = (
+            f"{question}\n(This follows the operator's earlier questions in this "
+            f"session: {' → '.join(prior_questions)})"
+        )
     synthetic = AskDef(
         id="_ask_runtime",
         queries=((resolution.query_name or "result", resolution.connector or ""),),
-        prompt=question,
+        prompt=answer_prompt,
         max_rows=cfg.max_rows,
         page_title=project.config.title,
         chart_context=chart_ctx,
@@ -890,8 +913,8 @@ def answer_question(
     }
     if resolution.kind == "semantic":
         payload["semantic_options"] = _semantic_options(project, resolution.model)
-    cache_answer(question, params, payload, cfg.cache_ttl, prev_key)
-    _log(project, question, resolution, len(result.rows), started, model, cfg)
+    cache_answer(question, params, payload, cfg.cache_ttl, hist_key)
+    _log(project, question, resolution, len(result.rows), started, model, cfg, history=hist)
     return payload
 
 
@@ -923,53 +946,75 @@ def _log(
     model: str,
     cfg: Any,
     via: str = "ask",
+    history: list[dict[str, Any]] | None = None,
 ) -> None:
     if not cfg.log:
         return
-    log_ask(
-        project,
-        {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "question": question,
-            "kind": resolution.kind,
-            "via": via,
-            "provenance": resolution.provenance,
-            "rows": rows,
-            "duration_ms": round((time.monotonic() - started) * 1000, 1),
-            "model": model,
-            "cached": False,
-        },
-    )
+    entry: dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "question": question,
+        "kind": resolution.kind,
+        "via": via,
+        "provenance": resolution.provenance,
+        "rows": rows,
+        "duration_ms": round((time.monotonic() - started) * 1000, 1),
+        "model": model,
+        "cached": False,
+    }
+    # Telemetry for refinement chains: how deep into a session this ask sits.
+    if history:
+        entry["session_depth"] = len(history)
+    log_ask(project, entry)
 
 
 # --------------------------------------------------------------------------- #
 # Follow-up context + semantic-spec editing (Tier 1 answer refinement)
 # --------------------------------------------------------------------------- #
-def _sanitize_previous(previous: Any) -> dict[str, Any] | None:
-    """Coerce a client-supplied ``previous`` block to at most
-    ``{question: str, resolved: {kind, detail}}``.
+_HISTORY_MAX_ENTRIES = 6
+_HISTORY_QUESTION_MAX = 400
 
-    It is **data for the resolver prompt only** — never executed — so this only
-    shapes/bounds it: the question is trimmed to ~500 chars, and ``resolved`` is
-    narrowed to a ``kind`` string + an opaque ``detail`` value. Anything malformed
-    → ``None`` (no context block)."""
-    if not isinstance(previous, dict):
-        return None
-    question = previous.get("question")
-    if not isinstance(question, str) or not question.strip():
-        return None
-    out: dict[str, Any] = {"question": question.strip()[:500]}
-    resolved = previous.get("resolved")
-    if isinstance(resolved, dict):
+
+def _sanitize_history(history: Any) -> list[dict[str, Any]]:
+    """Coerce a client-supplied ``history`` list to a bounded list of at most
+    ``{question: str, resolved: {kind, detail}}`` entries, oldest first.
+
+    It is **data for the resolver/answer prompts only** — never executed — so this
+    only shapes/bounds it: non-dict or empty-question entries are dropped, each
+    question is trimmed to 400 chars, each ``resolved`` is narrowed to a ``kind``
+    string + an opaque ``detail`` value, and only the **last 6** entries are kept.
+    Anything not a list, or a list of only malformed entries, → ``[]`` (no context
+    block)."""
+    if not isinstance(history, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in history:
+        if not isinstance(raw, dict):
+            continue
+        question = raw.get("question")
+        if not isinstance(question, str) or not question.strip():
+            continue
+        entry: dict[str, Any] = {"question": question.strip()[:_HISTORY_QUESTION_MAX]}
+        resolved = raw.get("resolved")
         clean: dict[str, Any] = {}
-        kind = resolved.get("kind")
-        if isinstance(kind, str):
-            clean["kind"] = kind
-        if "detail" in resolved:
-            clean["detail"] = resolved.get("detail")
-        if clean:
-            out["resolved"] = clean
-    return out
+        if isinstance(resolved, dict):
+            kind = resolved.get("kind")
+            if isinstance(kind, str):
+                clean["kind"] = kind
+            if "detail" in resolved:
+                clean["detail"] = resolved.get("detail")
+        entry["resolved"] = clean
+        out.append(entry)
+    return out[-_HISTORY_MAX_ENTRIES:]
+
+
+def _history_fingerprint(history: list[dict[str, Any]]) -> str:
+    """A stable 16-hex fingerprint of the entire sanitized history, for the cache
+    key's context discriminator. Two histories that differ only in a chip-edited
+    ``resolved.detail`` fingerprint apart, so the same follow-up text under them
+    can't collide."""
+    return hashlib.sha256(
+        json.dumps(history, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
 
 
 def _semantic_options(

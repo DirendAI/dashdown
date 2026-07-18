@@ -21,8 +21,11 @@
 // `commentary:false`, repaints the chart + table, and marks the answer prose
 // *stale* (dimmed, with an "↻ Update commentary" button) rather than re-writing
 // it on every twiddle. A slim follow-up input at the panel bottom re-asks with
-// the prior resolution as context (`previous`), and echoes the new question into
-// the header omnibox so a re-Enter re-asks it.
+// the whole session trail as context (`history`, oldest-first — the server keeps
+// the last few), and echoes the new question into the header omnibox so a
+// re-Enter re-asks it. The trail also drives a pill row at the panel top: each
+// ask/follow-up is a pill, and clicking an older one restores that answer
+// client-side (the payloads are held in the trail, so no server round-trip).
 //
 // Ask is gated server-side (the box's data-config `ask` flag comes from
 // `ask_enabled` — llm on ∧ ask on ∧ not embed), so this never wires up in static
@@ -121,15 +124,35 @@ function initOne(el) {
   let requestSeq = 0; // drop responses a newer question/execute superseded
   let abortController = null;
   let hasAnswer = false; // panel holds a rendered answer (for reopen)
-  let lastQuestion = ""; // the question the current answer belongs to
-  let lastPayload = null; // the current answer payload (for keep + refinement)
+  // Session trail: the ask → follow-up chain, oldest-first. Each entry is
+  // `{question, payload}` where payload is the full /ask (or /ask/execute)
+  // response the operator is looking at. A fresh header ask starts a new
+  // session (clears the trail); a follow-up appends; a chip edit / ↻ commentary
+  // updates the CURRENT (last) entry's payload in place; a trail-pill click
+  // restores an older entry (truncating everything after it). All the
+  // "current answer" reads (keep, refinement, follow-up context) go through the
+  // last entry via currentEntry/currentPayload/currentQuestion.
+  let trail = []; // [{question, payload}]
   // The live panel chart, so a theme toggle can dispose + re-init it (it's not
   // in chart.js's registry, so onThemeChange there won't reach it).
   let chartState = null; // { card, container, config }
 
+  const currentEntry = () => (trail.length ? trail[trail.length - 1] : null);
+  const currentPayload = () => {
+    const e = currentEntry();
+    return e ? e.payload : null;
+  };
+  const currentQuestion = () => {
+    const e = currentEntry();
+    return e ? e.question : "";
+  };
+  const updateCurrentPayload = (payload) => {
+    if (trail.length) trail[trail.length - 1].payload = payload;
+  };
+
   // Rebuilt on each answer render (buildAnswerSkeleton); the refinement paths
   // target these stable slots instead of the whole panel.
-  let slots = null; // { prov, err, bodyWrap, chart, table, keep, followup }
+  let slots = null; // { trail, prov, err, bodyWrap, chart, table, keep, followup }
   let answerBody = null; // the .dashdown-ask-body that holds the typed prose
   let updateBtn = null; // "↻ Update commentary" (revealed when prose is stale)
   let followupInput = null; // the bottom "refine or follow-up" field
@@ -218,6 +241,8 @@ function initOne(el) {
     panel.appendChild(buildTopbar());
 
     slots = {};
+    slots.trail = mkDiv("dashdown-ask-box-trail");
+    slots.trail.hidden = true;
     slots.prov = mkDiv("dashdown-ask-box-prov");
     slots.err = mkDiv("dashdown-ask-error dashdown-ask-box-message dashdown-ask-box-inline-error");
     slots.err.hidden = true;
@@ -238,6 +263,7 @@ function initOne(el) {
     slots.keep = mkDiv("dashdown-ask-box-keep-slot");
     slots.followup = mkDiv("dashdown-ask-box-followup-slot");
 
+    panel.appendChild(slots.trail);
     panel.appendChild(slots.prov);
     panel.appendChild(slots.err);
     panel.appendChild(slots.bodyWrap);
@@ -392,8 +418,9 @@ function initOne(el) {
 
   // Type the answer out word-batched (the ask.js replay cadence) into `bodyEl`,
   // then swap in the sanitized answer_html and wire its ref chips. Reduced-motion
+  // (or `skipTypewriter`, used when restoring a stored answer from the trail)
   // skips straight to the final HTML.
-  function renderAnswer(payload, chartCard, seq, bodyEl) {
+  function renderAnswer(payload, chartCard, seq, bodyEl, skipTypewriter) {
     bodyEl.innerHTML = "";
 
     const finish = () => {
@@ -403,7 +430,7 @@ function initOne(el) {
 
     const text = payload.answer_text || "";
     const words = text.match(/\S+\s*/g) || [];
-    if (!words.length || prefersReducedMotion()) {
+    if (!words.length || prefersReducedMotion() || skipTypewriter) {
       finish();
       return;
     }
@@ -709,7 +736,7 @@ function initOne(el) {
       const response = await postJson(
         _EXECUTE_URL,
         {
-          question: lastQuestion,
+          question: currentQuestion(),
           spec,
           params: gatherParams(),
           commentary: !!commentary,
@@ -750,7 +777,9 @@ function initOne(el) {
       showExecError(res.error);
       return;
     }
-    lastPayload = res.data;
+    // A chip edit updates what the operator sees, so it updates the CURRENT
+    // trail entry's payload in place (the next follow-up's history reflects it).
+    updateCurrentPayload(res.data);
     repaintChartAndTable(res.data);
     renderChips(res.data); // repaint chips + provenance from the response
     renderKeepFooter(res.data); // reset keep to the current edited spec
@@ -770,7 +799,7 @@ function initOne(el) {
       showExecError(res.error);
       return;
     }
-    lastPayload = res.data;
+    updateCurrentPayload(res.data);
     const chartCard = repaintChartAndTable(res.data);
     renderChips(res.data);
     renderKeepFooter(res.data);
@@ -808,11 +837,11 @@ function initOne(el) {
       btn.disabled = true;
       err.textContent = "";
       try {
-        // Keep the CURRENT edited answer: lastPayload is the latest /ask or
-        // /ask/execute response, so chip edits are reflected.
-        const current = lastPayload || payload;
+        // Keep the CURRENT edited answer: the last trail entry's payload is the
+        // latest /ask or /ask/execute response, so chip edits are reflected.
+        const current = currentPayload() || payload;
         const resp = await postJson(_KEEP_URL, {
-          question: lastQuestion,
+          question: currentQuestion(),
           resolved: current.resolved,
           chart: current.chart,
           path: window.location.pathname,
@@ -836,8 +865,9 @@ function initOne(el) {
   }
 
   // A slim follow-up field at the panel bottom. Enter re-asks via the normal
-  // submit flow, threading the prior resolution as `previous` context, and echoes
-  // the new question into the header omnibox so a re-Enter re-asks it.
+  // submit flow, threading the whole session trail as `history` context (the
+  // server keeps the last few), and echoes the new question into the header
+  // omnibox so a re-Enter re-asks it.
   function renderFollowUp() {
     slots.followup.innerHTML = "";
     const row = mkDiv("dashdown-ask-box-followup");
@@ -855,19 +885,20 @@ function initOne(el) {
         ev.preventDefault();
         const q = inp.value.trim();
         if (!q) return;
-        const prev = lastPayload
-          ? {
-              question: lastQuestion,
-              resolved: {
-                kind: (lastPayload.resolved || {}).kind,
-                detail: (lastPayload.resolved || {}).detail,
-              },
-            }
-          : null;
+        // History = the whole current trail, oldest-first (the server keeps the
+        // last 6). Chip edits already updated the last entry's payload, so this
+        // reflects exactly what the operator is looking at.
+        const history = trail.map((t) => ({
+          question: t.question,
+          resolved: {
+            kind: (t.payload.resolved || {}).kind,
+            detail: (t.payload.resolved || {}).detail,
+          },
+        }));
         // Echo the new question into the header omnibox (programmatic value set
         // fires no `input` event, so the panel isn't closed by the input handler).
         input.value = q;
-        submit(q, { previous: prev });
+        submit(q, { history });
       } else if (ev.key === "Escape") {
         // First Escape inside the follow-up field only steps out to panel scope
         // (focus the omnibox input); a second Escape then closes the panel via
@@ -890,25 +921,89 @@ function initOne(el) {
     }
   }
 
-  function renderAnswerPayload(payload, seq) {
+  // ---- Session trail pills ------------------------------------------------
+
+  // A slim pill row at the top of the panel: one pill per trail entry (the
+  // question, truncated ~40 chars), separated by "→". The current (last) pill is
+  // emphasized and inert; older pills are buttons that restore that answer. Only
+  // shown when the trail has ≥2 entries.
+  function renderTrailPills() {
+    if (!slots || !slots.trail) return;
+    slots.trail.innerHTML = "";
+    if (trail.length < 2) {
+      slots.trail.hidden = true;
+      return;
+    }
+    slots.trail.hidden = false;
+    const row = mkDiv("dashdown-ask-trail");
+    trail.forEach((entry, idx) => {
+      if (idx > 0) {
+        const sep = document.createElement("span");
+        sep.className = "dashdown-ask-trail-sep";
+        sep.textContent = "→";
+        sep.setAttribute("aria-hidden", "true");
+        row.appendChild(sep);
+      }
+      const full = entry.question || "";
+      const short = full.length > 40 ? `${full.slice(0, 39)}…` : full;
+      const isCurrent = idx === trail.length - 1;
+      if (isCurrent) {
+        const pill = document.createElement("span");
+        pill.className =
+          "dashdown-ask-trail-pill dashdown-ask-trail-pill-active";
+        pill.textContent = short;
+        pill.title = full;
+        pill.setAttribute("aria-current", "true");
+        row.appendChild(pill);
+      } else {
+        const pill = document.createElement("button");
+        pill.type = "button";
+        pill.className = "dashdown-ask-trail-pill";
+        pill.textContent = short;
+        pill.title = full;
+        pill.addEventListener("click", () => restoreTrailEntry(idx));
+        row.appendChild(pill);
+      }
+    });
+    slots.trail.appendChild(row);
+  }
+
+  // Clicking an older trail pill restores that answer entirely client-side (the
+  // payload is in hand — no server call): truncate the trail after it, then
+  // repaint the panel from the stored payload (typewriter skipped — the answer
+  // is already known) and write its question back into the omnibox.
+  function restoreTrailEntry(idx) {
+    if (idx < 0 || idx >= trail.length) return;
+    trail = trail.slice(0, idx + 1);
+    const entry = currentEntry();
+    if (!entry) return;
+    input.value = entry.question;
+    // Bump the seq so any in-flight typewriter/response can't paint over this.
+    renderAnswerPayload(entry.payload, ++requestSeq, { skipTypewriter: true });
+  }
+
+  function renderAnswerPayload(payload, seq, opts = {}) {
     buildAnswerSkeleton();
     applyModelTooltip(payload);
 
     // Answer-first hierarchy: the operator asked a question, so the answer text
-    // is the headline (it types in above the evidence). renderProvenance builds
-    // the interactive chip row (semantic) or the static provenance line; the
-    // chart must render before renderAnswer so the answer's annotation ref chips
-    // have a chart host to wire against.
+    // is the headline (it types in above the evidence). renderTrailPills shows
+    // the session chain; renderProvenance builds the interactive chip row
+    // (semantic) or the static provenance line; the chart must render before
+    // renderAnswer so the answer's annotation ref chips have a chart host.
+    renderTrailPills();
     renderProvenance(payload);
     const chartCard = repaintChartAndTable(payload);
-    renderAnswer(payload, chartCard, seq, answerBody);
+    renderAnswer(payload, chartCard, seq, answerBody, opts.skipTypewriter);
     renderKeepFooter(payload);
     renderFollowUp();
     hasAnswer = true;
   }
 
   async function submit(question, opts = {}) {
-    lastQuestion = question;
+    // A fresh header ask starts a new session; a follow-up keeps the trail and
+    // appends its answer on success.
+    if (opts.fresh) trail = [];
     const seq = ++requestSeq;
     if (abortController) abortController.abort();
     const controller = new AbortController();
@@ -918,7 +1013,7 @@ function initOne(el) {
 
     try {
       const reqBody = { question, params: gatherParams() };
-      if (opts.previous) reqBody.previous = opts.previous;
+      if (opts.history && opts.history.length) reqBody.history = opts.history;
       const response = await postJson(_ASK_URL, reqBody, {
         signal: controller.signal,
       });
@@ -938,7 +1033,7 @@ function initOne(el) {
         renderError(data.error || data.detail || `HTTP ${response.status}`);
         return;
       }
-      lastPayload = data;
+      trail.push({ question, payload: data });
       renderAnswerPayload(data, seq);
     } catch (error) {
       if (seq !== requestSeq || (error && error.name === "AbortError")) return;
@@ -950,11 +1045,12 @@ function initOne(el) {
 
   // site_search.js fires this when the operator picks the "Ask the data" row
   // (or hits Enter in ask-only mode). The modules stay decoupled — no import
-  // either way, just the DOM event. A header ask is always a *fresh* question
-  // (no `previous` context) — refinement/follow-up carries context, not this.
+  // either way, just the DOM event. A header ask always STARTS A NEW SESSION
+  // (clears the trail, no history) — refinement/follow-up carries the trail,
+  // not this.
   el.addEventListener("dashdown:ask", (ev) => {
     const q = ((ev.detail && ev.detail.question) || "").trim();
-    if (q) submit(q);
+    if (q) submit(q, { fresh: true });
   });
 
   // Escape closes the answer panel *first*, then falls through to search's own

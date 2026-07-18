@@ -877,10 +877,11 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             raise HTTPException(status_code=400, detail="'params' must be an object")
         params = {str(k): str(v) for k, v in raw_params.items() if not str(k).startswith("_")}
         refresh = bool(body.get("refresh"))
-        # Optional follow-up context: the previous {question, resolved} so a
-        # refinement ("only paid channels") resolves as a delta. It is data for
-        # the resolver prompt only (answer_question sanitizes it), never executed.
-        previous = body.get("previous")
+        # Optional session history: an oldest-first list of {question, resolved}
+        # entries so a refinement ("only paid channels") resolves in the context of
+        # the whole session. It is data for the resolver/answer prompts only
+        # (answer_question sanitizes + bounds it), never executed.
+        history = body.get("history")
 
         notice = ask_unavailable_notice(proj)
         if notice is not None:
@@ -888,7 +889,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         try:
             payload = answer_question(
-                proj, question.strip(), params, refresh=refresh, previous=previous
+                proj, question.strip(), params, refresh=refresh, history=history
             )
         except AskRateLimitError as e:
             raise HTTPException(status_code=429, detail=str(e))

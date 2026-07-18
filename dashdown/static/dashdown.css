@@ -2325,6 +2325,54 @@ body {
   background: var(--fallback-b2, oklch(var(--b2) / 1));
 }
 
+/* Session trail: a slim pill row at the top of the panel tracing the
+   ask → follow-up chain. The current answer's pill is emphasized
+   (primary-tinted); older pills are clickable buttons that restore that answer
+   client-side. Hidden entirely for a single-entry trail. All tokens, no new
+   Tailwind utilities. */
+.dashdown-ask-box-trail[hidden] { display: none; }
+.dashdown-ask-trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.dashdown-ask-trail-sep {
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+.dashdown-ask-trail-pill {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+button.dashdown-ask-trail-pill {
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+button.dashdown-ask-trail-pill:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  border-color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+.dashdown-ask-trail-pill-active {
+  color: var(--fallback-p, oklch(var(--p) / 1));
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  button.dashdown-ask-trail-pill { transition: none; }
+}
+
 /* Provenance line — the trust surface: small, muted, above the answer. */
 .dashdown-ask-box-provenance {
   font-size: 0.75rem;
