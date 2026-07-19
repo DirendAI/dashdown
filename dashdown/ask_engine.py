@@ -40,6 +40,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -86,6 +87,12 @@ log = logging.getLogger(__name__)
 # Defensive cap on rows returned by the raw-SQL rung: a hand-written SELECT has no
 # author-set LIMIT and its result feeds both the model payload and the wire.
 MAX_SQL_ROWS = 1000
+
+# Cap on rows that ship in an answer payload (and the answer cache). The *full*
+# result still feeds format_result_for_llm and the chart-shape inference; only the
+# rows the client renders are capped, disclosing the cut via additive
+# ``truncated``/``total_rows`` fields.
+ASK_WIRE_ROWS = 500
 
 # The runtime cache keys on free-form operator text, so unlike the authored
 # <Ask /> cache (bounded by the finite set of ask ids) its key space is
@@ -222,6 +229,104 @@ def build_ask_catalog(project: "Project") -> dict[str, Any]:
         "queries": queries,
         "python_queries": python_queries,
     }
+
+
+# The attribute the per-project catalog memo lives on. ``Project`` is a plain
+# (unfrozen, ``eq=True``) dataclass — hence unhashable, so a WeakKeyDictionary
+# can't key on it; a stored attribute is the simplest memo. It is never declared
+# on the dataclass, so it defaults to absent on a freshly loaded project.
+_ASK_CATALOG_ATTR = "_ask_catalog_memo"
+
+
+def cached_ask_catalog(project: "Project") -> dict[str, Any]:
+    """Memoized :func:`build_ask_catalog` — one construction per project *load*.
+
+    The catalog is derived purely from the project's static definitions
+    (semantic models + library/python queries), so it's constant for the life of
+    a ``Project`` instance. ``reload_project`` builds a **new** instance
+    (``load_project``) and swaps it into ``app.state.project``, so the memo is
+    invalidated automatically — the old instance (and its memo) is dropped, and
+    the fresh one has no cached attribute. Cached on the project object rather
+    than a module global so it can never outlive the project it describes."""
+    cached = getattr(project, _ASK_CATALOG_ATTR, None)
+    if cached is None:
+        cached = build_ask_catalog(project)
+        setattr(project, _ASK_CATALOG_ATTR, cached)
+    return cached
+
+
+# The most suggestions the ask box offers (one starter-question row per).
+MAX_ASK_SUGGESTIONS = 6
+# How many semantic models contribute measure-based starters, and how many
+# measures each contributes — kept small so a many-model project still leaves
+# slots for author-curated query descriptions.
+_SUGGEST_MODELS = 2
+_SUGGEST_MEASURES_PER_MODEL = 2
+
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s")
+
+
+def _first_sentence_lead(text: str) -> str:
+    """The first sentence of a description with its lead character lowercased.
+
+    A query description ("Monthly recurring revenue by cohort.") becomes a
+    ready-to-ask prompt fragment ("Monthly recurring revenue by cohort") — the
+    lead is lowercased so it reads as a phrase, and any trailing sentence
+    punctuation is trimmed."""
+    text = text.strip()
+    match = _SENTENCE_END_RE.search(text)
+    first = text[: match.start()] if match else text
+    first = first.rstrip(".!?").strip()
+    if not first:
+        return first
+    return first[:1].lower() + first[1:]
+
+
+def _humanize_query_name(name: str) -> str:
+    """A dotted/underscored query name as spaced words (``finance.mrr_by_month``
+    → ``finance mrr by month``) — the fallback starter when a query has no
+    description."""
+    return re.sub(r"[._-]+", " ", name).strip()
+
+
+def ask_suggestions(project: "Project") -> list[str]:
+    """Up to :data:`MAX_ASK_SUGGESTIONS` ready-to-ask starter questions.
+
+    Composed deterministically from :func:`cached_ask_catalog` (catalog order, so
+    the same project always yields the same list): first, for up to two semantic
+    models, each model's first two measures paired with the model's time dimension
+    (``"<measure> by <time_dim>"``) when it has one, else its first dimension, else
+    the bare measure; then the remaining slots fill from library/python query
+    *descriptions* (first sentence, lowercased lead) or — lacking one — the
+    humanized query name. Never leaks SQL, ``${param}`` names, or the ``sql_tables``
+    schema hint (none of which the catalog surfaces in these fields)."""
+    catalog = cached_ask_catalog(project)
+    suggestions: list[str] = []
+
+    for model in catalog["semantic_models"][:_SUGGEST_MODELS]:
+        measures = model.get("measures") or []
+        dims = model.get("dimensions") or []
+        time_dim = model.get("time_dimension")
+        for measure in measures[:_SUGGEST_MEASURES_PER_MODEL]:
+            if len(suggestions) >= MAX_ASK_SUGGESTIONS:
+                break
+            if time_dim:
+                suggestions.append(f"{measure} by {time_dim}")
+            elif dims:
+                suggestions.append(f"{measure} by {dims[0]}")
+            else:
+                suggestions.append(str(measure))
+        if len(suggestions) >= MAX_ASK_SUGGESTIONS:
+            return suggestions
+
+    for entry in list(catalog["queries"]) + list(catalog["python_queries"]):
+        if len(suggestions) >= MAX_ASK_SUGGESTIONS:
+            break
+        description = str(entry.get("description") or "").strip()
+        lead = _first_sentence_lead(description) if description else ""
+        suggestions.append(lead or _humanize_query_name(str(entry.get("name", ""))))
+
+    return suggestions[:MAX_ASK_SUGGESTIONS]
 
 
 # Bounds for the sql_tables schema hint: enough for a real project's core
@@ -1359,14 +1464,17 @@ def _answer_stages(
                 )
                 return
 
-    # 1) Resolve.
-    catalog = build_ask_catalog(project)
+    # 1) Resolve. The catalog is constant for the project's life, so use the
+    # per-load memo rather than rebuilding it on every ask.
+    catalog = cached_ask_catalog(project)
     if cfg.allow_sql:
         # The sql rung is useless blind — arm it with the default connector's
         # table/column names (only ever shown when the project opted into SQL).
+        # Copy first: the schema hint is a per-ask transient (fresh each call),
+        # never something that should linger on the shared per-load memo.
         schema = sql_schema_hint(project)
         if schema:
-            catalog["sql_tables"] = schema
+            catalog = {**catalog, "sql_tables": schema}
     system, user = build_resolver_prompt(catalog, question, cfg.allow_sql, hist)
     try:
         raw = adapter.complete(system, user)
@@ -1428,6 +1536,19 @@ def _answer_stages(
     )
 
 
+def _wire_rows(rows: list[Any]) -> tuple[list[Any], dict[str, Any]]:
+    """Cap the rows that ship in an answer payload at :data:`ASK_WIRE_ROWS`.
+
+    Returns the (possibly sliced) wire rows plus the additive fields disclosing a
+    cut — ``{"truncated": True, "total_rows": <full count>}`` when capped, else an
+    empty dict (omitted, so a fitting result stays byte-identical). The caller feeds
+    the *full* result to the LLM and chart-shape inference; only the client-rendered
+    rows (and thus the cached payload) are capped."""
+    if len(rows) > ASK_WIRE_ROWS:
+        return rows[:ASK_WIRE_ROWS], {"truncated": True, "total_rows": len(rows)}
+    return rows, {}
+
+
 def _stages_for_result(
     project: "Project",
     question: str,
@@ -1446,6 +1567,7 @@ def _stages_for_result(
     path and the direct-SQL passthrough (which skips the resolver call)."""
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
+    wire_rows, truncation = _wire_rows(serialized["rows"])
 
     # The `resolved` stage: the complete payload with the commentary slots still
     # empty. It ships the instant data is in hand so the panel paints provenance +
@@ -1460,13 +1582,14 @@ def _stages_for_result(
             "detail": _resolution_detail(resolution),
         },
         "columns": serialized["columns"],
-        "rows": serialized["rows"],
+        "rows": wire_rows,
         "chart": chart,
         "answer_html": "",
         "answer_text": "",
         "annotations": [],
         "model": model,
         "cached": False,
+        **truncation,
     }
     if resolution.kind == "semantic":
         resolved_payload["semantic_options"] = _semantic_options(
@@ -1788,6 +1911,7 @@ def execute_spec(
     result = execute_resolution(resolution, project, params)
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
+    wire_rows, truncation = _wire_rows(serialized["rows"])
 
     resolved = {
         "kind": resolution.kind,
@@ -1803,7 +1927,7 @@ def execute_spec(
             "question": question,
             "resolved": resolved,
             "columns": serialized["columns"],
-            "rows": serialized["rows"],
+            "rows": wire_rows,
             "chart": chart,
             "answer_html": "",
             "answer_text": "",
@@ -1811,6 +1935,7 @@ def execute_spec(
             "model": model,
             "semantic_options": semantic_options,
             "cached": False,
+            **truncation,
         }
         _log(project, question, resolution, len(result.rows), started, model, cfg, via="spec_edit")
         return payload
@@ -1844,7 +1969,7 @@ def execute_spec(
         "question": question,
         "resolved": resolved,
         "columns": serialized["columns"],
-        "rows": serialized["rows"],
+        "rows": wire_rows,
         "chart": chart,
         "answer_html": answer_html,
         "answer_text": answer_text,
@@ -1852,6 +1977,7 @@ def execute_spec(
         "model": model,
         "semantic_options": semantic_options,
         "cached": False,
+        **truncation,
     }
     cache_answer(question, params, payload, cfg.cache_ttl, spec_key)
     _log(project, question, resolution, len(result.rows), started, model, cfg, via="spec_edit")
@@ -1880,12 +2006,19 @@ def _attr_escape(value: Any) -> str:
     return str(value).replace("<", "").replace(">", "").replace('"', "&quot;")
 
 
+def _comment_safe(value: Any) -> str:
+    """Neutralize a string for inclusion in an HTML comment: strip ``<``/``>`` (so
+    it can't open or close a tag) and ``--`` (so it can't close the comment early).
+    Defense in depth — the kept-from line is server-derived, not client text."""
+    return str(value).replace("--", "").replace("<", "").replace(">", "")
+
+
 def build_kept_markdown(
     project: "Project",
     question: str,
     resolved: dict[str, Any],
     chart: dict[str, Any] | None,
-) -> str:
+) -> tuple[str, str]:
     """Render a liked runtime answer as an authored, **live** markdown section.
 
     The operator "keeps" an answer on a page: we append a ``## question`` section
@@ -1901,12 +2034,19 @@ def build_kept_markdown(
     * ``semantic`` — the ``detail`` is rebuilt into the dict shape
       :func:`_validate_semantic` consumes and re-validated against the current
       semantic models; the *validated* :class:`Resolution` (not the client's
-      values) is what gets emitted.
+      values) is what gets emitted. Filters / date range are **not** carried into
+      the file in v1 — when the resolution held any, the kept-from comment notes
+      "filters not carried over" (same disclosure as the list rung).
     * ``query`` — the name must still resolve to a real library or Python query.
     * ``list`` — the ``detail`` is re-validated by :func:`_validate_list` against
       the live models and emitted as a ``<List />`` (the authored twin of the list
       rung). Filters / date range are **not** carried into the file in v1 — when the
       resolution held any, the kept-from comment notes "filters not carried over".
+
+    The kept-from comment's provenance is **rebuilt server-side** from the
+    re-validated resolution (the client's ``resolved.provenance`` is untrusted text
+    that would otherwise land verbatim in the file) and passed through a
+    comment-safe escape as defense in depth.
 
     Only a raw-``sql`` answer stays unkeepable: it has no named artifact to
     reference from markdown. Any validation failure — off-catalog
@@ -1915,11 +2055,23 @@ def build_kept_markdown(
     attribute (the question title, inferred ``x``/``y`` columns) are run through
     :func:`_attr_escape` so a crafted value can't break out of its attribute.
 
-    Returns just the section text (leading blank line + heading + components); the
-    caller owns file I/O and blank-line separation."""
+    The whole section is wrapped in a **machine-parseable marker pair** — an
+    opening ``<!-- dashdown:keep id=… kind=… · … -->`` comment *before* the heading
+    and a closing ``<!-- /dashdown:keep id=… -->`` after the last component — so the
+    client can later locate a kept section by id (to edit or delete it) without
+    re-parsing the prose. :func:`find_kept_sections` is the reader half of that
+    format; the two must stay in lockstep. The ``id`` is a fresh 8-hex token per
+    keep.
+
+    Returns ``(section_text, keep_id)`` — the section text (leading blank line +
+    opening marker + heading + components + closing marker) and the generated id;
+    the caller owns file I/O and blank-line separation."""
     kind = str((resolved or {}).get("kind", "")).strip().lower()
     detail = (resolved or {}).get("detail") or {}
-    provenance = str((resolved or {}).get("provenance", "") or "").strip()
+    # The kept-from provenance is rebuilt *server-side* from the re-validated
+    # resolution below (never the client's `resolved.provenance`, which is untrusted
+    # text that would land verbatim in the file's comment).
+    provenance = ""
 
     if kind not in ("semantic", "query", "list"):
         why = (
@@ -1954,10 +2106,20 @@ def build_kept_markdown(
             "series": detail.get("series"),
             "grain": detail.get("grain"),
             "filters": detail.get("filters") or {},
+            "date_start": detail.get("date_start", ""),
+            "date_end": detail.get("date_end", ""),
         }
         res = _validate_semantic(obj, project)
         if res.kind == "none":
             raise ValueError(f"semantic answer failed re-validation: {res.reason}")
+        # Provenance is the *validated* resolution's, not the client's.
+        provenance = res.provenance
+        # Filters / date range are not carried into the file in v1 — flag it for the
+        # kept-from comment when the validated resolution held any (same disclosure
+        # as the list rung; semantic resolutions carry filters + a date range).
+        filters_dropped = (
+            bool(res.filters) or bool(res.date_start) or bool(res.date_end)
+        )
         metric_ref = f"{res.model}.{res.metric}"
         by_ref = f"{res.model}.{res.by}" if res.by else None
         series_ref = f"{res.model}.{res.series}" if res.series else None
@@ -2001,6 +2163,8 @@ def build_kept_markdown(
         res = _validate_list(obj, project)
         if res.kind == "none":
             raise ValueError(f"list answer failed re-validation: {res.reason}")
+        # Provenance is the *validated* resolution's, not the client's.
+        provenance = res.provenance
         # Filters / date range are not carried into the file in v1 — flag it for the
         # kept-from comment when the validated resolution held any.
         filters_dropped = bool(res.filters) or bool(res.date_start) or bool(res.date_end)
@@ -2025,6 +2189,9 @@ def build_kept_markdown(
         name = name.strip()
         if name not in project.queries and name not in project.python_queries:
             raise ValueError(f"query answer references unknown query {name!r}")
+        # Rebuild the same provenance the query rung (_validate_query) emits, from
+        # the *validated* name — never the client's provenance string.
+        provenance = f"named query '{name}'"
 
         if chart is not None:
             component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
@@ -2038,9 +2205,67 @@ def build_kept_markdown(
 
     date = datetime.now().strftime("%Y-%m-%d")
     note = " · filters not carried over" if filters_dropped else ""
-    comment = f"<!-- kept from an ask answer · {provenance} · {date}{note} -->"
-    parts = [f"## {heading}", comment, *components]
-    return "\n" + "\n".join(parts) + "\n"
+    comment = (
+        f"<!-- kept from an ask answer · {_comment_safe(provenance)} · "
+        f"{date}{note} -->"
+    )
+    keep_id = uuid.uuid4().hex[:8]
+    open_marker = (
+        f"<!-- dashdown:keep id={keep_id} kind={kind} · "
+        f"{_comment_safe(provenance)} · {date}{note} -->"
+    )
+    close_marker = f"<!-- /dashdown:keep id={keep_id} -->"
+    parts = [open_marker, f"## {heading}", comment, *components, close_marker]
+    return "\n" + "\n".join(parts) + "\n", keep_id
+
+
+@dataclass(frozen=True)
+class KeptSection:
+    """One kept-answer section located in a page's markdown by its marker pair.
+
+    ``start``/``end`` are character offsets into the source: ``start`` points at
+    the opening ``<!-- dashdown:keep … -->`` marker and ``end`` just past the
+    closing ``<!-- /dashdown:keep … -->`` marker, so ``markdown[start:end]`` is the
+    whole section (marker → heading → components → marker). Splicing it out (and
+    tidying the surrounding blank lines) deletes the kept answer."""
+
+    id: str
+    kind: str
+    start: int
+    end: int
+
+
+_KEEP_OPEN_RE = re.compile(
+    r"<!--\s*dashdown:keep\s+id=(?P<id>[0-9a-f]{8})\s+kind=(?P<kind>\w+).*?-->"
+)
+
+
+def find_kept_sections(markdown: str) -> list[KeptSection]:
+    """Locate every well-formed kept-answer section in ``markdown``.
+
+    The reader half of :func:`build_kept_markdown`'s marker format — the single
+    documented authority the client uses to edit/delete a kept section by id. Each
+    opening ``<!-- dashdown:keep id=<8-hex> kind=<kind> … -->`` marker is paired
+    with the *next* matching ``<!-- /dashdown:keep id=<same> -->`` closing marker;
+    the span between them (inclusive of both markers) is one section.
+
+    Tolerant by design: user edits *inside* a section are irrelevant (only the
+    markers are read), and a malformed or unclosed opening marker (no matching
+    close after it) is silently skipped rather than raising — a half-edited file
+    still parses. Sections are returned in document order."""
+    sections: list[KeptSection] = []
+    for m in _KEEP_OPEN_RE.finditer(markdown):
+        kid = m.group("id")
+        close_re = re.compile(
+            r"<!--\s*/dashdown:keep\s+id=" + re.escape(kid) + r"\s*-->"
+        )
+        close = close_re.search(markdown, m.end())
+        if close is None:
+            continue  # unclosed marker — ignore
+        sections.append(
+            KeptSection(id=kid, kind=m.group("kind"), start=m.start(), end=close.end())
+        )
+    return sections
 
 
 def ask_unavailable_notice(project: "Project") -> str | None:

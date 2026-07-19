@@ -912,7 +912,7 @@ def test_keep_markdown_emits_series(tmp_path):
     (dst / "sources.yaml").write_text("main:\n  type: csv\n  directory: data\n")
     proj = load_project(dst)
     try:
-        md = build_kept_markdown(
+        md, _keep_id = build_kept_markdown(
             proj,
             "Revenue by region per status?",
             {
@@ -1066,7 +1066,7 @@ class TestChartPref:
         (dst / "sources.yaml").write_text("main:\n  type: csv\n  directory: data\n")
         proj = load_project(dst)
         try:
-            md = build_kept_markdown(
+            md, _keep_id = build_kept_markdown(
                 proj,
                 "Revenue funnel by region?",
                 {
@@ -1247,6 +1247,33 @@ class TestStreaming:
         _, err = events[0]
         assert "detail" in err
         assert "LLM request failed" in err["detail"]
+
+    def test_stream_query_failure_is_error_event(self, tmp_path):
+        # A resolution onto a library query whose SQL is broken fails during
+        # execution — *after* SSE headers are sent, before any `resolved` — so the
+        # stream carries exactly one `error` event (never a pre-header 500).
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        (proj / "queries" / "broken.sql").write_text(
+            "SELECT * FROM no_such_table\n", encoding="utf-8"
+        )
+        app = create_app(proj)
+        fake = FakeAdapter('{"kind": "query", "name": "broken", "params": {}}')
+        app.state.project.llm_adapter = fake
+        client = TestClient(app)
+        with client.stream(
+            "POST",
+            "/_dashdown/api/ask",
+            json={"question": "boom", "stream": True},
+        ) as r:
+            assert r.status_code == 200
+            assert "text/event-stream" in r.headers["content-type"]
+            body = "".join(r.iter_text())
+        events = _parse_sse(body)
+        assert [e for e, _ in events] == ["error"], events
+        _, err = events[0]
+        assert "Query execution failed" in err["detail"]
 
     def test_stream_rate_limit_is_json_429_before_headers(self, tmp_path):
         # Rate-limit is checked before the stream commits → a plain-JSON 429, not

@@ -31,6 +31,7 @@ import { initAllCopyCode } from "./components/copy_code.js";
 import { initFullscreen } from "./components/fullscreen.js";
 import { initAllSiteSearches } from "./components/site_search.js";
 import { initAskIntegration } from "./components/ask_box.js";
+import { initPageEdit } from "./components/page_edit.js";
 import { initPrint, initPdfButton } from "./components/print.js";
 import { initLegacy } from "./legacy.js";
 
@@ -251,6 +252,12 @@ function init() {
   // when ask is off, i.e. llm/ask off or embed/static build). Reads Alpine
   // stores lazily at submit time, so it's safe before stores exist.
   initAskIntegration();
+
+  // Source editor (dev server only): the header ✎ (whole-page editor), a hover
+  // toolbar on every kept answer section, and the post-keep flash. Self-gates on
+  // the `#dashdown-page-edit` config node the server emits only on the dev
+  // server, so embeds / static builds (which never emit it) are untouched.
+  initPageEdit();
 
   // PDF export support: dress the page for print + expose a readiness signal.
   // No-op unless opened for export, so ordinary viewers pay nothing. Outside

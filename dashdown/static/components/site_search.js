@@ -3,6 +3,14 @@
 // Full-text search across every page. The component placeholder ships empty; this
 // module fetches the search index once (shared across every box on the page) and
 // ranks pages/sections entirely in the browser — there is no server-side search.
+// The index is prefetched on focus so it's warm before the first keystroke, and
+// matched terms are highlighted in the title, crumb, and snippet.
+//
+// When ask is merged into the box an "Ask the data" row joins the results: it
+// leads the dropdown when the query reads as a question (so the visible, aria-
+// selected default — the first row — asks) and trails the hits otherwise.
+// Focusing an empty ask box opens a recents + "try asking" dropdown; recents
+// carry a trailing × to forget them.
 //
 // Index source:
 //   - live server : GET /_dashdown/api/search-index
@@ -34,6 +42,175 @@ function loadIndex() {
     })
     .then((entries) => (Array.isArray(entries) ? entries : []));
   return _indexPromise;
+}
+
+// ---- Empty-focus dropdown: recents + "try asking" suggestions ------------
+
+// One in-flight fetch of ask suggestions, shared by every ask-enabled box on the
+// page (module-level, like loadIndex). Suggestions never change within a page
+// load, so this is fetched at most once. Failures degrade to an empty list.
+let _suggestionsPromise = null;
+
+// The leading word of every loaded suggestion ("revenue" from "revenue by
+// region"), used by the ask-default heuristic. Empty until suggestions land —
+// the heuristic works without it and only widens once the fetch resolves.
+const _suggestionFirstWords = new Set();
+
+// localStorage key holding the operator's recent questions (JSON array of
+// strings, newest-first). Written by ask_box.js on every successful answer.
+const _RECENT_KEY = "dashdown-recent-asks";
+
+// Platform detection for the ⌘/Ctrl modifier hints (Mac → ⌘, else Ctrl). Drives
+// the ask row's resting kbd label and the per-box ⌘K chip swap.
+const _IS_MAC = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
+const _ASK_KBD_REST = _IS_MAC ? "⌘↵" : "Ctrl ↵";
+
+function firstWord(s) {
+  const m = String(s || "")
+    .toLowerCase()
+    .match(/[a-z0-9]+/);
+  return m ? m[0] : "";
+}
+
+function loadSuggestions() {
+  if (_suggestionsPromise) return _suggestionsPromise;
+  const build = readBuildConfig();
+  // Static exports have no data API (and no ask surface) — never fetch there.
+  if (build && build.static) {
+    _suggestionsPromise = Promise.resolve([]);
+    return _suggestionsPromise;
+  }
+  _suggestionsPromise = fetch("/_dashdown/api/ask/suggestions")
+    .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+    .catch(() => ({ suggestions: [] }))
+    .then((d) => (d && Array.isArray(d.suggestions) ? d.suggestions : []))
+    .then((list) => {
+      for (const s of list) {
+        const w = firstWord(s);
+        if (w) _suggestionFirstWords.add(w);
+      }
+      return list;
+    });
+  return _suggestionsPromise;
+}
+
+// Read the operator's recent questions from localStorage (newest-first). Any
+// storage error / malformed value degrades to an empty list (private mode).
+function readRecents() {
+  try {
+    const raw = window.localStorage.getItem(_RECENT_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Drop a question from the operator's recents (case-insensitive on the trimmed
+// text) and write the list back. Best-effort, like readRecents (private mode).
+function removeRecent(question) {
+  try {
+    const q = (question || "").trim().toLowerCase();
+    const kept = readRecents().filter((x) => x.toLowerCase() !== q);
+    window.localStorage.setItem(_RECENT_KEY, JSON.stringify(kept));
+  } catch (e) {
+    /* best-effort */
+  }
+}
+
+// A conservative "does this read like a question (ask), not a keyword search?"
+// test. True when: the query ends in "?", OR its leading word is an
+// interrogative / aggregate, OR (once suggestions have loaded) it mentions a
+// known metric's leading word. Word-boundaried so "sum" doesn't match
+// "consumer". Empty/until-loaded suggestions simply narrow the last clause.
+const _INTERROGATIVES = new Set([
+  "who", "what", "when", "where", "which", "why", "how",
+  "show", "list", "top", "count", "sum", "total", "average", "avg", "compare",
+]);
+function isQuestionShaped(q) {
+  const s = (q || "").trim().toLowerCase();
+  if (!s) return false;
+  if (s.endsWith("?")) return true;
+  const lead = firstWord(s);
+  if (lead && _INTERROGATIVES.has(lead)) return true;
+  for (const w of _suggestionFirstWords) {
+    if (w && new RegExp("\\b" + escapeRe(w) + "\\b").test(s)) return true;
+  }
+  return false;
+}
+
+// One suggestion/recent/continue row: same row chrome as a search hit, with a
+// leading glyph and the question stashed on `data-q` for keyboard + click
+// selection. `extraClass` distinguishes the Continue row for emphasis;
+// `removable` appends a trailing × (recents only) to forget the question.
+function suggestRowMarkup(panel, idx, q, glyph, extraClass, removable) {
+  return (
+    `<div class="dashdown-site-search-result dashdown-ask-suggest-row${
+      extraClass ? " " + extraClass : ""
+    }" role="option" id="${esc(panel.id)}-opt-${idx}" data-idx="${idx}" ` +
+    `data-q="${esc(q)}">` +
+    `<span class="dashdown-ask-suggest-icon" aria-hidden="true">${esc(glyph)}</span>` +
+    `<span class="dashdown-ask-suggest-label">${esc(q)}</span>` +
+    (removable
+      ? '<button type="button" class="dashdown-ask-suggest-remove" aria-label="Remove from recent">×</button>'
+      : "") +
+    "</div>"
+  );
+}
+
+// Render the empty-focus dropdown: an optional "Continue" row (a restored
+// session, ↩), then up to four Recent rows (↻) and up to four "Try asking"
+// suggestions (✦). Section headers are non-option, aria-hidden labels. Returns
+// the option elements in DOM order, or null when there's nothing to show (the
+// caller then leaves the panel closed — today's empty behavior).
+function renderEmptyResults(panel, data) {
+  const resume = data.resume || "";
+  const recents = data.recents || [];
+  const suggestions = data.suggestions || [];
+  if (!resume && !recents.length && !suggestions.length) return null;
+
+  const parts = [];
+  let idx = 0;
+  if (resume) {
+    parts.push(
+      suggestRowMarkup(
+        panel,
+        idx,
+        "Continue: " + resume,
+        "↩",
+        "dashdown-ask-continue-row"
+      )
+    );
+    // The Continue row's label is prefixed; keep data-q the bare question.
+    idx += 1;
+  }
+  if (recents.length) {
+    parts.push(
+      '<div class="dashdown-ask-suggest-head" aria-hidden="true">Recent</div>'
+    );
+    for (const q of recents) {
+      parts.push(suggestRowMarkup(panel, idx, q, "↻", "", true));
+      idx += 1;
+    }
+  }
+  if (suggestions.length) {
+    parts.push(
+      '<div class="dashdown-ask-suggest-head" aria-hidden="true">Try asking</div>'
+    );
+    for (const q of suggestions) {
+      parts.push(suggestRowMarkup(panel, idx, q, "✦", ""));
+      idx += 1;
+    }
+  }
+  panel.innerHTML = parts.join("");
+  // Fix up the Continue row's data-q to the bare question (its label carries the
+  // "Continue: " prefix, but selecting it must re-ask the plain question).
+  if (resume) {
+    const cont = panel.querySelector(".dashdown-ask-continue-row");
+    if (cont) cont.setAttribute("data-q", resume);
+  }
+  panel.hidden = false;
+  return Array.from(panel.querySelectorAll('[role="option"]'));
 }
 
 // Turn an app URL ("/components/charts") into an href that works on both the live
@@ -89,6 +266,16 @@ function scoreEntry(entry, terms) {
   return { score, bestHeading };
 }
 
+// Escape `text`, then wrap each search term in <mark> (case-insensitive). The
+// shared highlighter for titles, crumbs, and snippets.
+function highlightTerms(text, terms) {
+  let html = esc(text || "");
+  for (const term of terms) {
+    html = html.replace(new RegExp("(" + escapeRe(term) + ")", "gi"), "<mark>$1</mark>");
+  }
+  return html;
+}
+
 // Build a snippet around the first matched term, with the term highlighted.
 function snippetFor(entry, terms) {
   const text = entry.text || "";
@@ -102,21 +289,30 @@ function snippetFor(entry, terms) {
   const start = Math.max(0, pos - 50);
   const end = Math.min(text.length, pos + 90);
   let snip = (start > 0 ? "… " : "") + text.slice(start, end) + (end < text.length ? " …" : "");
-  // Escape first, then wrap each term in <mark> on the escaped string.
-  let html = esc(snip);
-  for (const term of terms) {
-    html = html.replace(new RegExp("(" + escapeRe(term) + ")", "gi"), "<mark>$1</mark>");
-  }
-  return html;
+  return highlightTerms(snip, terms);
 }
 
 function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Structural words that must not gate the AND-match: a question-shaped query
+// ("how is revenue by month?") would otherwise match nothing, since no page
+// contains "how"/"is". When any content term remains, rank (and highlight) on
+// the content terms only; an all-stopword query falls back to the full set.
+const _STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "be", "been",
+  "do", "does", "did", "can", "could", "should", "would", "will",
+  "how", "what", "when", "where", "which", "who", "why",
+  "of", "in", "on", "at", "to", "for", "from", "with", "by",
+  "and", "or", "per", "vs", "me", "my", "our", "your",
+]);
+
 function rank(entries, query, max) {
-  const terms = tokenize(query);
-  if (!terms.length) return [];
+  const all = tokenize(query);
+  if (!all.length) return [];
+  const content = all.filter((t) => !_STOPWORDS.has(t));
+  const terms = content.length ? content : all;
   const scored = [];
   for (const entry of entries) {
     const r = scoreEntry(entry, terms);
@@ -127,26 +323,45 @@ function rank(entries, query, max) {
 }
 
 // Render the dropdown for one query. `results` are ranked search hits (may be
-// empty); when `askOn` we append a final selectable "Ask the data" row and, if
-// search is on but matched nothing, a "no pages match" hint above it. Every
-// selectable node carries role="option" so keyboard nav treats hits and the ask
-// row uniformly. Returns the option elements in DOM order.
+// empty); when `askOn` a selectable "Ask the data" row joins them — leading the
+// dropdown when `askFirst` (the query reads as a question, so the visible
+// default is the first row), else trailing the hits (or, with zero hits, a "no
+// pages match" hint above it). Matched terms are highlighted in title + crumb.
+// Every selectable node carries role="option" so keyboard nav treats hits and
+// the ask row uniformly. Returns the option elements in DOM order.
 function renderResults(panel, results, query, opts) {
   const askOn = !!(opts && opts.askOn);
   const searchOn = !(opts && opts.searchOn === false);
+  const askFirst = !!(opts && opts.askFirst);
   const parts = [];
+
+  // The ask row's id needn't encode order (aria-activedescendant only needs it
+  // unique), so it's fixed while hit ids stay -opt-<hit index>.
+  const askRow = askOn
+    ? '<div class="dashdown-site-search-result dashdown-site-search-ask-row" role="option" ' +
+        `id="${esc(panel.id)}-opt-ask">` +
+        '<span class="dashdown-site-search-ask-icon" aria-hidden="true">✦</span>' +
+        '<span class="dashdown-site-search-ask-label">Ask the data: ' +
+        `<span class="dashdown-site-search-ask-q">“${esc(query)}”</span></span>` +
+        `<kbd class="dashdown-site-search-ask-kbd" aria-hidden="true">${esc(_ASK_KBD_REST)}</kbd>` +
+        "</div>"
+    : "";
+
+  if (askFirst) parts.push(askRow);
 
   if (results.length) {
     results.forEach((r, i) => {
       const e = r.entry;
       const anchor = r.bestHeading ? "#" + r.bestHeading.id : "";
       const href = hrefFor(e.url) + anchor;
-      const sub = r.bestHeading ? esc(r.bestHeading.text) : esc(e.url);
+      const crumb = r.bestHeading
+        ? highlightTerms(r.bestHeading.text, r.terms)
+        : highlightTerms(e.url, r.terms);
       parts.push(
         `<a class="dashdown-site-search-result" href="${esc(href)}" role="option" ` +
-          `data-idx="${i}">` +
-          `<span class="dashdown-site-search-title">${esc(e.title)}</span>` +
-          `<span class="dashdown-site-search-crumb">${sub}</span>` +
+          `id="${esc(panel.id)}-opt-${i}" data-idx="${i}">` +
+          `<span class="dashdown-site-search-title">${highlightTerms(e.title, r.terms)}</span>` +
+          `<span class="dashdown-site-search-crumb">${crumb}</span>` +
           `<span class="dashdown-site-search-snippet">${snippetFor(e, r.terms)}</span>` +
           `</a>`
       );
@@ -161,26 +376,76 @@ function renderResults(panel, results, query, opts) {
     );
   }
 
-  if (askOn) {
-    parts.push(
-      '<div class="dashdown-site-search-result dashdown-site-search-ask-row" role="option" ' +
-        `data-idx="${results.length}">` +
-        '<span class="dashdown-site-search-ask-icon" aria-hidden="true">✦</span>' +
-        '<span class="dashdown-site-search-ask-label">Ask the data: ' +
-        `<span class="dashdown-site-search-ask-q">“${esc(query)}”</span></span>` +
-        "</div>"
-    );
-  }
+  if (askOn && !askFirst) parts.push(askRow);
 
   panel.innerHTML = parts.join("");
   panel.hidden = false;
   return Array.from(panel.querySelectorAll('[role="option"]'));
 }
 
+// Module-level shortcut registry. Every initialized box registers its input +
+// which shortcuts it honors; the document-level "/" and Ctrl/⌘+K listeners are
+// wired ONCE (below) and arbitrate across the set, so the two rendered boxes
+// (header + mobile menu) don't each install a duplicate pair.
+const _shortcutBoxes = new Set();
+let _shortcutsWired = false;
+let _boxSeq = 0; // fallback ids for the header/mobile omnibox (no wrapper id)
+
+// The first registered box whose input is currently visible — the header box is
+// display:none on mobile and the menu box display:none on desktop, so a shortcut
+// should land on whichever one the user can actually see. Registration runs in
+// DOM order (initAllSiteSearches iterates the nodes in order), matching the prior
+// per-box `document.querySelectorAll(...).find(visible)` arbitration.
+function firstVisibleShortcutBox() {
+  for (const entry of _shortcutBoxes) {
+    if (entry.input.offsetParent !== null) return entry;
+  }
+  return null;
+}
+
+function wireShortcutsOnce() {
+  if (_shortcutsWired) return;
+  _shortcutsWired = true;
+
+  // "/" focuses the first visible box that has search on (skip when already
+  // typing in a field, and in ask-only boxes where the "/" hint isn't shown).
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    const tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+    const entry = firstVisibleShortcutBox();
+    if (entry && entry.searchOn) {
+      ev.preventDefault();
+      entry.input.focus();
+    }
+  });
+
+  // Ctrl/Cmd+K focuses the omnibox from anywhere (search owns "/"; the ask box
+  // owns ⌘K when ask is on — the one owner, so no double-preventDefault).
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key.toLowerCase() !== "k" || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+    const entry = firstVisibleShortcutBox();
+    if (entry && entry.askOn) {
+      ev.preventDefault();
+      entry.input.focus();
+      entry.input.select();
+    }
+  });
+}
+
 export function initSiteSearch(el) {
   const input = el.querySelector(".dashdown-site-search-input");
   const panel = el.querySelector(".dashdown-site-search-results");
   if (!input || !panel) return;
+
+  // Combobox contract: give the results listbox an id (derived from the wrapper
+  // id, with a fallback for the header/mobile omnibox which has none) and point
+  // the input's aria-controls at it. markActive/close then move the input's
+  // aria-activedescendant across the option ids renderResults stamps.
+  const panelId = `${el.id || `dashdown-site-search-${++_boxSeq}`}-results`;
+  panel.id = panelId;
+  input.setAttribute("aria-controls", panelId);
 
   let config = {};
   try {
@@ -203,16 +468,37 @@ export function initSiteSearch(el) {
   function close() {
     panel.hidden = true;
     input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
     active = -1;
   }
 
-  function setActive(next) {
+  // Move selection to `next` (wrapping), stamping aria-selected + the input's
+  // aria-activedescendant so the active row is visible. `scroll` gates the
+  // scrollIntoView so the default row can be marked on render without jumping.
+  function markActive(next, scroll) {
     if (!options.length) return;
     if (active >= 0 && options[active]) options[active].removeAttribute("aria-selected");
     active = (next + options.length) % options.length;
     const opt = options[active];
     opt.setAttribute("aria-selected", "true");
-    opt.scrollIntoView({ block: "nearest" });
+    if (scroll) opt.scrollIntoView({ block: "nearest" });
+    if (opt.id) input.setAttribute("aria-activedescendant", opt.id);
+    else input.removeAttribute("aria-activedescendant");
+    syncAskKbd();
+  }
+
+  function setActive(next) {
+    markActive(next, true);
+  }
+
+  // Keep the ask row's kbd hint truthful as rows are traversed: plain "↵" when
+  // the ask row is the active option (Enter asks now), else the platform resting
+  // label. No-op when the panel has no ask row (e.g. the empty state).
+  function syncAskKbd() {
+    const kbd = panel.querySelector(".dashdown-site-search-ask-kbd");
+    if (!kbd) return;
+    const opt = active >= 0 ? options[active] : null;
+    kbd.textContent = isAskRow(opt) ? "↵" : _ASK_KBD_REST;
   }
 
   // Selecting the ask row: hand the question to ask_box.js via a DOM event (no
@@ -230,6 +516,86 @@ export function initSiteSearch(el) {
     return opt && opt.classList.contains("dashdown-site-search-ask-row");
   }
 
+  function isSuggestRow(opt) {
+    return opt && opt.classList.contains("dashdown-ask-suggest-row");
+  }
+
+  // Selecting a recent / suggestion / continue row: fill the input with the
+  // question and hand it to ask_box.js via the same event the ask row uses.
+  function selectSuggestion(q) {
+    const question = (q || "").trim();
+    if (!question) return;
+    input.value = question;
+    close();
+    el.dispatchEvent(
+      new CustomEvent("dashdown:ask", { detail: { question }, bubbles: true })
+    );
+  }
+
+  // The empty-focus dropdown (ask boxes only): recents + "try asking"
+  // suggestions, plus a "Continue" row when ask_box.js has a restored session
+  // (exposed via el.dataset.askResume — a decoupled channel, no import). Fetches
+  // suggestions once per page (module cache) then renders; a value typed while
+  // that loads switches back to the normal flow. Recents carry a × to forget
+  // them; the resume question is deduped out of them.
+  async function runEmpty() {
+    if (!askOn) return; // search-only boxes show nothing on empty focus
+    // Ask ask_box.js to refresh its resume attribute from the stored session
+    // (it also sets it on init; this keeps it fresh if a session landed later).
+    // ask_box.js updates el.dataset.askResume synchronously, so read it now and
+    // dedupe it out of the recents (the Continue row already offers it).
+    el.dispatchEvent(new CustomEvent("dashdown:ask-resume", { bubbles: false }));
+    const resume = el.dataset.askResume || "";
+    const recents = readRecents()
+      .filter((q) => q.toLowerCase() !== resume.toLowerCase())
+      .slice(0, 4);
+    const suggestions = (await loadSuggestions()).slice(0, 4);
+    // Bail if the user began typing (or the value otherwise changed) while the
+    // suggestions were loading — the input handler owns the non-empty flow.
+    if (input.value.trim()) return;
+    // Also bail if focus left the input while suggestions loaded (tabbed/clicked
+    // away) — don't open a dropdown under an unfocused box.
+    if (document.activeElement !== input) return;
+    const opts = renderEmptyResults(panel, { resume, recents, suggestions });
+    if (!opts) {
+      close();
+      return;
+    }
+    options = opts;
+    // Wire each row's click (they're <div>s, not links).
+    panel.querySelectorAll(".dashdown-ask-suggest-row").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        // A click on the trailing × forgets the recent (wired below) rather than
+        // re-asking the row's question — let it through.
+        if (e.target.closest(".dashdown-ask-suggest-remove")) return;
+        e.preventDefault();
+        selectSuggestion(row.getAttribute("data-q"));
+      });
+      const remove = row.querySelector(".dashdown-ask-suggest-remove");
+      if (remove) {
+        remove.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          removeRecent(row.getAttribute("data-q"));
+          // The click moved focus to the button; refocus the input so runEmpty's
+          // focus guard doesn't bail and strand a stale dropdown.
+          input.focus();
+          runEmpty();
+        });
+      }
+    });
+    input.setAttribute("aria-expanded", "true");
+    active = -1; // no default row in the empty state
+    // ask_box.js reopens its answer panel on focus, and open() hides the results
+    // dropdown. If that happened, keep the results hidden (checked once, after
+    // the render tick, per the answer-open interplay).
+    if (el.classList.contains("dashdown-ask-answer-open")) {
+      panel.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      active = -1;
+    }
+  }
+
   async function run() {
     const q = input.value.trim();
     if (!q) {
@@ -243,16 +609,20 @@ export function initSiteSearch(el) {
       if (input.value.trim() !== q) return;
       results = rank(entries, q, maxResults);
     }
-    options = renderResults(panel, results, q, { askOn, searchOn });
+    // Promote the ask row to the top when the query reads like a question, so a
+    // plain Enter asks; otherwise it trails the hits and the top page wins.
+    const askFirst = askOn && searchOn && results.length > 0 && isQuestionShaped(q);
+    options = renderResults(panel, results, q, { askOn, searchOn, askFirst });
     // Wire the ask row's click (search results are <a>, so they navigate on
     // their own; the ask row is a <div> and needs an explicit handler).
     const askRow = panel.querySelector(".dashdown-site-search-ask-row");
     if (askRow) askRow.addEventListener("click", (e) => { e.preventDefault(); selectAsk(); });
     input.setAttribute("aria-expanded", "true");
-    // Default selection: the first search hit when search matched, else the ask
-    // row (which is options[0] whenever there are no hits) — so a plain Enter
-    // prefers a page when one matched and asks otherwise.
+    // Default selection is always the first row — the ask row when askFirst
+    // promoted it, else the top hit (or the lone ask row on zero hits). Mark it
+    // without scrolling so the default is visibly highlighted on render.
     active = options.length ? 0 : -1;
+    if (active >= 0) markActive(active, false);
   }
 
   input.addEventListener("input", () => {
@@ -261,6 +631,18 @@ export function initSiteSearch(el) {
   });
 
   input.addEventListener("keydown", (ev) => {
+    // Cmd/Ctrl+Enter always asks immediately (regardless of the active row), so
+    // long as ask is on and the input isn't empty.
+    if (
+      ev.key === "Enter" &&
+      (ev.metaKey || ev.ctrlKey) &&
+      askOn &&
+      input.value.trim()
+    ) {
+      ev.preventDefault();
+      selectAsk();
+      return;
+    }
     if (ev.key === "ArrowDown") {
       ev.preventDefault();
       setActive(active + 1);
@@ -272,6 +654,10 @@ export function initSiteSearch(el) {
       if (isAskRow(opt)) {
         ev.preventDefault();
         selectAsk();
+      } else if (isSuggestRow(opt)) {
+        // Empty-state row (recent / suggestion / continue): re-ask its question.
+        ev.preventDefault();
+        selectSuggestion(opt.getAttribute("data-q"));
       } else if (opt && opt.tagName === "A") {
         ev.preventDefault();
         window.location.href = opt.getAttribute("href");
@@ -291,47 +677,28 @@ export function initSiteSearch(el) {
     if (!el.contains(ev.target)) close();
   });
   input.addEventListener("focus", () => {
+    // Warm the search index while the user types (dedups via the module promise).
+    if (searchOn) loadIndex();
     if (input.value.trim()) run();
+    else runEmpty();
+  });
+  // A click on an already-focused (so no `focus` event) empty box also opens the
+  // empty-focus dropdown. Guarded so it doesn't fight ask_box.js's own click
+  // reopen of the answer panel (that keeps the results hidden anyway).
+  input.addEventListener("click", () => {
+    if (!input.value.trim() && panel.hidden) runEmpty();
   });
 
-  // "/" focuses the first *visible* search box (skip when already typing in a
-  // field, and in ask-only boxes where the "/" hint isn't shown). Visibility
-  // matters because the header box is display:none on mobile and the menu box is
-  // display:none on desktop — the shortcut should land on whichever one the user
-  // can actually see.
-  if (searchOn) {
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-      const t = ev.target;
-      const tag = t && t.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
-      const inputs = Array.from(document.querySelectorAll(".dashdown-site-search-input"));
-      const firstVisible = inputs.find((i) => i.offsetParent !== null);
-      if (firstVisible === input) {
-        ev.preventDefault();
-        input.focus();
-      }
-    });
-  }
-
-  // Ctrl/Cmd+K focuses the omnibox from anywhere (search owns "/"; this box owns
-  // ⌘K when ask is on — the one owner, so no double-preventDefault). Same
-  // first-visible arbitration as "/". Swap the hint chip for the Mac glyph.
+  // Swap the ⌘K hint chip for the Mac glyph (per-box — each box owns its chip).
   if (askOn) {
     const askHint = el.querySelector(".dashdown-site-search-hint-ask");
-    const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
-    if (askHint && isMac) askHint.textContent = "⌘K";
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key.toLowerCase() !== "k" || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
-      const inputs = Array.from(document.querySelectorAll(".dashdown-site-search-input"));
-      const firstVisible = inputs.find((i) => i.offsetParent !== null);
-      if (firstVisible === input) {
-        ev.preventDefault();
-        input.focus();
-        input.select();
-      }
-    });
+    if (askHint && _IS_MAC) askHint.textContent = "⌘K";
   }
+
+  // Register this box for the shared "/" + Ctrl/⌘K shortcuts, then wire the two
+  // document-level listeners once (they arbitrate to the first visible box).
+  _shortcutBoxes.add({ input, searchOn, askOn });
+  wireShortcutsOnce();
 }
 
 export function initAllSiteSearches() {

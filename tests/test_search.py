@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -11,7 +12,11 @@ from fastapi.testclient import TestClient
 
 from dashdown.build import build_site
 from dashdown.project import load_project
-from dashdown.search import build_search_index, index_page
+from dashdown.search import (
+    build_search_index,
+    get_cached_search_index,
+    index_page,
+)
 from dashdown.server import create_app
 
 
@@ -193,6 +198,70 @@ def test_search_config_threads_placeholder_and_max_results(tmp_project):
     html = TestClient(create_app(proj)).get("/guide").text
     assert 'placeholder="Find stuff"' in html
     assert '"max_results":3' in html
+
+
+# --------------------------------------------------------------------------- #
+# memoization: the live endpoint caches on page content state
+# --------------------------------------------------------------------------- #
+def test_get_cached_search_index_does_not_reparse(tmp_project, monkeypatch):
+    """A second call with unchanged pages reuses the built index (no re-parse)."""
+    import dashdown.search as search_mod
+
+    proj = load_project(_make_project(tmp_project))
+
+    calls = {"n": 0}
+    orig = search_mod.parse_markdown
+
+    def counting(src):
+        calls["n"] += 1
+        return orig(src)
+
+    monkeypatch.setattr(search_mod, "parse_markdown", counting)
+
+    etag1, index1 = get_cached_search_index(proj)
+    first = calls["n"]
+    assert first > 0
+
+    etag2, index2 = get_cached_search_index(proj)
+    assert calls["n"] == first  # no page re-parsed on the cache hit
+    assert etag2 == etag1
+    assert index2 == index1
+
+
+def test_get_cached_search_index_reflects_page_edit(tmp_project):
+    """Editing a page (bumping its mtime) yields a fresh index + new etag."""
+    proj_dir = _make_project(tmp_project)
+    proj = load_project(proj_dir)
+
+    etag1, index1 = get_cached_search_index(proj)
+    assert "freshtoken" not in next(e["text"] for e in index1 if e["url"] == "/guide")
+
+    guide = proj_dir / "pages" / "guide.md"
+    guide.write_text("# Guide\n\nNow with freshtoken prose.\n", encoding="utf-8")
+    # Force the mtime forward so the change is visible even on coarse clocks.
+    bumped = os.stat(guide).st_mtime_ns + 2_000_000_000
+    os.utime(guide, ns=(bumped, bumped))
+
+    etag2, index2 = get_cached_search_index(proj)
+    assert etag2 != etag1
+    assert "freshtoken" in next(e["text"] for e in index2 if e["url"] == "/guide")
+
+
+def test_search_index_endpoint_etag_and_304(tmp_project):
+    """The endpoint returns an ETag; an If-None-Match round-trip gets a 304."""
+    client = TestClient(create_app(_make_project(tmp_project)))
+
+    r1 = client.get("/_dashdown/api/search-index")
+    assert r1.status_code == 200
+    etag = r1.headers.get("etag")
+    assert etag
+
+    r2 = client.get(
+        "/_dashdown/api/search-index", headers={"If-None-Match": etag}
+    )
+    assert r2.status_code == 304
+    assert r2.headers.get("etag") == etag
+    assert r2.content == b""
 
 
 def test_site_search_survives_static_build(tmp_project):

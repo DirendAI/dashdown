@@ -12,6 +12,7 @@ import json
 import shutil
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,7 +20,9 @@ from typer.testing import CliRunner
 
 from dashdown import ask_engine
 from dashdown.ask_engine import (
+    ask_suggestions,
     build_ask_catalog,
+    cached_ask_catalog,
     infer_chart_shape,
     normalize_question,
     parse_resolution,
@@ -180,6 +183,128 @@ def test_parse_resolution_unknown_query_is_none(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Memoized catalog + ask suggestions (pure, no LLM)
+# --------------------------------------------------------------------------- #
+def _fake_handle(measures, dimensions, time_dimension=None):
+    """A minimal semantic-model handle for catalog composition (no ibis/bsl).
+
+    ``build_ask_catalog`` reads only ``.measures`` / ``.dimensions`` /
+    ``.time_dimension`` off a handle, so a namespace with those suffices."""
+    return SimpleNamespace(
+        measures=measures, dimensions=dimensions, time_dimension=time_dimension
+    )
+
+
+def _fake_query(description, connector="main", sql="SELECT 1"):
+    return SimpleNamespace(description=description, connector=connector, sql=sql)
+
+
+def _fake_project(*, semantic_models=None, queries=None, python_queries=None):
+    """A duck-typed project carrying only the fields the catalog builder reads."""
+    return SimpleNamespace(
+        semantic_models=semantic_models or {},
+        queries=queries or {},
+        python_queries=python_queries or {},
+    )
+
+
+def test_cached_ask_catalog_memoizes_per_project(monkeypatch):
+    calls: list[object] = []
+    real = ask_engine.build_ask_catalog
+
+    def counting(project):
+        calls.append(project)
+        return real(project)
+
+    monkeypatch.setattr(ask_engine, "build_ask_catalog", counting)
+    proj = _fake_project(queries={"by_region": _fake_query("Revenue by region")})
+    first = cached_ask_catalog(proj)
+    second = cached_ask_catalog(proj)
+    # Two calls, one build — and the identical dict comes back both times.
+    assert first is second
+    assert len(calls) == 1
+    # A distinct project instance builds its own catalog (reload → new Project).
+    cached_ask_catalog(_fake_project())
+    assert len(calls) == 2
+
+
+def test_ask_suggestions_composition_and_no_sql_leak():
+    proj = _fake_project(
+        semantic_models={
+            "sales": _fake_handle(
+                ["sales.revenue", "sales.orders", "sales.aov"],
+                ["sales.region", "sales.channel"],
+                time_dimension="sales.order_date",
+            ),
+        },
+        queries={
+            "by_region": _fake_query(
+                "Revenue by region. Second sentence ignored.",
+                sql="SELECT * FROM t WHERE x = '${secret_param}'",
+            ),
+        },
+        python_queries={
+            "ml.churn": SimpleNamespace(description="", connector="main"),
+        },
+    )
+    out = ask_suggestions(proj)
+    # First two measures paired with the model's time dimension.
+    assert out[0] == "aov by order_date"  # measures are sorted: aov, orders, revenue
+    assert out[1] == "orders by order_date"
+    # Library query: first sentence only, lowercased lead, no trailing period.
+    assert "revenue by region" in out
+    assert "Second sentence" not in " ".join(out)
+    # Descriptionless python query → humanized name.
+    assert "ml churn" in out
+    # Never leaks SQL, param names, or schema.
+    joined = " ".join(out)
+    assert "${" not in joined and "secret_param" not in joined
+    assert "SELECT" not in joined
+
+
+def test_ask_suggestions_caps_at_six():
+    proj = _fake_project(
+        semantic_models={
+            f"m{i}": _fake_handle([f"m{i}.a", f"m{i}.b"], [f"m{i}.d"])
+            for i in range(4)
+        },
+        queries={
+            f"q{i}": _fake_query(f"Query number {i}") for i in range(10)
+        },
+    )
+    out = ask_suggestions(proj)
+    assert len(out) == 6
+    # Only the first two models (by catalog/sorted order) contribute measures.
+    assert out[:4] == ["a by d", "b by d", "a by d", "b by d"]
+
+
+def test_ask_suggestions_measure_falls_back_to_dimension_then_bare():
+    with_dim = _fake_project(
+        semantic_models={"s": _fake_handle(["s.rev"], ["s.region"])}
+    )
+    assert ask_suggestions(with_dim) == ["rev by region"]
+    bare = _fake_project(semantic_models={"s": _fake_handle(["s.rev"], [])})
+    assert ask_suggestions(bare) == ["rev"]
+
+
+def test_ask_suggestions_endpoint_shape(tmp_path):
+    client = _client(tmp_path)
+    resp = client.get("/_dashdown/api/ask/suggestions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["suggestions"], list)
+    # The library query's description drives one starter.
+    assert "revenue by region" in body["suggestions"]
+
+
+def test_ask_suggestions_endpoint_empty_when_ask_disabled(tmp_path):
+    client = _client(tmp_path, llm=False)
+    resp = client.get("/_dashdown/api/ask/suggestions")
+    assert resp.status_code == 200
+    assert resp.json() == {"suggestions": []}
+
+
+# --------------------------------------------------------------------------- #
 # Chart inference (mirrors chart.js::resolveAutoConfig)
 # --------------------------------------------------------------------------- #
 class TestChartInference:
@@ -245,6 +370,93 @@ def test_parse_ask_config_rate_limit_validation():
     for bad in (-1, "10", True, 1.5):
         with pytest.raises(ValueError):
             parse_ask_config({"rate_limit": bad})
+
+
+def test_parse_ask_config_non_mapping_raises():
+    from dashdown.project import parse_ask_config
+
+    with pytest.raises(ValueError):
+        parse_ask_config("x")
+
+
+@pytest.mark.parametrize("key", ["enabled", "allow_sql", "log"])
+@pytest.mark.parametrize("bad", [1, 0, "yes", "true", 1.0])
+def test_parse_ask_config_non_bool_flags_raise(key, bad):
+    # None means "unset" (uses the default), so it's *not* a bad value here.
+    from dashdown.project import parse_ask_config
+
+    with pytest.raises(ValueError):
+        parse_ask_config({key: bad})
+
+
+@pytest.mark.parametrize("key", ["max_rows", "cache_ttl"])
+@pytest.mark.parametrize("bad", [0, -1, "10", True, 1.5])
+def test_parse_ask_config_non_positive_int_raise(key, bad):
+    from dashdown.project import parse_ask_config
+
+    with pytest.raises(ValueError):
+        parse_ask_config({key: bad})
+
+
+@pytest.mark.parametrize("key", ["max_rows", "cache_ttl"])
+def test_parse_ask_config_valid_int_sets_field(key):
+    from dashdown.project import parse_ask_config
+
+    cfg = parse_ask_config({key: 10})
+    assert getattr(cfg, key) == 10
+
+
+@pytest.mark.parametrize("key", ["enabled", "allow_sql", "log"])
+def test_parse_ask_config_valid_bool_sets_field(key):
+    from dashdown.project import parse_ask_config
+
+    assert getattr(parse_ask_config({key: False}), key) is False
+
+
+# --------------------------------------------------------------------------- #
+# Wire-row cap — an answer payload ships at most ASK_WIRE_ROWS rows
+# --------------------------------------------------------------------------- #
+class TestWireRowCap:
+    def _big_query_client(self, tmp_path: Path, n: int) -> TestClient:
+        """A project with a `big` library query generating `n` rows, resolved to
+        it by the fake adapter."""
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        (proj / "queries" / "big.sql").write_text(
+            f"SELECT i AS n FROM range({n}) AS t(i)\n", encoding="utf-8"
+        )
+        app = create_app(proj)
+        app.state.project.llm_adapter = FakeAdapter(
+            '{"kind": "query", "name": "big", "params": {}}', "Big answer."
+        )
+        return TestClient(app)
+
+    def test_over_cap_ships_500_and_truncation_fields(self, tmp_path):
+        client = self._big_query_client(tmp_path, 600)
+        body = client.post("/_dashdown/api/ask", json={"question": "big list"}).json()
+        assert body["resolved"]["kind"] == "query"
+        assert len(body["rows"]) == ask_engine.ASK_WIRE_ROWS == 500
+        assert body["truncated"] is True
+        assert body["total_rows"] == 600
+
+    def test_at_or_under_cap_omits_truncation_fields(self, tmp_path):
+        client = self._big_query_client(tmp_path, 300)
+        body = client.post("/_dashdown/api/ask", json={"question": "small list"}).json()
+        assert len(body["rows"]) == 300
+        assert "truncated" not in body
+        assert "total_rows" not in body
+
+    def test_cached_payload_is_capped(self, tmp_path):
+        client = self._big_query_client(tmp_path, 600)
+        first = client.post("/_dashdown/api/ask", json={"question": "big list"}).json()
+        assert first["cached"] is False
+        # The cache stores the capped payload — the replay is identical.
+        second = client.post("/_dashdown/api/ask", json={"question": "big list"}).json()
+        assert second["cached"] is True
+        assert len(second["rows"]) == 500
+        assert second["truncated"] is True
+        assert second["total_rows"] == 600
 
 
 # --------------------------------------------------------------------------- #

@@ -2174,7 +2174,8 @@ body {
 }
 
 .dashdown-site-search-snippet mark,
-.dashdown-site-search-title mark {
+.dashdown-site-search-title mark,
+.dashdown-site-search-crumb mark {
   background: transparent;
   color: var(--fallback-p, oklch(var(--p) / 1));
   font-weight: 700;
@@ -2223,6 +2224,86 @@ body {
 .dashdown-site-search-ask-q {
   font-weight: 400;
   color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+/* The "⌘↵ always asks" hint on the ask row — pushed to the row's trailing edge,
+   same chip chrome as the omnibox "/" + ⌘K hints. */
+.dashdown-site-search-ask-kbd {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: 0.3rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+
+/* ---- Empty-focus dropdown: recents + "try asking" suggestions --------- *
+   Shown when an ask-enabled omnibox is focused/clicked while empty: an optional
+   "Continue" row (a restored session), a "Recent" section, and a "Try asking"
+   section. Rows reuse .dashdown-site-search-result chrome (hover/selected). */
+.dashdown-ask-suggest-head {
+  padding: 0.4rem 0.625rem 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+.dashdown-ask-suggest-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.dashdown-ask-suggest-icon {
+  flex: none;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+.dashdown-ask-suggest-label {
+  font-size: 0.9375rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The "Continue" row (a restored session) leads the dropdown and carries a
+   primary-tinted accent so it reads as the distinct resume affordance. */
+.dashdown-ask-continue-row {
+  margin-bottom: 0.15rem;
+}
+.dashdown-ask-continue-row .dashdown-ask-suggest-icon {
+  color: var(--fallback-p, oklch(var(--p) / 1));
+}
+.dashdown-ask-continue-row .dashdown-ask-suggest-label {
+  font-weight: 600;
+}
+/* The trailing × on a Recent row — forget that question. Sits at the row's
+   trailing edge (mirroring the ask row's kbd chip) and stays hidden until the
+   row is hovered/selected or the button itself is focused. */
+.dashdown-ask-suggest-remove {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+  border: none;
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  cursor: pointer;
+  opacity: 0;
+}
+.dashdown-ask-suggest-row:hover .dashdown-ask-suggest-remove,
+.dashdown-ask-suggest-row[aria-selected="true"] .dashdown-ask-suggest-remove,
+.dashdown-ask-suggest-remove:focus-visible {
+  opacity: 1;
+}
+.dashdown-ask-suggest-remove:hover {
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  background: var(--fallback-b3, oklch(var(--b3) / 1));
 }
 
 /* While an answer panel is open the search results dropdown stays hidden, so
@@ -2324,6 +2405,75 @@ body {
   color: var(--fallback-bc, oklch(var(--bc) / 1));
   background: var(--fallback-b2, oklch(var(--b2) / 1));
 }
+/* Topbar right-hand action cluster: the expand + close icon buttons. */
+.dashdown-ask-box-topbar-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+/* Expand affordance: promotes the panel into a modal <dialog> (⤢), collapses
+   back (⤡). Same 24px icon-button footprint as the close button. */
+.dashdown-ask-box-expand {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--dashdown-radius-control);
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.dashdown-ask-box-expand:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+/* Copy-link affordance: shares the icon-button footprint with expand/close;
+   flashes a ✓ (primary tint) for ~1.5s after a successful copy. */
+.dashdown-ask-box-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--dashdown-radius-control);
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.dashdown-ask-box-copy:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+.dashdown-ask-box-copy-done {
+  color: var(--fallback-su, oklch(var(--su) / 1));
+}
+
+/* Visually-hidden (clip-based) — off-screen for sighted users, still read by
+   assistive tech. Used for the answer panel's polite live region. */
+.dashdown-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* Session trail: a slim pill row at the top of the panel tracing the
    ask → follow-up chain. The current answer's pill is emphasized
@@ -2358,11 +2508,19 @@ body {
 }
 button.dashdown-ask-trail-pill {
   cursor: pointer;
+  position: relative;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 button.dashdown-ask-trail-pill:hover {
   color: var(--fallback-bc, oklch(var(--bc) / 1));
   border-color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+/* Grow the clickable area to ≥24px vertically without inflating the pill's
+   look — an invisible ::before overlay extends the hit target. */
+button.dashdown-ask-trail-pill::before {
+  content: "";
+  position: absolute;
+  inset: -0.28rem 0;
 }
 .dashdown-ask-trail-pill-active {
   color: var(--fallback-p, oklch(var(--p) / 1));
@@ -2498,6 +2656,7 @@ button.dashdown-ask-trail-pill:hover {
 }
 .dashdown-ask-chip-remove {
   flex: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2511,6 +2670,12 @@ button.dashdown-ask-trail-pill:hover {
   font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
+}
+/* Extend the ×'s hit target to ≥24px without visually enlarging the glyph. */
+.dashdown-ask-chip-remove::before {
+  content: "";
+  position: absolute;
+  inset: -0.3rem;
 }
 .dashdown-ask-chip-remove:hover {
   background: var(--fallback-b3, oklch(var(--b3) / 1));
@@ -2655,6 +2820,24 @@ button.dashdown-ask-trail-pill:hover {
   border-color: var(--fallback-p, oklch(var(--p) / 1));
 }
 .dashdown-ask-box-followup-input::placeholder {
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+/* Slim inline busy row shown in the follow-up slot while a follow-up loads (the
+   current answer stays visible above it). Reuses the loading blink cursor. */
+.dashdown-ask-box-followup-busy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+
+/* Truncation note under the table: how many rows were withheld when the server
+   capped the result set (`truncated` + `total_rows`). Muted, small, unobtrusive. */
+.dashdown-ask-box-truncated {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
   color: var(--fallback-bc3, oklch(var(--bc3) / 1));
 }
 
@@ -3151,6 +3334,12 @@ html.dashdown-theme-anim *::after {
   }
   .dashdown-counter:hover {
     transform: none !important;
+  }
+  /* The kept-section flash is decorative — hold it steady under reduced motion
+     (the blanket rule above already near-zeroes it; this makes the intent
+     explicit and neutralizes the pulse keyframes outright). */
+  .dashdown-kept-flash {
+    animation: none !important;
   }
 }
 
@@ -4382,4 +4571,294 @@ dialog.dashdown-fullscreen-modal::backdrop {
 }
 .dashdown-map-bilegend-grid i {
   display: block;
+}
+
+/* === Ask answer: expanded view ========================================
+   The ⤢ topbar button promotes the LIVE answer panel node into this modal
+   <dialog> (ask_box.js moves the node itself, so its state/listeners/chart
+   canvas survive). Native <dialog> gives the top-layer render + ::backdrop +
+   Escape-to-close; these rules size the shell and override the panel's
+   omnibox-anchored absolute positioning while it lives here. Placed after the
+   ask-panel base rules so the position/size overrides win by source order. */
+dialog.dashdown-ask-expand {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+dialog.dashdown-ask-expand[open] {
+  display: grid;
+  place-items: center;
+}
+dialog.dashdown-ask-expand::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+/* Un-anchor the panel from the omnibox and give it the roomier expanded box
+   (internal scroll kept via the base rule's overflow-y). */
+.dashdown-ask-expand .dashdown-ask-box-panel {
+  position: static;
+  width: min(60rem, 94vw);
+  max-height: 90vh;
+  margin: 0;
+}
+/* A taller plot while expanded (vs. the 16rem compact-panel default). */
+.dashdown-ask-expand .dashdown-ask-box-chart-container {
+  height: 360px;
+}
+
+/* === Source editor (dev server only) ==================================
+   A ✎ header button opens a whole-page markdown editor; every kept answer
+   section gains a hover toolbar to edit/remove just that section (page_edit.js).
+   Dev-server-only surface (the config node is never emitted in embeds / static
+   builds), so none of this ships to a viewer. All colors are DaisyUI tokens so
+   both themes are covered; spacing/radius come from the --dashdown-* tokens. */
+
+/* Header ✎ button — a ghost control sitting next to the theme toggle. Mirrors
+   the muted-icon posture of the header's other actions. */
+.dashdown-page-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--dashdown-radius-control);
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.dashdown-page-edit-btn:hover {
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+.dashdown-page-edit-btn:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 2px;
+}
+
+/* The editor dialog — a native <dialog> (top-layer render + ::backdrop +
+   Escape) holding a full-height monospace textarea. Same posture as the export
+   modal: the dialog fills the viewport, the box is centered so a backdrop click
+   requests close. */
+dialog.dashdown-page-editor {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+}
+dialog.dashdown-page-editor[open] {
+  display: grid;
+  place-items: center;
+}
+dialog.dashdown-page-editor::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+.dashdown-page-editor-box {
+  display: flex;
+  flex-direction: column;
+  width: min(56rem, 94vw);
+  height: min(80vh, 44rem);
+  padding: 1rem;
+  background-color: var(--fallback-b1, oklch(var(--b1) / 1));
+  border-radius: var(--dashdown-radius-card);
+  box-shadow: var(--dashdown-shadow-raised, 0 20px 50px -12px rgba(0, 0, 0, 0.35));
+}
+.dashdown-page-editor-textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  tab-size: 2;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  white-space: pre;
+  overflow: auto;
+}
+.dashdown-page-editor-textarea:focus-visible {
+  outline: 2px solid var(--fallback-p, oklch(var(--p) / 1));
+  outline-offset: 1px;
+}
+.dashdown-page-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.dashdown-page-editor-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--fallback-bc3, oklch(var(--bc3) / 1));
+}
+.dashdown-page-editor-cancel,
+.dashdown-page-editor-save {
+  flex: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--dashdown-radius-control);
+  cursor: pointer;
+}
+.dashdown-page-editor-cancel {
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  background: transparent;
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+}
+.dashdown-page-editor-cancel:hover {
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+.dashdown-page-editor-save {
+  border: 1px solid var(--fallback-p, oklch(var(--p) / 1));
+  background: var(--fallback-p, oklch(var(--p) / 1));
+  color: var(--fallback-pc, oklch(var(--pc) / 1));
+}
+.dashdown-page-editor-save:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.dashdown-page-editor-save:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+/* Conflict banner (a 409 on save) + inline save errors. */
+.dashdown-page-editor-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  border-radius: var(--dashdown-radius-control);
+  border: 1px solid var(--fallback-wa, oklch(var(--wa) / 0.5));
+  background: var(--fallback-wa, oklch(var(--wa) / 0.12));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+}
+.dashdown-page-editor-conflict[hidden] {
+  display: none;
+}
+.dashdown-page-editor-conflict-msg {
+  flex: 1 1 auto;
+}
+.dashdown-page-editor-conflict-load,
+.dashdown-page-editor-conflict-mine {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--dashdown-radius-control);
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  cursor: pointer;
+}
+.dashdown-page-editor-conflict-load:hover,
+.dashdown-page-editor-conflict-mine:hover {
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+  color: var(--fallback-p, oklch(var(--p) / 1));
+}
+
+/* Kept-section wrapper + hover toolbar. The wrapper is the positioning context
+   for the top-right toolbar, which stays out of the way until the section is
+   hovered or holds focus. */
+.dashdown-kept-wrap {
+  position: relative;
+}
+.dashdown-kept-toolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 5;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.dashdown-kept-wrap:hover .dashdown-kept-toolbar,
+.dashdown-kept-wrap:focus-within .dashdown-kept-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dashdown-kept-toolbar button {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--dashdown-radius-control);
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc2, oklch(var(--bc2) / 1));
+  box-shadow: var(--dashdown-shadow-card);
+  cursor: pointer;
+}
+.dashdown-kept-toolbar .dashdown-kept-edit:hover {
+  border-color: var(--fallback-p, oklch(var(--p) / 1));
+  color: var(--fallback-p, oklch(var(--p) / 1));
+}
+.dashdown-kept-toolbar .dashdown-kept-remove:hover {
+  border-color: var(--fallback-er, oklch(var(--er) / 1));
+  color: var(--fallback-er, oklch(var(--er) / 1));
+}
+
+/* Post-keep flash: a soft background pulse drawing the eye to a freshly kept
+   section after the live-reload. Decorative — neutralized under reduced motion
+   (see the reduced-motion block above). */
+.dashdown-kept-flash {
+  animation: dashdown-kept-flash-pulse 2s ease;
+  border-radius: var(--dashdown-radius-card);
+}
+@keyframes dashdown-kept-flash-pulse {
+  0%,
+  100% {
+    background: transparent;
+  }
+  15% {
+    background: var(--fallback-p, oklch(var(--p) / 0.14));
+  }
+}
+
+/* Editor toast (a transient error, e.g. a section that vanished from source). */
+.dashdown-page-edit-toast {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  max-width: min(30rem, 92vw);
+  padding: 0.6rem 1rem;
+  font-size: 0.8125rem;
+  border-radius: var(--dashdown-radius-control);
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  border: 1px solid var(--fallback-er, oklch(var(--er) / 0.5));
+  box-shadow: var(--dashdown-shadow-raised, 0 8px 24px rgb(0 0 0 / 0.18));
 }

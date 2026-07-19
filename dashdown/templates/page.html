@@ -21,6 +21,10 @@
 {% set omni_search = search_enabled | default(true) %}
 {% set omni_ask = ask_enabled | default(false) %}
 {% set omni_ask_keep = ask_keep_enabled | default(false) %}
+{# Source-editing surface (dev server only): a ✎ header button + a config div the
+   page-edit JS module reads. Server-threaded, default-false so embeds/static
+   builds omit it entirely. #}
+{% set page_editing = page_edit_enabled | default(false) %}
 {% if omni_search and omni_ask %}
   {% set omni_placeholder = 'Search — or ask your data…' %}
 {% elif omni_ask %}
@@ -222,6 +226,11 @@
       {% endif %}
       {# The PDF + Embed buttons live in a per-page action row (right of the
          filters), rendered into body_html by render_page — not in the header. #}
+      {% if page_editing %}
+      {# Source-editing entry point (dev server only). The page-edit JS module wires
+         the click; here we just render the control next to the theme toggle. #}
+      <button type="button" class="dashdown-page-edit-btn" title="Edit page source" aria-label="Edit page source">✎</button>
+      {% endif %}
       <label class="flex cursor-pointer gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="5" />
@@ -356,6 +365,11 @@
       </footer>
     </main>
   </div>
+  {% if page_editing %}
+  {# Source-editing config for the page-edit JS module (dev server only): the
+     current page path (what it GETs/PUTs) + the enabled flag. Read as JSON. #}
+  <div id="dashdown-page-edit" data-config='{"path": {{ current | tojson }}, "enabled": true}' hidden></div>
+  {% endif %}
   <script type="module" src="{{ ap }}_dashdown/static/dashdown.js"></script>
   {%- for js in (component_js | default([])) %}
   <!-- Colocated JS for a custom component (components/<Name>/<file>.js). Loaded

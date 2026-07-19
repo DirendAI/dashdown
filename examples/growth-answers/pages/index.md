@@ -50,7 +50,7 @@ long-run baseline — not a crisis, but worth a look before it becomes one.
 ## Who to call
 
 Everyone who made a repeat purchase in the last 7 days, and the campaign
-credited for bringing them back:
+credited for bringing them back yes:
 
 <Table data={campaigns.repeat_purchasers} title="Repeat purchasers, last 7 days"
        format="amount=currency, order_date=date" />
@@ -67,3 +67,11 @@ The dashboard above needs no API key. The header ask box, `dashdown ask`, the
 then each shows a muted "no LLM provider configured" note; nothing else on
 this page is affected.
 :::
+
+<!-- dashdown:keep id=c5f6f680 kind=query · named query 'campaigns.performance' · 2026-07-19 -->
+## per-campaign order volume, revenue, and repeat-purchase share over the last 30 days — which campaign is actually driving repeat business, not just first clicks
+<!-- kept from an ask answer · named query 'campaigns.performance' · 2026-07-19 -->
+<BarChart data={campaigns.performance} x="campaign" y="orders" title="per-campaign order volume, revenue, and repeat-purchase share over the last 30 days — which campaign is actually driving repeat business, not just first clicks" />
+<Table data={campaigns.performance} />
+<Ask data={campaigns.performance} ask="per-campaign order volume, revenue, and repeat-purchase share over the last 30 days — which campaign is actually driving repeat business, not just first clicks" />
+<!-- /dashdown:keep id=c5f6f680 -->

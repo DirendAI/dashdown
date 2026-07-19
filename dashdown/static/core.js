@@ -370,6 +370,61 @@ export async function postJson(url, body, opts = {}) {
 }
 
 /**
+ * Read a Server-Sent Events response body frame by frame. Both ask surfaces —
+ * the authored <Ask/> card and the header ask box — consume the same SSE shape,
+ * so the frame parser + read loop live here once instead of hand-rolled twice.
+ *
+ * Frames split on the blank-line delimiter ("\n\n"); each frame's `event:` line
+ * names the event (default "message") and its `data:` lines are joined and
+ * JSON-parsed — an unparseable frame is skipped. `onEvent(name, data)` fires per
+ * parsed frame. The read returns early whenever `isStale()` is true (checked
+ * after every read AND before every dispatch), so a superseded request abandons
+ * its stream without touching the DOM.
+ *
+ * @param {Response} response - A fetch Response whose body is an SSE stream.
+ * @param {Object} handlers
+ * @param {(event: string, data: any) => void} handlers.onEvent - Per-frame sink.
+ * @param {() => boolean} handlers.isStale - True once a newer request took over.
+ * @returns {Promise<void>}
+ */
+export async function readSseFrames(response, { onEvent, isStale }) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatch = (raw) => {
+    let event = "message";
+    const dataLines = [];
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    let data;
+    try {
+      data = JSON.parse(dataLines.join("\n"));
+    } catch {
+      return; // unparseable frame — skip it
+    }
+    onEvent(event, data);
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (isStale()) return; // superseded — a newer request took over
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const raw = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      if (!raw.trim()) continue;
+      if (isStale()) return; // re-check before each dispatch
+      dispatch(raw);
+    }
+  }
+}
+
+/**
  * Convert dataset to array of record objects
  * @param {Object} ds - Dataset with columns and rows
  * @returns {Array<Object>} - Array of record objects

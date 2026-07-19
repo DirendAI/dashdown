@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -321,17 +322,23 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
     async def get_search_index(request: Request):
         """Full-text search index for every concrete page.
 
-        Built from the live project on demand so a page/content edit is reflected
-        without a server restart. The browser (`site_search.js`) does the actual
-        ranking — there is no server-side search execution. The static build bakes
-        the equivalent JSON to `_dashdown/search-index.json`.
+        Built from the live project so a page/content edit is reflected without a
+        server restart, but memoized on the pages' content state so a poll that
+        finds no change reuses the parsed index instead of re-parsing every page.
+        The result carries an ETag; an `If-None-Match` revalidation gets a 304. The
+        browser (`site_search.js`) does the actual ranking — there is no
+        server-side search execution. The static build bakes the equivalent JSON to
+        `_dashdown/search-index.json`.
         """
-        from fastapi.responses import JSONResponse
+        from fastapi.responses import JSONResponse, Response
 
-        from dashdown.search import build_search_index
+        from dashdown.search import get_cached_search_index
 
         proj: Project = request.app.state.project
-        return JSONResponse(build_search_index(proj))
+        etag, entries = get_cached_search_index(proj)
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return JSONResponse(entries, headers={"ETag": etag})
 
     @app.get("/_dashdown/api/data/{query_name}")
     async def get_query_data(query_name: str, request: Request):
@@ -615,6 +622,31 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         finally:
             watcher.cancel()
             stream_hub.unsubscribe(key, queue)
+
+    @app.get("/_dashdown/api/ask/suggestions")
+    def get_ask_suggestions(request: Request):
+        """Ready-to-ask starter questions for the ask box (no LLM, no rate-limit).
+
+        The empty ask panel offers a few clickable starters composed from the
+        project's own catalog — semantic measures over their time/dimension, then
+        author-curated query descriptions. Deterministic and free: it never calls
+        the LLM and never consumes the ask rate-limit budget.
+
+        Registered **before** ``GET /api/ask/{ask_id}`` so the static ``suggestions``
+        segment isn't captured as an ``ask_id`` (FastAPI matches routes in
+        declaration order). Gated by the *same* graceful-degrade check as the ask
+        endpoints — when llm/ask is disabled (:func:`ask_unavailable_notice`) it
+        returns an empty list with 200, so the client simply shows no starters
+        rather than erroring. Always 200 ``{"suggestions": [str, ...]}``.
+        """
+        from fastapi.responses import JSONResponse
+
+        from dashdown.ask_engine import ask_suggestions, ask_unavailable_notice
+
+        proj: Project = request.app.state.project
+        if ask_unavailable_notice(proj) is not None:
+            return JSONResponse({"suggestions": []})
+        return JSONResponse({"suggestions": ask_suggestions(proj)})
 
     @app.get("/_dashdown/api/ask/{ask_id}")
     def get_ask_commentary(ask_id: str, request: Request):
@@ -1037,11 +1069,6 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
         from dashdown.ask_engine import build_kept_markdown
 
-        if not request.app.state.dev:
-            raise HTTPException(
-                status_code=403, detail="keeping answers is only available on the dev server"
-            )
-
         proj: Project = request.app.state.project
 
         if not isinstance(body, dict):
@@ -1056,30 +1083,120 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         if chart is not None and not isinstance(chart, dict):
             raise HTTPException(status_code=400, detail="'chart' must be an object or null")
         path = body.get("path")
-        if not isinstance(path, str):
-            raise HTTPException(status_code=400, detail="a 'path' is required")
 
-        full = path.strip("/")
-        md_path, route_params = proj.page_path(full)
-        if md_path is None:
-            raise HTTPException(status_code=404, detail=f"No page for {path!r}")
-        if route_params:
-            raise HTTPException(
-                status_code=400,
-                detail="cannot keep an answer on a dynamic [slug] page (it would apply to every slug)",
-            )
+        # Shared dev-gate / path resolution (403/400/404/400-dynamic) — the same
+        # editable-page contract the page-source endpoints use.
+        md_path = _resolve_editable_page(request, path)
 
         try:
-            section = build_kept_markdown(proj, question.strip(), resolved, chart)
+            section, keep_id = build_kept_markdown(proj, question.strip(), resolved, chart)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
         # Append with exactly one blank line separating the new section from the
         # existing body (the section already starts with a newline).
-        existing = md_path.read_text(encoding="utf-8")
-        md_path.write_text(existing.rstrip("\n") + "\n" + section, encoding="utf-8")
+        try:
+            existing = md_path.read_text(encoding="utf-8")
+            new_content = existing.rstrip("\n") + "\n" + section
+            md_path.write_text(new_content, encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"could not update page source: {e}")
 
-        return JSONResponse({"ok": True, "path": ("/" + full).rstrip("/") or "/"})
+        full = path.strip("/")
+        token = hashlib.sha1(new_content.encode("utf-8")).hexdigest()
+        return JSONResponse(
+            {
+                "ok": True,
+                "path": ("/" + full).rstrip("/") or "/",
+                "id": keep_id,
+                "token": token,
+            }
+        )
+
+    @app.get("/_dashdown/api/page-source")
+    def get_page_source(request: Request):
+        """Return a page's raw markdown + a content fingerprint (dev server only).
+
+        The read half of the source-editing surface: the client GETs a page's
+        ``.md``, splices between kept-section markers client-side, and PUTs the
+        whole file back with the ``token`` it saw (optimistic concurrency). The
+        token is a SHA-1 over the file bytes, so a no-op save/touch never conflicts.
+
+        403 off the dev server, 400 on a non-string / oversize path, 404 unknown
+        page, 400 on a dynamic ``[slug]`` page (its source is a template, not a
+        single editable file). An unreadable file (I/O / decode error) maps to a
+        clean 400, never a bare 500.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        path = request.query_params.get("path")
+        md_path = _resolve_editable_page(request, path)
+        try:
+            raw = md_path.read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"could not read page source: {e}")
+        full = (path or "").strip("/")
+        return JSONResponse(
+            {
+                "path": ("/" + full).rstrip("/") or "/",
+                "markdown": text,
+                "token": hashlib.sha1(raw).hexdigest(),
+            }
+        )
+
+    @app.put("/_dashdown/api/page-source")
+    def put_page_source(request: Request, body: Any = Body(default=None)):
+        """Overwrite a page's markdown, guarded by the ``token`` from a prior GET.
+
+        The write half of the source-editing surface. The client sends the full
+        file it edited plus the ``token`` it read; if the on-disk fingerprint has
+        since changed, the write is refused with 409 carrying the current token (so
+        the client can reconcile). On success the new fingerprint comes back.
+
+        Body must be a JSON object with a string ``markdown`` (rejected 400
+        otherwise); markdown over 2 MB is refused (400). Path resolution shares the
+        editable-page contract (403 off-dev / 400 non-string / 404 unknown /
+        400 dynamic). I/O and decode errors map to clean 400s, never a bare 500.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        markdown = body.get("markdown")
+        if not isinstance(markdown, str):
+            raise HTTPException(status_code=400, detail="'markdown' must be a string")
+        if len(markdown.encode("utf-8")) > _MAX_PAGE_SOURCE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"page source exceeds the {_MAX_PAGE_SOURCE_BYTES // (1024 * 1024)} MB limit",
+            )
+        token = body.get("token")
+
+        md_path = _resolve_editable_page(request, body.get("path"))
+        try:
+            current = hashlib.sha1(md_path.read_bytes()).hexdigest()
+        except (OSError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"could not read page source: {e}")
+        if token != current:
+            # Content changed on disk since the client's GET — refuse and hand back
+            # the current fingerprint so it can re-read and reconcile.
+            return JSONResponse(
+                {
+                    "detail": "page source changed since it was read; reload before saving",
+                    "token": current,
+                },
+                status_code=409,
+            )
+        try:
+            md_path.write_text(markdown, encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"could not write page source: {e}")
+        return JSONResponse(
+            {"ok": True, "token": hashlib.sha1(markdown.encode("utf-8")).hexdigest()}
+        )
 
     @app.get("/_dashdown/api/pdf")
     def export_page_pdf(request: Request):
@@ -1354,6 +1471,10 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 and request.app.state.dev
                 and not params
             ),
+            # Source-editing surface (the ✎ header button + page-source endpoints):
+            # a dev-server authoring action, off in chrome-less embeds and never in
+            # a static build (build.py leaves it default-false).
+            page_edit_enabled=(request.app.state.dev and not embed_on),
             # Desktop sidebar collapse: `collapsed` seeds the first-visit state (a
             # saved localStorage choice overrides it); `toggle` gates the control.
             # Mobile slide-in is unaffected.
@@ -1376,6 +1497,41 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         return HTMLResponse(html, headers=frame_headers(embed_cfg))
 
     return app
+
+
+# Cap on a source-editing PUT body — a page's markdown is prose + component tags,
+# so 2 MB is already far past any real page while bounding a hostile payload.
+_MAX_PAGE_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _resolve_editable_page(request: Request, path: Any) -> Path:
+    """Resolve a URL ``path`` to the single ``.md`` file that backs it, refusing
+    anything that isn't a directly editable page source.
+
+    The shared front half of every source-editing endpoint (page-source GET/PUT and
+    ask/keep): writing to source is a **dev-server** authoring action, so a
+    production process refuses it (403); a non-string path is a 400; an unknown page
+    is a 404; a dynamic ``[slug]`` page is a 400 (its source is a template shared by
+    every slug, not one editable file). Returns the resolved path on success.
+    """
+    from fastapi import HTTPException
+
+    if not request.app.state.dev:
+        raise HTTPException(
+            status_code=403, detail="editing pages is only available on the dev server"
+        )
+    if not isinstance(path, str):
+        raise HTTPException(status_code=400, detail="a string 'path' is required")
+    proj: Project = request.app.state.project
+    md_path, route_params = proj.page_path(path.strip("/"))
+    if md_path is None:
+        raise HTTPException(status_code=404, detail=f"No page for {path!r}")
+    if route_params:
+        raise HTTPException(
+            status_code=400,
+            detail="cannot edit a dynamic [slug] page (its source is shared by every slug)",
+        )
+    return md_path
 
 
 def _not_found_html(project: Project, path: str) -> str:

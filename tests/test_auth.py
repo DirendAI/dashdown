@@ -5,6 +5,7 @@ and integration tests driving the FastAPI app through ``TestClient`` to confirm
 the middleware guards real requests and exempts the health probe.
 """
 import base64
+import re
 import tempfile
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from dashdown.auth import (
     is_authorized,
     parse_auth_config,
 )
-from dashdown.server import create_app
+from dashdown.server import _AUTH_EXEMPT_PATHS, create_app
 
 
 # --------------------------------------------------------------------------- #
@@ -284,3 +285,81 @@ class TestMisconfiguredAuthFailsLoad:
         root = _make_project(tmp_project, "auth:\n  type: basic\n")
         with pytest.raises(ValueError):
             create_app(root)
+
+
+# --------------------------------------------------------------------------- #
+# every /_dashdown/ endpoint must sit behind the auth guard
+# --------------------------------------------------------------------------- #
+class TestEveryDashdownRouteGuarded:
+    """Walk ``app.routes`` and prove the middleware covers every framework
+    endpoint — so a new one (especially a billable/side-effectful one, like the
+    ask endpoints that POST to the LLM and mutate page files) can't ship
+    unguarded. The per-endpoint integration tests above pin a hand-picked few;
+    this closes the gap by construction.
+    """
+
+    AUTH = "auth:\n  type: basic\n  username: admin\n  password: s3cret\n"
+
+    # Unbounded SSE keepalive: TestClient can't consume an authenticated response
+    # (the generator never ends), so only its unauthenticated 401 is exercised.
+    UNBOUNDED_STREAMS = frozenset({"/_dashdown/reload"})
+
+    def _walk(self, app) -> list[tuple[str, str]]:
+        """``(templated_path, method)`` for every guarded ``/_dashdown/`` HTTP
+        route. Skips the WebSocket route and Starlette mounts (neither carries
+        ``.methods``), the exempt health probe, and the catch-all page route
+        (page auth is covered by the tests above)."""
+        routes: list[tuple[str, str]] = []
+        for route in app.routes:
+            methods = getattr(route, "methods", None)
+            if not methods:  # WebSocketRoute / Mount — no HTTP verbs
+                continue
+            path = route.path
+            if not path.startswith("/_dashdown/"):
+                continue  # the catch-all page route + anything non-framework
+            if path in _AUTH_EXEMPT_PATHS:
+                continue
+            routes.append((path, "GET" if "GET" in methods else "POST"))
+        return routes
+
+    def _status(self, client: TestClient, method: str, path: str, **kw) -> int:
+        url = re.sub(r"\{[^}]+\}", "dummy", path)
+        # Stream so an SSE endpoint (e.g. /_dashdown/reload) surfaces its status
+        # from the response headers without blocking on an unbounded body.
+        with client.stream(method, url, **kw) as resp:
+            return resp.status_code
+
+    def test_exempt_list_is_pinned(self):
+        # Widening this set lets an endpoint answer without credentials, which is
+        # a deliberate security decision — never a drive-by change. If you add a
+        # path here, that is the review to have.
+        assert _AUTH_EXEMPT_PATHS == {"/_dashdown/health"}
+
+    def test_ask_endpoints_are_walked(self, tmp_project):
+        # The walker must actually reach the billable/side-effectful ask
+        # endpoints — a silent skip would make the guard assertion vacuous.
+        app = create_app(_make_project(tmp_project, self.AUTH))
+        walked = {p for p, _ in self._walk(app)}
+        for ask_path in (
+            "/_dashdown/api/ask",
+            "/_dashdown/api/ask/execute",
+            "/_dashdown/api/ask/keep",
+        ):
+            assert ask_path in walked, f"{ask_path} was not walked"
+
+    def test_every_route_requires_auth(self, tmp_project):
+        app = create_app(_make_project(tmp_project, self.AUTH))
+        client = TestClient(app)
+        routes = self._walk(app)
+        assert routes  # sanity: the walk found endpoints to check
+
+        for path, method in routes:
+            kw = {"json": {}} if method == "POST" else {}
+            unauth = self._status(client, method, path, **kw)
+            assert unauth == 401, f"{method} {path} answered unauthenticated ({unauth})"
+            if path in self.UNBOUNDED_STREAMS:
+                continue
+            authed = self._status(
+                client, method, path, auth=("admin", "s3cret"), **kw
+            )
+            assert authed != 401, f"{method} {path} rejected valid creds ({authed})"

@@ -8,7 +8,7 @@ title: Growth Answers
 llm:
   provider: mistral
   api_key: ${MISTRAL_API_KEY}
-  model: mistral-small-latest
+  model: mistral-medium-latest
 
 # The runtime natural-language ask engine (dashdown/ask_engine.py) — the
 # header ask box and `dashdown ask`. Inert (same graceful "no LLM provider"
@@ -17,4 +17,4 @@ llm:
 # the model wrote itself.
 ask:
   enabled: true
-  allow_sql: false
+  allow_sql: true

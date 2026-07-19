@@ -16,8 +16,11 @@ a result can deep-link to the matching section.
 """
 from __future__ import annotations
 
+import hashlib
 import html as _htmllib
+import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dashdown.render.markdown import parse_markdown
@@ -105,3 +108,61 @@ def build_search_index(project: "Project") -> list[dict[str, Any]]:
             continue
         entries.append(index_page(app_url, source))
     return entries
+
+
+# --------------------------------------------------------------------------- #
+# Memoized accessor
+# --------------------------------------------------------------------------- #
+# The live endpoint (`server.py::get_search_index`) would otherwise re-parse every
+# page on each poll. Cache the built index against a cheap content-state key so a
+# rebuild happens only when a page is added/removed/renamed or edited. The key is
+# content-derived, so a `reload_project` that swaps the Project without changing
+# any page reuses the cache, and an edited page (bumped mtime) invalidates it.
+_ContentKey = tuple[tuple[str, ...], int]
+_index_cache: dict[Path, tuple[_ContentKey, str, list[dict[str, Any]]]] = {}
+
+
+def _content_state_key(project: "Project") -> _ContentKey:
+    """Cheap fingerprint of the page files that feed the index.
+
+    A tuple of ``(sorted page file paths, newest mtime_ns)`` via ``os.stat``: an
+    added/removed/renamed page changes the path set and an edited page bumps the
+    mtime, so either way the key changes and the index is rebuilt.
+    """
+    if not project.pages_dir.is_dir():
+        return ((), 0)
+    paths: list[str] = []
+    max_mtime = 0
+    for p in sorted(project.pages_dir.rglob("*.md")):
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        paths.append(str(p))
+        if st.st_mtime_ns > max_mtime:
+            max_mtime = st.st_mtime_ns
+    return (tuple(paths), max_mtime)
+
+
+def _etag_for_key(key: _ContentKey) -> str:
+    """A strong HTTP validator (quoted) derived from the content-state key."""
+    digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16]
+    return f'"{digest}"'
+
+
+def get_cached_search_index(project: "Project") -> tuple[str, list[dict[str, Any]]]:
+    """Return ``(etag, entries)`` for ``project``, memoized on page content state.
+
+    The index is rebuilt only when the set of page files or their newest mtime
+    changes; otherwise the previously built entries are served verbatim. The etag
+    is a strong validator over the same key, so a client can revalidate with
+    ``If-None-Match`` and receive a 304.
+    """
+    key = _content_state_key(project)
+    cached = _index_cache.get(project.root)
+    if cached is not None and cached[0] == key:
+        return cached[1], cached[2]
+    entries = build_search_index(project)
+    etag = _etag_for_key(key)
+    _index_cache[project.root] = (key, etag, entries)
+    return etag, entries

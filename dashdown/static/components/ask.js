@@ -22,7 +22,13 @@
 
 "use strict";
 
-import { readBuildConfig, readEmbedToken, readRouteParams, esc } from "../core.js";
+import {
+  readBuildConfig,
+  readEmbedToken,
+  readRouteParams,
+  readSseFrames,
+  esc,
+} from "../core.js";
 import {
   clearChartAnnotations,
   emphasizeChartAnnotation,
@@ -74,6 +80,53 @@ export function wireAnnotationRefChips(bodyEl, chartHost) {
     chip.addEventListener("focus", bold);
     chip.addEventListener("blur", restore);
   });
+}
+
+/**
+ * Type `text` into `el` word by word at the shared replay cadence, then call
+ * `onDone` once the whole text has typed (or immediately when there are no words
+ * or the viewer prefers reduced motion). Pacing is synthetic: word-sized steps
+ * at a fixed cadence, batching words per tick so long answers still finish
+ * inside _REPLAY_CAP_MS. `el` is cleared to a single `.dashdown-ask-stream` div
+ * that accumulates escaped plain text (textContent — the raw model stream never
+ * renders as HTML). A truthy `isStale()` bails the loop mid-type WITHOUT calling
+ * `onDone` (a superseded request abandons its typing). Shared by the authored
+ * <Ask/> replay and the header ask box so both surfaces type at one cadence/cap.
+ *
+ * @param {HTMLElement} el - Host, replaced with the streaming div.
+ * @param {string} text - The plain answer text to type out.
+ * @param {Object} opts
+ * @param {() => boolean} opts.isStale - True once a newer request supersedes.
+ * @param {() => void} opts.onDone - Fires when typing finishes (or is skipped).
+ */
+export function typewriterInto(el, text, { isStale, onDone }) {
+  const words = (text || "").match(/\S+\s*/g) || [];
+  const reducedMotion =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!words.length || reducedMotion) {
+    onDone();
+    return;
+  }
+  const perTick = Math.max(
+    1,
+    Math.ceil(words.length / (_REPLAY_CAP_MS / _REPLAY_TICK_MS))
+  );
+  const streamEl = document.createElement("div");
+  streamEl.className = "dashdown-ask-stream";
+  el.replaceChildren(streamEl);
+  let i = 0;
+  const tick = () => {
+    if (isStale()) return; // superseded — stop typing
+    streamEl.textContent += words.slice(i, i + perTick).join("");
+    i += perTick;
+    if (i >= words.length) {
+      onDone();
+      return;
+    }
+    setTimeout(tick, _REPLAY_TICK_MS);
+  };
+  tick();
 }
 
 /**
@@ -184,34 +237,18 @@ export function initAsk(el, opts = {}) {
 
   // Type the recorded answer out as escaped plain text (the exact rendering
   // the live SSE chunks get), then swap in the sanitized HTML via renderDone.
-  // Pacing is synthetic: word-sized steps at a fixed cadence, batching words
-  // per tick so long answers still finish inside _REPLAY_CAP_MS.
+  // The shared typewriterInto owns the word-batch pacing; here we bind it to
+  // this load's seq and resolve when the typing finishes (a superseded replay
+  // bails without resolving — its `load` is already abandoned).
   function replayAnswer(data, seq) {
-    const words = data.text.match(/\S+\s*/g) || [];
-    if (!words.length) {
-      renderDone(data);
-      return Promise.resolve();
-    }
-    const perTick = Math.max(
-      1,
-      Math.ceil(words.length / (_REPLAY_CAP_MS / _REPLAY_TICK_MS))
-    );
-    const streamEl = document.createElement("div");
-    streamEl.className = "dashdown-ask-stream";
-    body.replaceChildren(streamEl);
-    let i = 0;
     return new Promise((resolve) => {
-      const tick = () => {
-        if (seq !== requestSeq) return resolve(); // superseded — stop typing
-        streamEl.textContent += words.slice(i, i + perTick).join("");
-        i += perTick;
-        if (i >= words.length) {
+      typewriterInto(body, data.text, {
+        isStale: () => seq !== requestSeq,
+        onDone: () => {
           renderDone(data);
-          return resolve();
-        }
-        setTimeout(tick, _REPLAY_TICK_MS);
-      };
-      tick();
+          resolve();
+        },
+      });
     });
   }
 
@@ -241,55 +278,30 @@ export function initAsk(el, opts = {}) {
 
   // Consume an SSE cache-miss response: `chunk` events accumulate as escaped
   // plain text (textContent — the raw model stream never renders as HTML),
-  // then `done` swaps in the server-rendered sanitized HTML.
+  // then `done` swaps in the server-rendered sanitized HTML. The frame parser +
+  // stale-aware read loop live in core.js (readSseFrames); this only maps events.
   async function consumeStream(response, seq) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
     let streamEl = null;
-
-    const handleEvent = (raw) => {
-      let event = "message";
-      const dataLines = [];
-      for (const line of raw.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-      }
-      let data;
-      try {
-        data = JSON.parse(dataLines.join("\n"));
-      } catch {
-        return;
-      }
-      if (event === "chunk") {
-        if (!streamEl) {
-          streamEl = document.createElement("div");
-          streamEl.className = "dashdown-ask-stream";
-          body.replaceChildren(streamEl);
+    await readSseFrames(response, {
+      isStale: () => seq !== requestSeq,
+      onEvent: (event, data) => {
+        if (event === "chunk") {
+          if (!streamEl) {
+            streamEl = document.createElement("div");
+            streamEl.className = "dashdown-ask-stream";
+            body.replaceChildren(streamEl);
+          }
+          streamEl.textContent += data.text || "";
+        } else if (event === "done") {
+          renderDone(data);
+          // The viewer just watched the live stream — a later cache hit of the
+          // same answer shouldn't re-type it (replay="once").
+          markReplayed();
+        } else if (event === "error") {
+          renderError(data.error || "LLM request failed");
         }
-        streamEl.textContent += data.text || "";
-      } else if (event === "done") {
-        renderDone(data);
-        // The viewer just watched the live stream — a later cache hit of the
-        // same answer shouldn't re-type it (replay="once").
-        markReplayed();
-      } else if (event === "error") {
-        renderError(data.error || "LLM request failed");
-      }
-    };
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (seq !== requestSeq) return; // stale — a newer request took over
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let sep;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        const raw = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        if (raw.trim()) handleEvent(raw);
-      }
-    }
+      },
+    });
   }
 
   async function load(url) {
