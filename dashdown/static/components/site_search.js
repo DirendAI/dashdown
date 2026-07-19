@@ -8,9 +8,10 @@
 //
 // When ask is merged into the box an "Ask the data" row joins the results: it
 // leads the dropdown when the query reads as a question (so the visible, aria-
-// selected default — the first row — asks) and trails the hits otherwise.
-// Focusing an empty ask box opens a recents + "try asking" dropdown; recents
-// carry a trailing × to forget them.
+// selected default — the first row — asks) and trails the hits otherwise; an
+// imperative-shaped input ("add …") on a compose-capable box leads with an
+// "✎ Add to this page" row instead. Focusing an empty ask box opens a small
+// recents + "try asking" dropdown (three of each, no extra chrome).
 //
 // Index source:
 //   - live server : GET /_dashdown/api/search-index
@@ -86,6 +87,9 @@ function loadSuggestions() {
     .then((d) => (d && Array.isArray(d.suggestions) ? d.suggestions : []))
     .then((list) => {
       for (const s of list) {
+        // The dev-only compose starter ("add …") must not widen the
+        // question-shape heuristic — "add" is the compose verb, not an ask verb.
+        if (isComposeShaped(s)) continue;
         const w = firstWord(s);
         if (w) _suggestionFirstWords.add(w);
       }
@@ -106,18 +110,6 @@ function readRecents() {
   }
 }
 
-// Drop a question from the operator's recents (case-insensitive on the trimmed
-// text) and write the list back. Best-effort, like readRecents (private mode).
-function removeRecent(question) {
-  try {
-    const q = (question || "").trim().toLowerCase();
-    const kept = readRecents().filter((x) => x.toLowerCase() !== q);
-    window.localStorage.setItem(_RECENT_KEY, JSON.stringify(kept));
-  } catch (e) {
-    /* best-effort */
-  }
-}
-
 // A conservative "does this read like a question (ask), not a keyword search?"
 // test. True when: the query ends in "?", OR its leading word is an
 // interrogative / aggregate, OR (once suggestions have loaded) it mentions a
@@ -127,6 +119,16 @@ const _INTERROGATIVES = new Set([
   "who", "what", "when", "where", "which", "why", "how",
   "show", "list", "top", "count", "sum", "total", "average", "avg", "compare",
 ]);
+
+// Leading words that read as a page-composition instruction ("add a KPI row…").
+// Only OFFERS the "✎ Add to this page" row — selection stays explicit, exactly
+// like the question heuristic only promotes the ask row. Compose is available
+// only when the box config carries ask_keep (the dev-server authoring surface).
+const _IMPERATIVES = new Set(["add", "insert", "put", "pin", "place"]);
+function isComposeShaped(q) {
+  const lead = firstWord(q);
+  return !!lead && _IMPERATIVES.has(lead);
+}
 function isQuestionShaped(q) {
   const s = (q || "").trim().toLowerCase();
   if (!s) return false;
@@ -139,57 +141,36 @@ function isQuestionShaped(q) {
   return false;
 }
 
-// One suggestion/recent/continue row: same row chrome as a search hit, with a
-// leading glyph and the question stashed on `data-q` for keyboard + click
-// selection. `extraClass` distinguishes the Continue row for emphasis;
-// `removable` appends a trailing × (recents only) to forget the question.
-function suggestRowMarkup(panel, idx, q, glyph, extraClass, removable) {
+// One suggestion/recent row: same row chrome as a search hit, with a leading
+// glyph and the question stashed on `data-q` for keyboard + click selection.
+function suggestRowMarkup(panel, idx, q, glyph) {
   return (
-    `<div class="dashdown-site-search-result dashdown-ask-suggest-row${
-      extraClass ? " " + extraClass : ""
-    }" role="option" id="${esc(panel.id)}-opt-${idx}" data-idx="${idx}" ` +
+    `<div class="dashdown-site-search-result dashdown-ask-suggest-row" ` +
+    `role="option" id="${esc(panel.id)}-opt-${idx}" data-idx="${idx}" ` +
     `data-q="${esc(q)}">` +
     `<span class="dashdown-ask-suggest-icon" aria-hidden="true">${esc(glyph)}</span>` +
     `<span class="dashdown-ask-suggest-label">${esc(q)}</span>` +
-    (removable
-      ? '<button type="button" class="dashdown-ask-suggest-remove" aria-label="Remove from recent">×</button>'
-      : "") +
     "</div>"
   );
 }
 
-// Render the empty-focus dropdown: an optional "Continue" row (a restored
-// session, ↩), then up to four Recent rows (↻) and up to four "Try asking"
-// suggestions (✦). Section headers are non-option, aria-hidden labels. Returns
-// the option elements in DOM order, or null when there's nothing to show (the
-// caller then leaves the panel closed — today's empty behavior).
+// Render the empty-focus dropdown: up to three Recent rows (↻) and up to three
+// "Try asking" suggestions (✦). Section headers are non-option, aria-hidden
+// labels. Returns the option elements in DOM order, or null when there's
+// nothing to show (the caller then leaves the panel closed).
 function renderEmptyResults(panel, data) {
-  const resume = data.resume || "";
   const recents = data.recents || [];
   const suggestions = data.suggestions || [];
-  if (!resume && !recents.length && !suggestions.length) return null;
+  if (!recents.length && !suggestions.length) return null;
 
   const parts = [];
   let idx = 0;
-  if (resume) {
-    parts.push(
-      suggestRowMarkup(
-        panel,
-        idx,
-        "Continue: " + resume,
-        "↩",
-        "dashdown-ask-continue-row"
-      )
-    );
-    // The Continue row's label is prefixed; keep data-q the bare question.
-    idx += 1;
-  }
   if (recents.length) {
     parts.push(
       '<div class="dashdown-ask-suggest-head" aria-hidden="true">Recent</div>'
     );
     for (const q of recents) {
-      parts.push(suggestRowMarkup(panel, idx, q, "↻", "", true));
+      parts.push(suggestRowMarkup(panel, idx, q, "↻"));
       idx += 1;
     }
   }
@@ -198,17 +179,13 @@ function renderEmptyResults(panel, data) {
       '<div class="dashdown-ask-suggest-head" aria-hidden="true">Try asking</div>'
     );
     for (const q of suggestions) {
-      parts.push(suggestRowMarkup(panel, idx, q, "✦", ""));
+      // The dev-only compose starter ("add …") gets the ✎ glyph so the one
+      // page-writing verb is discoverable without any extra chrome.
+      parts.push(suggestRowMarkup(panel, idx, q, isComposeShaped(q) ? "✎" : "✦"));
       idx += 1;
     }
   }
   panel.innerHTML = parts.join("");
-  // Fix up the Continue row's data-q to the bare question (its label carries the
-  // "Continue: " prefix, but selecting it must re-ask the plain question).
-  if (resume) {
-    const cont = panel.querySelector(".dashdown-ask-continue-row");
-    if (cont) cont.setAttribute("data-q", resume);
-  }
   panel.hidden = false;
   return Array.from(panel.querySelectorAll('[role="option"]'));
 }
@@ -333,6 +310,7 @@ function renderResults(panel, results, query, opts) {
   const askOn = !!(opts && opts.askOn);
   const searchOn = !(opts && opts.searchOn === false);
   const askFirst = !!(opts && opts.askFirst);
+  const composeOn = !!(opts && opts.composeOn);
   const parts = [];
 
   // The ask row's id needn't encode order (aria-activedescendant only needs it
@@ -341,12 +319,30 @@ function renderResults(panel, results, query, opts) {
     ? '<div class="dashdown-site-search-result dashdown-site-search-ask-row" role="option" ' +
         `id="${esc(panel.id)}-opt-ask">` +
         '<span class="dashdown-site-search-ask-icon" aria-hidden="true">✦</span>' +
-        '<span class="dashdown-site-search-ask-label">Ask the data: ' +
+        '<span class="dashdown-site-search-ask-label">Ask your data: ' +
         `<span class="dashdown-site-search-ask-q">“${esc(query)}”</span></span>` +
         `<kbd class="dashdown-site-search-ask-kbd" aria-hidden="true">${esc(_ASK_KBD_REST)}</kbd>` +
         "</div>"
     : "";
 
+  // Offered only for an imperative-shaped input on a compose-capable box
+  // (ask ∧ ask_keep — the dev-server authoring surface): "add a KPI row…"
+  // becomes new page content via the compose preview flow (ask_box.js). It
+  // LEADS (and is the Enter default) only when nothing else matched — with
+  // search hits present it trails them, so a plain Enter on a plausible search
+  // ("add connector") never fires a billable compose call.
+  const composeRow = composeOn
+    ? '<div class="dashdown-site-search-result dashdown-site-search-ask-row ' +
+      'dashdown-site-search-compose-row" role="option" ' +
+        `id="${esc(panel.id)}-opt-compose">` +
+        '<span class="dashdown-site-search-ask-icon" aria-hidden="true">✎</span>' +
+        '<span class="dashdown-site-search-ask-label">Add to page: ' +
+        `<span class="dashdown-site-search-ask-q">“${esc(query)}”</span></span>` +
+        "</div>"
+    : "";
+  const composeFirst = composeOn && results.length === 0;
+
+  if (composeFirst) parts.push(composeRow);
   if (askFirst) parts.push(askRow);
 
   if (results.length) {
@@ -371,12 +367,13 @@ function renderResults(panel, results, query, opts) {
     // plain "no matches" (unchanged search-only behavior).
     parts.push(
       '<div class="dashdown-site-search-empty">' +
-        (askOn ? "No pages match — ask the data instead" : "No matches") +
+        (askOn ? "No pages match — ask your data instead" : "No matches") +
         "</div>"
     );
   }
 
   if (askOn && !askFirst) parts.push(askRow);
+  if (composeOn && !composeFirst) parts.push(composeRow);
 
   panel.innerHTML = parts.join("");
   panel.hidden = false;
@@ -456,9 +453,11 @@ export function initSiteSearch(el) {
   const maxResults = config.max_results || 8;
   // `search` defaults on (a bare `{max_results}` config is a plain search box);
   // `ask` merges the runtime ask surface into this box (an "Ask the data" row +
-  // an answer panel attached by ask_box.js).
+  // an answer panel attached by ask_box.js); `ask_keep` additionally arms the
+  // compose row ("Add to this page" — dev-server authoring only).
   const askOn = !!config.ask;
   const searchOn = config.search !== false;
+  const keepOn = !!config.ask_keep;
 
   let entries = null;
   let options = [];
@@ -512,51 +511,72 @@ export function initSiteSearch(el) {
     );
   }
 
+  function isComposeRow(opt) {
+    return opt && opt.classList.contains("dashdown-site-search-compose-row");
+  }
+
   function isAskRow(opt) {
-    return opt && opt.classList.contains("dashdown-site-search-ask-row");
+    return (
+      opt &&
+      opt.classList.contains("dashdown-site-search-ask-row") &&
+      !isComposeRow(opt)
+    );
+  }
+
+  // Selecting the compose row: hand the instruction to ask_box.js's compose
+  // flow via a DOM event (same decoupling as the ask row).
+  function selectCompose() {
+    const instruction = input.value.trim();
+    if (!instruction) return;
+    close();
+    el.dispatchEvent(
+      new CustomEvent("dashdown:compose", {
+        detail: { instruction },
+        bubbles: true,
+      })
+    );
   }
 
   function isSuggestRow(opt) {
     return opt && opt.classList.contains("dashdown-ask-suggest-row");
   }
 
-  // Selecting a recent / suggestion / continue row: fill the input with the
-  // question and hand it to ask_box.js via the same event the ask row uses.
+  // Selecting a recent / suggestion row: fill the input with the question and
+  // hand it to ask_box.js. An imperative-shaped suggestion on a compose-capable
+  // box (the server's dev-only "add …" starter) routes to compose, not ask.
   function selectSuggestion(q) {
     const question = (q || "").trim();
     if (!question) return;
     input.value = question;
     close();
+    if (keepOn && isComposeShaped(question)) {
+      el.dispatchEvent(
+        new CustomEvent("dashdown:compose", {
+          detail: { instruction: question },
+          bubbles: true,
+        })
+      );
+      return;
+    }
     el.dispatchEvent(
       new CustomEvent("dashdown:ask", { detail: { question }, bubbles: true })
     );
   }
 
-  // The empty-focus dropdown (ask boxes only): recents + "try asking"
-  // suggestions, plus a "Continue" row when ask_box.js has a restored session
-  // (exposed via el.dataset.askResume — a decoupled channel, no import). Fetches
-  // suggestions once per page (module cache) then renders; a value typed while
-  // that loads switches back to the normal flow. Recents carry a × to forget
-  // them; the resume question is deduped out of them.
+  // The empty-focus dropdown (ask boxes only): a small recents + "try asking"
+  // list. Fetches suggestions once per page (module cache) then renders; a
+  // value typed while that loads switches back to the normal flow.
   async function runEmpty() {
     if (!askOn) return; // search-only boxes show nothing on empty focus
-    // Ask ask_box.js to refresh its resume attribute from the stored session
-    // (it also sets it on init; this keeps it fresh if a session landed later).
-    // ask_box.js updates el.dataset.askResume synchronously, so read it now and
-    // dedupe it out of the recents (the Continue row already offers it).
-    el.dispatchEvent(new CustomEvent("dashdown:ask-resume", { bubbles: false }));
-    const resume = el.dataset.askResume || "";
-    const recents = readRecents()
-      .filter((q) => q.toLowerCase() !== resume.toLowerCase())
-      .slice(0, 4);
-    const suggestions = (await loadSuggestions()).slice(0, 4);
+    const recents = readRecents().slice(0, 3);
+    const suggestions = (await loadSuggestions()).slice(0, 3);
     // Bail if the user began typing (or the value otherwise changed) while the
     // suggestions were loading — the input handler owns the non-empty flow.
     if (input.value.trim()) return;
     // Also bail if focus left the input while suggestions loaded (tabbed/clicked
     // away) — don't open a dropdown under an unfocused box.
     if (document.activeElement !== input) return;
-    const opts = renderEmptyResults(panel, { resume, recents, suggestions });
+    const opts = renderEmptyResults(panel, { recents, suggestions });
     if (!opts) {
       close();
       return;
@@ -565,24 +585,9 @@ export function initSiteSearch(el) {
     // Wire each row's click (they're <div>s, not links).
     panel.querySelectorAll(".dashdown-ask-suggest-row").forEach((row) => {
       row.addEventListener("click", (e) => {
-        // A click on the trailing × forgets the recent (wired below) rather than
-        // re-asking the row's question — let it through.
-        if (e.target.closest(".dashdown-ask-suggest-remove")) return;
         e.preventDefault();
         selectSuggestion(row.getAttribute("data-q"));
       });
-      const remove = row.querySelector(".dashdown-ask-suggest-remove");
-      if (remove) {
-        remove.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          removeRecent(row.getAttribute("data-q"));
-          // The click moved focus to the button; refocus the input so runEmpty's
-          // focus guard doesn't bail and strand a stale dropdown.
-          input.focus();
-          runEmpty();
-        });
-      }
     });
     input.setAttribute("aria-expanded", "true");
     active = -1; // no default row in the empty state
@@ -610,13 +615,25 @@ export function initSiteSearch(el) {
       results = rank(entries, q, maxResults);
     }
     // Promote the ask row to the top when the query reads like a question, so a
-    // plain Enter asks; otherwise it trails the hits and the top page wins.
+    // plain Enter asks; otherwise it trails the hits and the top page wins. An
+    // imperative-shaped input on a compose-capable box leads with the compose
+    // row instead ("add …" is an instruction, not a search).
+    const composeOn = askOn && keepOn && isComposeShaped(q);
     const askFirst = askOn && searchOn && results.length > 0 && isQuestionShaped(q);
-    options = renderResults(panel, results, q, { askOn, searchOn, askFirst });
-    // Wire the ask row's click (search results are <a>, so they navigate on
-    // their own; the ask row is a <div> and needs an explicit handler).
-    const askRow = panel.querySelector(".dashdown-site-search-ask-row");
+    options = renderResults(panel, results, q, { askOn, searchOn, askFirst, composeOn });
+    // Wire the ask/compose rows' clicks (search results are <a>, so they
+    // navigate on their own; these rows are <div>s and need explicit handlers).
+    const askRow = panel.querySelector(
+      ".dashdown-site-search-ask-row:not(.dashdown-site-search-compose-row)"
+    );
     if (askRow) askRow.addEventListener("click", (e) => { e.preventDefault(); selectAsk(); });
+    const composeRow = panel.querySelector(".dashdown-site-search-compose-row");
+    if (composeRow) {
+      composeRow.addEventListener("click", (e) => {
+        e.preventDefault();
+        selectCompose();
+      });
+    }
     input.setAttribute("aria-expanded", "true");
     // Default selection is always the first row — the ask row when askFirst
     // promoted it, else the top hit (or the lone ask row on zero hits). Mark it
@@ -651,18 +668,23 @@ export function initSiteSearch(el) {
       setActive(active - 1);
     } else if (ev.key === "Enter") {
       const opt = active >= 0 ? options[active] : null;
-      if (isAskRow(opt)) {
+      if (isComposeRow(opt)) {
+        ev.preventDefault();
+        selectCompose();
+      } else if (isAskRow(opt)) {
         ev.preventDefault();
         selectAsk();
       } else if (isSuggestRow(opt)) {
-        // Empty-state row (recent / suggestion / continue): re-ask its question.
+        // Empty-state row (recent / suggestion): re-ask its question.
         ev.preventDefault();
         selectSuggestion(opt.getAttribute("data-q"));
       } else if (opt && opt.tagName === "A") {
         ev.preventDefault();
         window.location.href = opt.getAttribute("href");
-      } else if (askOn && !searchOn && input.value.trim()) {
-        // Ask-only mode: Enter always asks, even before a row is rendered.
+      } else if (askOn && input.value.trim()) {
+        // No active row (ask-only mode, a closed dropdown, or an open answer
+        // panel): Enter asks the typed question — which is also the retry
+        // affordance after an error (cache makes an exact re-ask cheap).
         ev.preventDefault();
         selectAsk();
       }

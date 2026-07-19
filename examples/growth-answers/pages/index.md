@@ -75,3 +75,58 @@ this page is affected.
 <Table data={campaigns.performance} />
 <Ask data={campaigns.performance} ask="per-campaign order volume, revenue, and repeat-purchase share over the last 30 days — which campaign is actually driving repeat business, not just first clicks" />
 <!-- /dashdown:keep id=c5f6f680 -->
+
+<!-- dashdown:keep id=63de5810 kind=query · named query 'campaigns.repeat_purchasers' · 2026-07-19 -->
+## customers who made a repeat purchase in the last 7 days, with the campaign credited and the order amount — the "who to call" list behind the Monday question
+<!-- kept from an ask answer · named query 'campaigns.repeat_purchasers' · 2026-07-19 -->
+<LineChart data={campaigns.repeat_purchasers} x="order_date" y="amount" title="customers who made a repeat purchase in the last 7 days, with the campaign credited and the order amount — the &quot;who to call&quot; list behind the Monday question" />
+<Ask data={campaigns.repeat_purchasers} ask="customers who made a repeat purchase in the last 7 days, with the campaign credited and the order amount — the &quot;who to call&quot; list behind the Monday question" />
+<!-- /dashdown:keep id=63de5810 -->
+<!-- dashdown:keep id=9ff3ceb4 kind=semantic · semantic: orders.revenue by city · 2026-07-19 -->
+## City Share
+<!-- kept from an ask answer · semantic: orders.revenue by city · 2026-07-19 -->
+<PieChart metric={orders.revenue} by={orders.city} title="maybe pie chart" />
+<Ask inline metric={orders.revenue} by={orders.city} ask="Can you tell me which city has most potential or which one the least?" />
+<!-- /dashdown:keep id=9ff3ceb4 -->
+
+<!-- dashdown:keep id=ec5dd019 kind=query · named query 'campaigns.performance' · 2026-07-19 -->
+## Per campaign
+<!-- kept from an ask answer · named query 'campaigns.performance' · 2026-07-19 -->
+<BarChart data={campaigns.performance} x="campaign" y="orders" title="per-campaign order volume, revenue, and repeat-purchase share over the last 30 days — which campaign is actually driving repeat business, not just first clicks" />
+<Ask inline data={campaigns.performance} ask="Which campaing has the most potential? Also annotate it." />
+<!-- /dashdown:keep id=ec5dd019 -->
+
+<!-- dashdown:keep id=d1d0efc1 kind=semantic · semantic: orders.revenue by channel · 2026-07-19 -->
+## can you show me funnel chart of the revenue by channel
+<!-- kept from an ask answer · semantic: orders.revenue by channel · 2026-07-19 -->
+<Table metric={orders.revenue} by={orders.channel} />
+<Ask metric={orders.revenue} by={orders.channel} ask="can you show me funnel chart of the revenue by channel" />
+<!-- /dashdown:keep id=d1d0efc1 -->
+
+<!-- dashdown:keep id=bb82b4e4 kind=semantic · semantic: orders.revenue by channel · 2026-07-19 -->
+## Revenue by channel
+<!-- kept from an ask answer · asked: “can you show me funnel chart of the revenue by channel” · semantic: orders.revenue by channel · 2026-07-19 -->
+<FunnelChart metric={orders.revenue} by={orders.channel} title="Revenue by channel" />
+<Ask metric={orders.revenue} by={orders.channel} ask="Revenue by channel" />
+<!-- /dashdown:keep id=bb82b4e4 -->
+
+<!-- dashdown:keep id=f967402a kind=semantic · semantic: orders.revenue · 2026-07-19 -->
+## All-time revenue
+<!-- kept from an ask answer · asked: “what about all time” · semantic: orders.revenue · 2026-07-19 -->
+<Counter metric={orders.revenue} />
+<Ask metric={orders.revenue} ask="All-time revenue" />
+<!-- /dashdown:keep id=f967402a -->
+
+<!-- dashdown:keep id=5b45151f kind=semantic · semantic: orders.n by order_date per channel (week) · 2026-07-19 -->
+## Order channel counts
+<!-- kept from an ask answer · asked: “can you show me themeriver chart of order channel counts” · semantic: orders.n by order_date per channel (week) · 2026-07-19 -->
+<ThemeRiver metric={orders.n} by={orders.order_date} series={orders.channel} grain="week" title="Order channel counts" />
+<Ask inline metric={orders.n} by={orders.order_date} series={orders.channel} ask="tell a bit more about this data" />
+<!-- /dashdown:keep id=5b45151f -->
+
+<!-- dashdown:keep id=a5a72719 kind=semantic · semantic: orders.orders · 2026-07-19 · filters not carried over -->
+## Orders this month
+<!-- kept from an ask answer · asked: “can you show counter of orders this month” · semantic: orders.orders · 2026-07-19 · filters not carried over -->
+<Counter metric={orders.orders} label="Orders" />
+<Ask metric={orders.orders} ask="Orders this month" />
+<!-- /dashdown:keep id=a5a72719 -->

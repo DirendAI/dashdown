@@ -342,36 +342,81 @@ box renders only when `llm:` is configured ∧ `ask.enabled` ∧ not embed (serv
 is **merged into the site-search omnibox** (one centered header field): site_search.js appends a
 selectable "✦ Ask the data" row (the only row on zero hits; ask-only mode skips the index
 entirely) and fires a `dashdown:ask` CustomEvent; `static/components/ask_box.js` listens and
-attaches the answer-first panel — provenance → typed answer → chart → table — under the same box
-(Ctrl/Cmd+K focus, `postJson` in core.js, reusing `updateChart`/`renderTableInto`/
-`setChartAnnotations` + helpers exported from ask.js; the two modules never import each other).
-**Refinement = editing a query, not chat**: a semantic answer's provenance becomes an interactive
-chip row (metric/by/grain selects + filter chips, options from the payload's `semantic_options`);
-a chip edit POSTs the edited spec to `POST /_dashdown/api/ask/execute` with `commentary:false` —
-validated by the *same* `_validate_semantic` as LLM output, **zero LLM calls, no rate-limit
-consumption** — repainting chart+table instantly and marking the prose stale (dimmed + "↻ Update
-commentary" = one billed call, cached under a spec-fingerprinted key). A follow-up input at the
-panel bottom re-asks with the **whole session** as context (`history`: a bounded oldest-first list
-of `{question, resolved}` — sanitized, prompt-only, fingerprinted into the cache key so same-text
-follow-ups under different sessions never collide); the trail renders as clickable pills whose
-older entries restore instantly client-side. Resolutions support a second grouping dimension
+attaches the answer panel under the same box (Ctrl/Cmd+K focus, `postJson` in core.js, reusing
+`updateChart`/`renderTableInto`/`setChartAnnotations` + helpers exported from ask.js; the two
+modules never import each other). **The panel is deliberately minimal — one input, one answer,
+one action** (the 2026-07-19 v2 subtraction pass; see plan_ask_ux.md): topbar (✦ badge · one muted
+truncating provenance line — the trust surface · ⤢ expand · ✕) → typed answer → evidence →
+[Add to page] + a follow-up input. **Answer-shaped rendering**: every data payload carries
+`display: {form: value|chart|table}` (`display_form` — derived, never an LLM choice: list rung →
+table, inferred chart → chart, 1×1 / ungrouped semantic aggregate → value) and the panel renders
+to the form — a value answer is a headline number card (no chart/table), a **counters** answer is a
+wrapping row of compact KPI cards (auto for a one-row multi-number result — one card per numeric
+column; or the explicit "as counters" wish on a ≤12-row breakdown — one card per row, labeled by
+its category; `_counters_viable`), a chart answer folds its
+rows behind a collapsed "Data · N rows" `<details>` disclosure (state remembered per session;
+expand force-opens it), a table answer is just the table; commentary is prompt-sized to the form
+(`_style_hint` → `AskDef.style_hint`, appended by `build_ask_prompt` — authored `<Ask />` never
+sets it, so authored ids/caches are untouched). **Refinement is language-only**: the follow-up
+field re-asks with the **whole session** as context (`history`: a bounded oldest-first list of
+`{question, resolved}` — sanitized, prompt-only, fingerprinted into the cache key so same-text
+follow-ups under different sessions never collide); the session trail is held client-side but
+**never rendered** — no pills, no chip editor (`POST /_dashdown/api/ask/execute`, which re-runs a
+client-built semantic spec through `_validate_semantic` with zero LLM calls, remains a tested
+programmatic API the v2 client no longer calls). Resolutions support a second grouping dimension
 (`series` — "revenue by week *per channel*"; comma-joined/list-valued `by`/`metric` from the model
 are split-coerced, and a validation failure gets one self-repair retry before degrading to none).
-**Keep on this page**: a dev-server-only panel button POSTs `{question, resolved, chart, path}` to
+**Chart preferences** span every panel-renderable type (`CHART_PREFS`: line/bar/scatter/pie/funnel/
+treemap + radar/gauge/calendar/heatmap/sankey/themeriver + `counter` — not a chart.js type but the
+panel's counter-card form; with spoken aliases river/stream→themeriver, donut→pie, area→line,
+counters/kpi/stats→counter in `_CHART_PREF_ALIASES`); `resolution_chart_shape`/
+`_apply_chart_pref` hold the per-type compatibility rules (heatmap/sankey re-map the three columns
+onto x/y/**value** config keys; themeriver/calendar need a temporal axis; gauge applies only to a
+≤1-row headline; an inexpressible wish is soft-dropped, never an error) and `_KEEP_CHART_COMPONENTS`
+maps each type to its authored component for keep (Heatmap/Sankey emit their value+two-dimension
+grammar; a split query chart keeps its `series=`). Date fields are validated (`_ISO_DATE_RE`) — a
+relative phrase ("this week") fails validation into the self-repair, never reaches a backend; the
+resolver prompt carries today's date so boundaries are computable.
+**Generated answer titles**: every routed resolution carries a `title` ("Channel share") — one
+extra JSON field in the *same* resolver call (`_clean_title` sanitizes: plain text, punctuation
+stripped, angle-escaped, capped; `_derive_title`/`answer_title` fill a deterministic fallback from
+the resolution). It ships top-level in the payload, headlines the panel chart / value card, and is
+the text a kept section wears. **Add to page (keep)**: the ONE action on an answer — a
+dev-server-only button that POSTs `{question, title, resolved, chart, elements, path}` to
 `POST /_dashdown/api/ask/keep`, which **re-validates every name against the live catalog**
-(`build_kept_markdown` — client markdown is never trusted; semantic/query/list kinds (only raw
-`sql` is refused), dynamic `[slug]` pages refused) and appends a *live* section to the page's `.md`
-(heading + chart component + table + an authored `<Ask>` re-asking the question; a kept **list**
-answer emits a `<List model= columns= …>` re-validated by `_validate_list`, with filters/date range
-not carried into the file in v1) — "a dashboard is an answer you kept",
-mechanically. **Staged answers**: `POST /_dashdown/api/ask` with `stream: true` responds as SSE —
-an `resolved` event ships provenance+data+chart the moment the query lands (the panel paints
-early), `done` delivers the commentary; rate-limit/notice refuse as plain JSON *before* headers,
-LLM failures after headers become `error` events; `stream` absent stays byte-identical JSON (the
-CLI path). **Direct-SQL passthrough**: with `allow_sql` on, a question that *is* SQL
-(`SELECT`/`WITH`) skips the resolver call and runs as-is (provenance "raw SQL (typed directly)");
-detection is attempt-and-fallback — if it fails to execute it silently re-enters the normal
-resolver path as English. Cost control: the answer cache (bounded LRU,
+(`build_kept_markdown` — client markdown is never trusted; the echoed title is re-cleaned;
+semantic/query/list kinds, raw `sql` refused, dynamic `[slug]` pages refused) and appends a *live*
+marker-wrapped section to the page's `.md` — "a dashboard is an answer you kept", mechanically.
+The **title** (not the conversational question) becomes the section heading, the chart/list
+`title=`, and the `<Ask>` prompt — the verbatim question is preserved in the kept-from comment
+(`asked: “…”`); no title (CLI/older clients) keeps the legacy question-as-heading. What lands =
+what the panel shows: the client derives `elements` from the display form
+(value→`<Value>`+`<Ask>`, chart→chart+`<Ask>`, table→`<Table>`+`<Ask>`, list→`<List>`), checking
+the **DOM** for a mounted chart card (never a state flag) so a shown chart is what gets kept; the
+server API is richer than the UI (an `elements` enum re-validated by `_normalize_elements`,
+`position: end|top` via `insert_kept_section` — top inserts after frontmatter + a leading H1) but
+the UI deliberately exposes none of it. **Staged answers**: `POST /_dashdown/api/ask` with
+`stream: true` responds as SSE — a `resolved` event ships provenance+data+chart the moment the
+query lands (the panel paints early), `done` delivers the commentary; rate-limit/notice refuse as
+plain JSON *before* headers, LLM failures after headers become `error` events; `stream` absent
+stays byte-identical JSON (the CLI path). **Direct-SQL passthrough**: with `allow_sql` on, a
+question that *is* SQL (`SELECT`/`WITH`) skips the resolver call and runs as-is (provenance "raw
+SQL (typed directly)"); detection is attempt-and-fallback — if it fails to execute it silently
+re-enters the normal resolver path as English. **Compose ("✎ Add to this page",
+`dashdown/ask_compose.py`)**: the generative sibling of keep, with exactly two entry points — an
+imperative-shaped omnibox input ("add a KPI row with revenue…" offers the compose row; ask ∧
+ask_keep boxes only) or the `dashdown compose` CLI. The instruction goes to
+`POST /_dashdown/api/ask/compose` (dev-gated like keep, ask rate-limited): one constrained LLM
+call returns a **typed plan** (elements heading/prose/kpi_row/value/chart/table/list over catalog
+names only), compiled by `build_composed_markdown` through the *same* validators keep uses —
+invalid entries drop with reasons, free text is capped + angle-escaped, the model never authors
+markup. Preview-then-apply: compose returns the section **without writing** and the client shows a
+plain-words summary of what will land (one line per element, never markdown source);
+`POST /_dashdown/api/ask/compose/apply` re-compiles the echoed plan (deterministic — preview ==
+written) and splices it wrapped in the standard `dashdown:keep` markers (`kind=composed`), so the
+`page_edit.js` section toolbars/flash govern composed sections unchanged. Extend
+`tests/test_ask_compose.py` for any plan-vocabulary/validation change — same security standing as
+the resolver ladder. Cost control: the answer cache (bounded LRU,
 keys on `(normalized question, frozen params)`; kind-`none` cached only briefly) plus a
 process-wide sliding-window **rate limit** on cache-miss asks (`ask.rate_limit`/min, default 60,
 0 disables → endpoint 429s) — every miss is two billable LLM calls. Extend

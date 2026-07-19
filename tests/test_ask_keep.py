@@ -404,6 +404,406 @@ class TestBuildKeptMarkdown:
 
 
 # --------------------------------------------------------------------------- #
+# Element choice (the keep menu's `elements`) + placement (`insert_kept_section`)
+# --------------------------------------------------------------------------- #
+class TestKeepElements:
+    def _project(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        return load_project(proj)
+
+    def _query_resolved(self):
+        return {"kind": "query", "detail": {"name": "by_region"}}
+
+    def test_chart_only(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "q",
+                self._query_resolved(),
+                {"type": "bar", "x": "region", "y": "total"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert "<BarChart data={by_region}" in section
+        assert "<Table" not in section
+        assert "<Ask" not in section
+
+    def test_table_only(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "q",
+                self._query_resolved(),
+                {"type": "bar", "x": "region", "y": "total"},
+                ["table"],
+            )
+        finally:
+            project.close()
+        assert "Chart" not in section
+        assert "<Table data={by_region} />" in section
+        assert "<Ask" not in section
+
+    def test_value_element_for_query(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project, "total?", self._query_resolved(), None, ["value"]
+            )
+        finally:
+            project.close()
+        assert "<Value data={by_region} />" in section
+        assert "<Table" not in section
+
+    def test_canonical_order_and_dedup(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "q",
+                self._query_resolved(),
+                {"type": "bar", "x": "region", "y": "total"},
+                ["ask", "chart", "ask", "table"],
+            )
+        finally:
+            project.close()
+        # Emitted chart → table → ask regardless of the client's order.
+        assert (
+            section.index("<BarChart")
+            < section.index("<Table")
+            < section.index("<Ask")
+        )
+        assert section.count("<Ask") == 1
+
+    def test_unknown_element_rejected(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            with pytest.raises(ValueError, match="unknown keep element"):
+                build_kept_markdown(
+                    project, "q", self._query_resolved(), None, ["chart", "iframe"]
+                )
+        finally:
+            project.close()
+
+    def test_empty_elements_rejected(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            with pytest.raises(ValueError, match="non-empty"):
+                build_kept_markdown(project, "q", self._query_resolved(), None, [])
+        finally:
+            project.close()
+
+    def test_chart_element_without_chart_rejected(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            with pytest.raises(ValueError, match="no chart"):
+                build_kept_markdown(
+                    project, "q", self._query_resolved(), None, ["chart"]
+                )
+        finally:
+            project.close()
+
+    @needs_bsl
+    def test_semantic_table_element(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {"model": "sales", "metric": "revenue", "by": "region"},
+            }
+            section, _ = build_kept_markdown(
+                project, "q", resolved,
+                {"type": "bar", "x": "region", "y": "revenue"}, ["table"],
+            )
+        finally:
+            project.close()
+        assert "<Table metric={sales.revenue} by={sales.region} />" in section
+        assert "Chart" not in section
+
+    @needs_bsl
+    def test_semantic_grouped_value_rejected(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {"model": "sales", "metric": "revenue", "by": "region"},
+            }
+            with pytest.raises(ValueError, match="no single value"):
+                build_kept_markdown(project, "q", resolved, None, ["value"])
+        finally:
+            project.close()
+
+    @needs_bsl
+    def test_semantic_scalar_value_element(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {"model": "sales", "metric": "revenue"},
+            }
+            section, _ = build_kept_markdown(project, "q", resolved, None, ["value"])
+        finally:
+            project.close()
+        # The page-side twin of the panel's counter card.
+        assert '<Counter metric={sales.revenue} label="Revenue" />' in section
+
+
+class TestKeepNewChartTypes:
+    def _lib(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        return load_project(proj)
+
+    @needs_bsl
+    def test_semantic_themeriver_uses_shared_grammar(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {
+                    "model": "sales", "metric": "revenue",
+                    "by": "order_date", "series": "status", "grain": "week",
+                },
+            }
+            section, _ = build_kept_markdown(
+                project, "revenue river", resolved,
+                {"type": "themeriver", "x": "order_date", "y": "revenue",
+                 "series_by": "status"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert (
+            "<ThemeRiver metric={sales.revenue} by={sales.order_date} "
+            "series={sales.status} grain=\"week\" title=\"revenue river\" />"
+        ) in section
+
+    @needs_bsl
+    def test_semantic_heatmap_uses_value_grammar(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {
+                    "model": "sales", "metric": "revenue",
+                    "by": "region", "series": "status",
+                },
+            }
+            section, _ = build_kept_markdown(
+                project, "heatmap", resolved,
+                {"type": "heatmap", "x": "region", "y": "status",
+                 "value": "revenue"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert (
+            "<HeatmapChart by={sales.region} series={sales.status} "
+            "value={sales.revenue} title=\"heatmap\" />"
+        ) in section
+
+    @needs_bsl
+    def test_semantic_gauge_is_bare_metric(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            resolved = {
+                "kind": "semantic",
+                "detail": {"model": "sales", "metric": "revenue"},
+            }
+            section, _ = build_kept_markdown(
+                project, "revenue gauge", resolved,
+                {"type": "gauge", "x": "revenue", "y": "revenue"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert '<GaugeChart metric={sales.revenue} title="revenue gauge" />' in section
+
+    def test_query_sankey_uses_source_target_value(self, tmp_path):
+        project = self._lib(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project, "flows",
+                {"kind": "query", "detail": {"name": "by_region"}},
+                {"type": "sankey", "x": "region", "y": "channel",
+                 "value": "total"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert (
+            '<SankeyChart data={by_region} source="region" target="channel" '
+            'value="total" title="flows" />'
+        ) in section
+
+    def test_query_series_split_is_kept(self, tmp_path):
+        # Pre-existing gap fixed alongside: a split line/bar kept from a query
+        # now carries its series attribute instead of silently flattening.
+        project = self._lib(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project, "split",
+                {"kind": "query", "detail": {"name": "by_region"}},
+                {"type": "line", "x": "week", "y": "total",
+                 "series_by": "region", "sort_by": "week"},
+                ["chart"],
+            )
+        finally:
+            project.close()
+        assert (
+            '<LineChart data={by_region} x="week" y="total" series="region" '
+            'title="split" />'
+        ) in section
+
+
+class TestKeepTitle:
+    def _project(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        return load_project(proj)
+
+    def test_title_becomes_heading_chart_title_and_ask_prompt(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "can you show me a pie chart of channel shares?",
+                {"kind": "query", "detail": {"name": "by_region"}},
+                {"type": "pie", "x": "region", "y": "total"},
+                None,
+                "Channel share",
+            )
+        finally:
+            project.close()
+        # The generated title is the page copy everywhere…
+        assert "\n## Channel share\n" in section
+        assert 'title="Channel share"' in section
+        assert '<Ask data={by_region} ask="Channel share" />' in section
+        # …and the conversational question never lands outside the comment.
+        assert "asked: “can you show me a pie chart of channel shares?”" in section
+        assert "## can you show me" not in section
+        assert 'ask="can you show me' not in section
+
+    def test_missing_title_keeps_legacy_question_heading(self, tmp_path):
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "revenue by region",
+                {"kind": "query", "detail": {"name": "by_region"}},
+                None,
+            )
+        finally:
+            project.close()
+        assert "\n## revenue by region\n" in section
+        # No title → nothing to repeat in the comment.
+        assert "asked:" not in section
+
+    def test_client_title_is_recleaned(self, tmp_path):
+        # The title crossed the browser — a crafted one can't smuggle markup
+        # into the heading line or break out of an attribute.
+        project = self._project(tmp_path)
+        try:
+            section, _ = build_kept_markdown(
+                project,
+                "q",
+                {"kind": "query", "detail": {"name": "by_region"}},
+                None,
+                None,
+                'x <Script src="evil" /> y?',
+            )
+        finally:
+            project.close()
+        assert "<Script" not in section
+        assert "## x &lt;Script" in section
+
+    def test_keep_endpoint_accepts_title(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        app = create_app(proj)
+        client = TestClient(app)
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "how are the regions doing?",
+                "resolved": {"kind": "query", "detail": {"name": "by_region"}},
+                "chart": {"type": "bar", "x": "region", "y": "total"},
+                "title": "Revenue by region",
+                "path": "/",
+            },
+        )
+        assert r.status_code == 200, r.text
+        md = (proj / "pages" / "index.md").read_text(encoding="utf-8")
+        assert "## Revenue by region" in md
+        assert "asked: “how are the regions doing?”" in md
+
+    def test_keep_endpoint_rejects_non_string_title(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        client = TestClient(create_app(proj))
+        r = client.post(
+            "/_dashdown/api/ask/keep",
+            json={
+                "question": "q",
+                "resolved": {"kind": "query", "detail": {"name": "by_region"}},
+                "chart": None,
+                "title": 7,
+                "path": "/",
+            },
+        )
+        assert r.status_code == 400
+
+
+class TestInsertKeptSection:
+    SECTION = "\n<!-- open -->\n## q\n<X />\n<!-- close -->\n"
+
+    def test_end_appends_with_one_blank_line(self):
+        out = ask_engine.insert_kept_section("# Page\n\nbody\n", self.SECTION, "end")
+        assert out == "# Page\n\nbody\n\n<!-- open -->\n## q\n<X />\n<!-- close -->\n"
+
+    def test_end_on_empty_file(self):
+        out = ask_engine.insert_kept_section("", self.SECTION, "end")
+        assert out == "<!-- open -->\n## q\n<X />\n<!-- close -->\n"
+
+    def test_top_inserts_after_frontmatter_and_h1(self):
+        md = "---\ntitle: Sales\n---\n\n# Sales\n\nexisting body\n"
+        out = ask_engine.insert_kept_section(md, self.SECTION, "top")
+        assert out.startswith("---\ntitle: Sales\n---\n\n# Sales\n\n<!-- open -->")
+        assert out.rstrip("\n").endswith("existing body")
+        # One blank line on each seam, never a triple run.
+        assert "\n\n\n" not in out
+
+    def test_top_without_h1_inserts_after_frontmatter(self):
+        md = "---\ntitle: Sales\n---\n\nexisting body\n"
+        out = ask_engine.insert_kept_section(md, self.SECTION, "top")
+        assert out.startswith("---\ntitle: Sales\n---\n\n<!-- open -->")
+        assert "existing body" in out
+
+    def test_top_plain_body(self):
+        out = ask_engine.insert_kept_section("just text\n", self.SECTION, "top")
+        assert out.startswith("<!-- open -->")
+        assert out.rstrip("\n").endswith("just text")
+
+    def test_top_h1_later_in_body_is_not_an_anchor(self):
+        # An H1 that isn't the leading content must not pull the section down.
+        md = "intro paragraph\n\n# Later heading\n"
+        out = ask_engine.insert_kept_section(md, self.SECTION, "top")
+        assert out.index("<!-- open -->") < out.index("intro paragraph")
+
+    def test_unknown_position_rejected(self):
+        with pytest.raises(ValueError, match="unknown position"):
+            ask_engine.insert_kept_section("x\n", self.SECTION, "middle")
+
+
+# --------------------------------------------------------------------------- #
 # find_kept_sections — the reader half of the marker format
 # --------------------------------------------------------------------------- #
 class TestFindKeptSections:

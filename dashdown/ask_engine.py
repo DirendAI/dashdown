@@ -43,7 +43,7 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from dashdown.chart_annotations import ChartContext, build_chart_context
@@ -138,7 +138,44 @@ _KINDS = frozenset({"semantic", "list", "query", "sql", "none"})
 # of…"). All of them consume the same {x: label, y: value} config the panel
 # chart already speaks (chart.js buildChartOption), so honoring a preference
 # is a type override — applied only when the result's shape supports it.
-CHART_PREFS = frozenset({"line", "bar", "scatter", "pie", "funnel", "treemap"})
+# Chart types an operator may ask for by name ("as a funnel", "river chart").
+# Every token here has a rendering branch in chart.js AND a compatibility rule
+# in resolution_chart_shape/_apply_chart_pref (a pref the result's shape can't
+# express is soft-dropped, never an error): heatmap/sankey/themeriver need a
+# second grouping (series), themeriver/calendar a temporal axis, gauge a single
+# ungrouped value.
+# `counter` is the one pref that isn't a chart.js type: it suppresses the chart
+# and renders the panel's counter cards instead (display form "counters" —
+# viable for a one-row KPI set or a small category breakdown).
+CHART_PREFS = frozenset(
+    {
+        "line", "bar", "scatter", "pie", "funnel", "treemap",
+        "radar", "gauge", "calendar", "heatmap", "sankey", "themeriver",
+        "counter",
+    }
+)
+
+# Spoken-name aliases → canonical pref tokens ("river chart" is a themeriver;
+# a donut is the default pie; an area chart is the line's area fill; counters/
+# KPIs/big numbers are the counter cards).
+_CHART_PREF_ALIASES = {
+    "river": "themeriver",
+    "stream": "themeriver",
+    "streamgraph": "themeriver",
+    "theme_river": "themeriver",
+    "donut": "pie",
+    "doughnut": "pie",
+    "area": "line",
+    "counters": "counter",
+    "kpi": "counter",
+    "kpis": "counter",
+    "stat": "counter",
+    "stats": "counter",
+    "number": "counter",
+    "numbers": "counter",
+    "big_number": "counter",
+    "bignumber": "counter",
+}
 
 # Bounds for the list rung's row cap — a hallucinated/absent limit is clamped here
 # (the request feeds both the model payload and the wire).
@@ -394,7 +431,12 @@ RESOLVER_SYSTEM_PROMPT = (
     "in `series`, never a comma-joined pair. `grain` "
     "must be one of the model's grains and only makes sense with a time-dimension "
     "`by`; `filters` keys must be the model's dimensions. `name` must be a query "
-    "listed in the catalog.\n\n"
+    "listed in the catalog. "
+    "`date_start`/`date_end` must be CONCRETE ISO dates (YYYY-MM-DD) computed "
+    "from today's date (given below) — for 'this week', 'last month', "
+    "'recently' etc., compute the actual boundary dates; NEVER pass a relative "
+    "phrase as a date or filter value (date columns can only compare against "
+    "real dates).\n\n"
     "Semantic models answer AGGREGATE questions only — a measure grouped by "
     "dimensions. A detail/list question ('show/list the last N orders', 'which "
     "customers ordered recently', 'give me the list of …') is NOT a semantic "
@@ -407,9 +449,20 @@ RESOLVER_SYSTEM_PROMPT = (
     "by it, with `desc: true` for newest/largest first; `limit` is an integer "
     "1-500 (default 50). A `list` never carries a `metric` — that's `semantic`. "
     "Any routed resolution may additionally carry "
-    '"chart": one of line|bar|scatter|pie|funnel|treemap — set it ONLY when the '
-    "operator asked for a specific chart type ('as a funnel', 'pie chart of…'); "
-    "otherwise omit it and a sensible chart is inferred. A chart wish is never a "
+    '"chart": one of line|bar|scatter|pie|donut|area|funnel|treemap|radar|'
+    "gauge|calendar|heatmap|sankey|themeriver|counter — set it ONLY when the "
+    "operator asked for a specific presentation ('as a funnel', 'river chart "
+    "of…', 'as counters/KPIs'; a river/stream chart is themeriver; counters/"
+    "KPIs/big numbers are counter). Chart wishes have shape needs — give "
+    "the resolution the DATA the chart wants: heatmap/sankey/themeriver need "
+    "BOTH `by` and `series` (two groupings); themeriver and calendar need a "
+    "time-dimension `by`; gauge fits a single ungrouped value (no `by`); "
+    "counter fits a single value or a SMALL breakdown (≤12 rows). "
+    "Otherwise omit `chart` and a sensible one is inferred. "
+    'Every routed resolution should ALSO carry "title": a concise dashboard-'
+    "style heading for the result (2-6 plain words, no question mark — e.g. "
+    "'Channel share', 'Revenue by month') — the label a chart of this answer "
+    "would wear, never the operator's sentence echoed back. A chart wish is never a "
     "reason to refuse: resolve the DATA the question needs and let `chart` carry "
     "the presentation. "
     "An OPEN or underspecified question ('show me something interesting', 'a "
@@ -477,6 +530,9 @@ def build_resolver_prompt(
         + json.dumps(catalog, indent=2, default=str)
         + "\n\n"
         + context
+        # The anchor for relative time phrases: without it the model literally
+        # cannot turn "this week" into date_start/date_end boundaries.
+        + f"Today's date: {date.today().isoformat()}\n"
         + f"Question: {question}\n\nJSON:"
     )
     return system, user
@@ -505,6 +561,12 @@ class Resolution:
     # Presentation wish ("as a funnel") — any kind may carry one; honored by
     # resolution_chart_shape only when the result's shape supports it.
     chart_pref: str | None = None
+    # A concise, dashboard-style heading for the result ("Channel share") — the
+    # resolver generates it in the same call (one extra JSON field, no extra
+    # LLM cost); :func:`_derive_title` fills a deterministic fallback. Used for
+    # the panel chart title and as the heading/title/ask text of a kept section
+    # (the raw conversational question stays in the provenance comment).
+    title: str = ""
     grain: str | None = None
     filters: dict[str, list[str]] = field(default_factory=dict)
     date_start: str = ""
@@ -626,15 +688,70 @@ def parse_resolution(
         res = _validate_semantic(obj, project)
 
     # Presentation wish, valid on every routed kind ("pie chart of…", "as a
-    # funnel"). Soft: an off-list value is dropped, never fatal.
+    # funnel"). Soft: an off-list value is dropped, never fatal. The generated
+    # title is cleaned free text (never a catalog name), also soft.
     if res.kind != "none":
         res.chart_pref = _parse_chart_pref(obj)
+        res.title = _clean_title(obj.get("title"))
     return res
+
+
+MAX_TITLE_CHARS = 80
+
+
+def _clean_title(value: Any) -> str:
+    """Sanitize a generated/client-supplied title to one plain-text line.
+
+    Model (or browser) output headed for a heading line and attribute values:
+    whitespace-collapsed, trailing question/sentence punctuation dropped (a
+    title is a label, not a question), angle brackets escaped so it can never
+    smuggle a component tag into a page, capped at :data:`MAX_TITLE_CHARS`.
+    Anything non-string / empty degrades to ``""`` (callers fall back)."""
+    if not isinstance(value, str):
+        return ""
+    title = " ".join(value.split()).strip().rstrip("?.!:;,")
+    if len(title) > MAX_TITLE_CHARS:
+        title = title[:MAX_TITLE_CHARS].rstrip()
+    return title.replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _short_name(name: Any) -> str:
+    return str(name or "").split(".")[-1].replace("_", " ")
+
+
+def _derive_title(resolution: Resolution) -> str:
+    """Deterministic title fallback when the resolver omitted one.
+
+    Semantic → "Revenue by region [per channel]"; list → the model's rows
+    ("Latest sales"); query → the humanized query name. Empty for sql/none
+    (callers then fall back to the question)."""
+    if resolution.kind == "semantic" and resolution.metric:
+        title = _short_name(resolution.metric).capitalize()
+        if resolution.by:
+            title += f" by {_short_name(resolution.by)}"
+        if resolution.series:
+            title += f" per {_short_name(resolution.series)}"
+        return title
+    if resolution.kind == "list" and resolution.model:
+        return f"Latest {_short_name(resolution.model)}"
+    if resolution.kind == "query":
+        name = resolution.name or resolution.query_name
+        if name:
+            return _humanize_query_name(name).capitalize()
+    return ""
+
+
+def answer_title(resolution: Resolution) -> str:
+    """The answer's display title: the resolver's generated one, else derived."""
+    return resolution.title or _derive_title(resolution)
 
 
 def _parse_chart_pref(obj: dict[str, Any]) -> str | None:
     pref = obj.get("chart")
     pref = pref.strip().lower() if isinstance(pref, str) and pref.strip() else None
+    if pref is None:
+        return None
+    pref = _CHART_PREF_ALIASES.get(pref, pref)
     return pref if pref in CHART_PREFS else None
 
 
@@ -653,6 +770,28 @@ def _validate_query(obj: dict[str, Any], project: "Project") -> Resolution:
     if params:
         prov += " with " + ", ".join(f"{k}={v}" for k, v in sorted(params.items()))
     return Resolution(kind="query", name=name, params=params, provenance=prov)
+
+
+# A concrete calendar date — the ONLY thing the date-range fields may carry.
+# The resolver is prompted with today's date and told to compute boundaries, but
+# real models still emit relative phrases ("this week"); those must fail
+# VALIDATION (→ the one-shot self-repair retries with the reason quoted back),
+# never reach a backend where `order_date >= 'this week'` raises a raw
+# IbisTypeError into the operator's panel.
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _bad_date_reason(field: str, value: str) -> str | None:
+    """A validation-failure reason when a date field isn't a concrete ISO date
+    (empty is fine — no range), else ``None``. The reason is written for the
+    self-repair retry: it tells the model exactly how to fix the field."""
+    if not value or _ISO_DATE_RE.match(value):
+        return None
+    return (
+        f"{field} {value!r} is not a concrete ISO date — compute the actual "
+        "YYYY-MM-DD boundaries from today's date; never pass relative phrases "
+        'like "this week" or "last month"'
+    )
 
 
 def _candidate_names(value: Any) -> list[str]:
@@ -735,8 +874,29 @@ def _validate_semantic(obj: dict[str, Any], project: "Project") -> Resolution:
             if values:
                 filters[str(key)] = values
 
+    # A filter ON THE TIME DIMENSION compares against a date column, so its
+    # values must be concrete ISO dates — "this week" would raise a raw
+    # IbisTypeError at execution. Non-date values fail validation with a reason
+    # steering the (self-repair) model to the date_start/date_end fields.
+    time_dim_short = (handle.time_dimension or "").split(".")[-1]
+    if time_dim_short:
+        for key, values in filters.items():
+            if key.split(".")[-1] != time_dim_short:
+                continue
+            for v in values:
+                if not _ISO_DATE_RE.match(v):
+                    return _none(
+                        f"filter {key!r} = {v!r} compares against a date column "
+                        "— use concrete ISO dates, or express the time range "
+                        "via date_start/date_end computed from today's date"
+                    )
+
     date_start = _scalar(obj.get("date_start"))
     date_end = _scalar(obj.get("date_end"))
+    for field, value in (("date_start", date_start), ("date_end", date_end)):
+        reason = _bad_date_reason(field, value)
+        if reason:
+            return _none(reason)
 
     prov = f"semantic: {model}.{metric}"
     if by:
@@ -849,8 +1009,26 @@ def _validate_list(obj: dict[str, Any], project: "Project") -> Resolution:
             if values:
                 filters[str(key)] = values
 
+    # Same date discipline as the semantic rung: a time-dimension filter value
+    # or a date-range field that isn't a concrete ISO date fails validation
+    # (→ self-repair) instead of raising a raw backend type error at execution.
+    if time_short:
+        for key, values in filters.items():
+            if key.split(".")[-1] != time_short:
+                continue
+            for v in values:
+                if not _ISO_DATE_RE.match(v):
+                    return _none(
+                        f"filter {key!r} = {v!r} compares against a date column "
+                        "— use concrete ISO dates, or express the time range "
+                        "via date_start/date_end computed from today's date"
+                    )
     date_start = _scalar(obj.get("date_start"))
     date_end = _scalar(obj.get("date_end"))
+    for field, value in (("date_start", date_start), ("date_end", date_end)):
+        reason = _bad_date_reason(field, value)
+        if reason:
+            return _none(reason)
 
     if order_by == time_short:
         ord_txt = "newest first" if desc else "oldest first"
@@ -1163,18 +1341,27 @@ def resolution_chart_shape(
     one metric into a colored series per value) and the annotation context gets
     the same split. Everything else falls through to ``infer_chart_shape``.
 
-    An explicit operator chart wish (``resolution.chart_pref`` — "as a funnel")
-    overrides the inferred *type* when the shape supports it: every pref speaks
-    the same ``{x, y}`` config, but pie/funnel/treemap need a single unsplit
-    category+value pairing, so a preference is dropped (never an error) when a
-    ``series_by`` split is present or no chartable shape exists at all."""
+    An explicit operator chart wish (``resolution.chart_pref`` — "as a funnel",
+    "river chart") overrides the inferred *type* when the shape supports it; a
+    preference the result can't express is dropped (never an error). The
+    split-compatible prefs: line/bar swap freely; pie renders faceted small
+    multiples; radar overlays one polygon per series value; themeriver streams
+    the split over a TIME x; heatmap/sankey re-map the three columns onto their
+    own config keys (x=by, y=series, value=metric). funnel/treemap/gauge/
+    calendar can't express a split — dropped on a series shape. The ``counter``
+    pref suppresses the chart entirely when the result can render as counter
+    cards (:func:`_counters_viable` — display form "counters" takes over)."""
+    if resolution.chart_pref == "counter" and _counters_viable(payload):
+        return None
     if (
         resolution.kind != "semantic"
         or not resolution.series
         or not resolution.by
         or not resolution.metric
     ):
-        return _apply_chart_pref(infer_chart_shape(payload), resolution.chart_pref)
+        return _apply_chart_pref(
+            infer_chart_shape(payload), resolution.chart_pref, payload
+        )
     columns = payload["columns"]
     rows = payload["rows"]
     if len(rows) <= 1 or not columns:
@@ -1183,35 +1370,188 @@ def resolution_chart_shape(
     series_col = _find_col(columns, resolution.series)
     y = _find_col(columns, resolution.metric)
     if not (x and series_col and y) or len({x, series_col, y}) != 3:
-        return _apply_chart_pref(infer_chart_shape(payload), resolution.chart_pref)
+        return _apply_chart_pref(
+            infer_chart_shape(payload), resolution.chart_pref, payload
+        )
     x_idx = columns.index(x)
     x_kind = _classify([row[x_idx] if x_idx < len(row) else None for row in rows[:50]])
     if x_kind == "temporal":
         shape = {"type": "line", "x": x, "y": y, "series_by": series_col, "sort_by": x}
     else:
         shape = {"type": "bar", "x": x, "y": y, "series_by": series_col}
-    # Pie + series is the one split-compatible pref (faceted small multiples);
-    # line/bar swap freely; funnel/treemap can't express a split — dropped.
     pref = resolution.chart_pref
-    if pref in ("line", "bar", "pie"):
+    if pref in ("line", "bar", "pie", "radar"):
         shape["type"] = pref
+        if pref in ("pie", "radar"):
+            shape.pop("sort_by", None)
+    elif pref == "themeriver" and x_kind == "temporal":
+        shape = {"type": "themeriver", "x": x, "y": y, "series_by": series_col}
+    elif pref in ("heatmap", "sankey"):
+        # Their chart.js branches speak x/y/value, not x/y/series_by: both
+        # groupings become the axes/nodes, the metric the cell/flow magnitude.
+        shape = {"type": pref, "x": x, "y": series_col, "value": y}
     return shape
 
 
+# Counter cards stay glanceable; past this the answer is a table/chart anyway.
+MAX_COUNTER_CARDS = 12
+
+
+def _column_kinds(payload: dict[str, Any]) -> dict[str, str]:
+    columns = payload["columns"]
+    rows = payload["rows"]
+    return {
+        c: _classify([row[i] if i < len(row) else None for row in rows[:50]])
+        for i, c in enumerate(columns)
+    }
+
+
+def _counters_viable(payload: dict[str, Any]) -> bool:
+    """Can this result render as counter cards? Two shapes qualify: a single
+    row with numeric columns (a KPI set — one card per number), or a small
+    (≤ :data:`MAX_COUNTER_CARDS`) category breakdown with exactly one numeric
+    column (one card per row, labeled by the category)."""
+    columns = payload["columns"]
+    rows = payload["rows"]
+    if not rows or not columns:
+        return False
+    kinds = _column_kinds(payload)
+    numeric = [c for c in columns if kinds[c] == "numeric"]
+    if len(rows) == 1:
+        return bool(numeric)
+    return (
+        len(rows) <= MAX_COUNTER_CARDS
+        and len(numeric) == 1
+        and len(columns) >= 2
+    )
+
+
+def _gauge_shape(payload: dict[str, Any]) -> dict[str, str] | None:
+    """A gauge shape for a headline (≤1 row) result — the one chart wish that
+    applies where nothing is inferable ("show revenue as a gauge"). Needs a
+    numeric column; else ``None`` (the answer stays a value card)."""
+    columns = payload["columns"]
+    rows = payload["rows"]
+    if not rows or not columns:
+        return None
+    kind = {
+        c: _classify([row[i] if i < len(row) else None for row in rows[:50]])
+        for i, c in enumerate(columns)
+    }
+    y = next((c for c in columns if kind[c] == "numeric"), None)
+    if y is None:
+        return None
+    return {"type": "gauge", "x": columns[0], "y": y}
+
+
 def _apply_chart_pref(
-    shape: dict[str, str] | None, pref: str | None
+    shape: dict[str, str] | None,
+    pref: str | None,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
-    """Overlay an operator chart wish on an inferred shape (soft — a pref that
-    the shape can't express leaves the inference untouched)."""
-    if shape is None or pref is None or pref == shape.get("type"):
+    """Overlay an operator chart wish on an inferred (non-series) shape — soft:
+    a pref the shape can't express leaves the inference untouched.
+
+    Special cases: ``gauge`` applies only where nothing was inferable (a ≤1-row
+    headline — on a multi-row result a first-row gauge would silently discard
+    data); ``calendar`` needs the temporal x the line inference implies;
+    heatmap/sankey/themeriver need a second grouping a two-column result
+    doesn't have."""
+    if shape is None:
+        if pref == "gauge" and payload is not None:
+            return _gauge_shape(payload)
+        return None
+    if pref is None or pref == shape.get("type"):
         return shape
+    # counter isn't a chart type (a non-viable counter wish keeps the inferred
+    # chart); the others need data this two-column shape doesn't have.
+    if pref in ("heatmap", "sankey", "themeriver", "gauge", "counter"):
+        return shape
+    if pref == "calendar":
+        if shape.get("type") != "line":
+            return shape  # a calendar grid needs a temporal axis
+        out = dict(shape)
+        out["type"] = "calendar"
+        out.pop("sort_by", None)
+        return out
     out = dict(shape)
     out["type"] = pref
-    if pref in ("pie", "funnel", "treemap"):
+    if pref in ("pie", "funnel", "treemap", "radar"):
         # Category+value charts: an ordering hint is meaningless (funnel sorts
-        # itself; pie shows shares).
+        # itself; pie shows shares; radar axes are unordered).
         out.pop("sort_by", None)
     return out
+
+
+def display_form(
+    resolution: Resolution, chart: dict[str, str] | None, payload: dict[str, Any]
+) -> str:
+    """The answer's presentation form — ``"value"``, ``"chart"``, or ``"table"``.
+
+    Derived (never an LLM choice) from what's already in hand, so the client can
+    render answer-shaped instead of one maximal layout: the list rung is detail
+    rows (**table**); an inferred chart shape is a **chart** (the data table then
+    collapses behind a disclosure client-side); a chartless result is a headline
+    **value** when it *is* one — a 1×1 result, or a semantic aggregate with no
+    ``by`` — **counters** when it's a KPI set (a single row with several
+    numbers, or an explicit "as counters" wish on a small breakdown), else a
+    **table**. Ships as ``payload["display"]["form"]``; the commentary prompt is
+    sized to the same form (:func:`_style_hint`), so form and prose can't
+    disagree."""
+    if resolution.kind == "list":
+        return "table"
+    if chart is not None:
+        return "chart"
+    rows = payload["rows"]
+    columns = payload["columns"]
+    if _counters_viable(payload):
+        kinds = _column_kinds(payload)
+        numeric_count = sum(1 for c in columns if kinds[c] == "numeric")
+        # A lone number is the (identical, bigger) single value card.
+        if resolution.chart_pref == "counter":
+            if len(rows) == 1 and numeric_count == 1:
+                return "value"
+            return "counters"
+        # Auto: a one-row multi-number result IS a KPI set — no wish needed.
+        if len(rows) == 1 and numeric_count >= 2:
+            return "counters"
+    if len(rows) == 1 and len(columns) == 1:
+        return "value"
+    if resolution.kind == "semantic" and not resolution.by and len(rows) == 1:
+        return "value"
+    return "table"
+
+
+def _style_hint(form: str) -> str:
+    """Commentary sizing for one display form (rides ``AskDef.style_hint``).
+
+    The evidence (number, chart, or table) is rendered *next to* the prose, so
+    the prose's job is the takeaway, not a restatement — and a compact answer
+    panel has no room for a paragraph that repeats the chart."""
+    if form == "value":
+        return (
+            "One short sentence only. The headline number is displayed "
+            "prominently beside your text — state what it means, don't repeat it."
+        )
+    if form == "counters":
+        return (
+            "One short sentence only. The numbers are displayed as counter "
+            "cards beside your text — call out the one that matters most, "
+            "don't enumerate them."
+        )
+    if form == "chart":
+        return (
+            "At most two short sentences. A chart of this result is displayed "
+            "beside your text — say what stands out (trend, outlier, "
+            "concentration), never walk through the rows."
+        )
+    if form == "table":
+        return (
+            "At most two short sentences. The rows are displayed in a table "
+            "beside your text — summarize the key takeaway, never restate the "
+            "rows and never emit a Markdown table."
+        )
+    return ""
 
 
 # --------------------------------------------------------------------------- #
@@ -1567,6 +1907,7 @@ def _stages_for_result(
     path and the direct-SQL passthrough (which skips the resolver call)."""
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
+    form = display_form(resolution, chart, serialized)
     wire_rows, truncation = _wire_rows(serialized["rows"])
 
     # The `resolved` stage: the complete payload with the commentary slots still
@@ -1574,6 +1915,7 @@ def _stages_for_result(
     # chart + table while the (second) answer call runs.
     resolved_payload: dict[str, Any] = {
         "question": question,
+        "title": answer_title(resolution),
         "resolved": {
             "kind": resolution.kind,
             "provenance": resolution.provenance,
@@ -1584,6 +1926,7 @@ def _stages_for_result(
         "columns": serialized["columns"],
         "rows": wire_rows,
         "chart": chart,
+        "display": {"form": form},
         "answer_html": "",
         "answer_text": "",
         "annotations": [],
@@ -1598,14 +1941,18 @@ def _stages_for_result(
     yield ("resolved", resolved_payload)
 
     # 3) Answer — reuse the exact <Ask /> generation path. A chart shape means a
-    # ChartContext, so generate_answer runs the annotation protocol for it.
+    # ChartContext, so generate_answer runs the annotation protocol for it
+    # (types without a vocabulary — funnel, themeriver… — get None and stay
+    # commentary-only). A value-keyed shape (heatmap/sankey) threads its value
+    # column as the `extra` role the vocabulary grounds against.
     chart_ctx: ChartContext | None = None
     if chart is not None:
         chart_ctx = build_chart_context(
             chart["type"],
-            x=chart["x"],
-            y=chart["y"],
+            x=chart.get("x"),
+            y=chart.get("y"),
             series_by=chart.get("series_by"),
+            extra=(("value", chart["value"]),) if chart.get("value") else (),
         )
     # When this ask continues a session, fold the prior *questions* (only — no
     # resolutions, to keep tokens down) into the answer prompt so the commentary
@@ -1624,6 +1971,7 @@ def _stages_for_result(
         max_rows=cfg.max_rows,
         page_title=project.config.title,
         chart_context=chart_ctx,
+        style_hint=_style_hint(form),
     )
     try:
         answer_html, answer_text, annotations = generate_answer(
@@ -1672,6 +2020,8 @@ def _none_payload(
         "answer_html": render_markdown_text(resolution.reason),
         "answer_text": resolution.reason,
         "annotations": [],
+        "display": {"form": "none"},
+        "title": "",
         "model": model,
         "cached": False,
     }
@@ -1795,7 +2145,11 @@ def _history_fingerprint(history: list[dict[str, Any]]) -> str:
 def _semantic_options(
     project: "Project", model_name: str | None
 ) -> dict[str, Any] | None:
-    """The editable vocabulary of a semantic model, for the answer panel's chips.
+    """The editable vocabulary of a semantic model (``semantic_options``).
+
+    Shipped on semantic answer payloads for programmatic consumers of the ask
+    API (the v1 chip editor was the original reader; the v2 panel doesn't use
+    it).
 
     Short (last-segment) names, sorted — built from the model handle exactly like
     :func:`build_ask_catalog` does, so a chip references a name the resolver /
@@ -1911,6 +2265,7 @@ def execute_spec(
     result = execute_resolution(resolution, project, params)
     serialized = serialize_result(result)
     chart = resolution_chart_shape(resolution, serialized)
+    form = display_form(resolution, chart, serialized)
     wire_rows, truncation = _wire_rows(serialized["rows"])
 
     resolved = {
@@ -1925,10 +2280,12 @@ def execute_spec(
     if not commentary:
         payload = {
             "question": question,
+            "title": answer_title(resolution),
             "resolved": resolved,
             "columns": serialized["columns"],
             "rows": wire_rows,
             "chart": chart,
+            "display": {"form": form},
             "answer_html": "",
             "answer_text": "",
             "annotations": [],
@@ -1945,9 +2302,10 @@ def execute_spec(
     if chart is not None:
         chart_ctx = build_chart_context(
             chart["type"],
-            x=chart["x"],
-            y=chart["y"],
+            x=chart.get("x"),
+            y=chart.get("y"),
             series_by=chart.get("series_by"),
+            extra=(("value", chart["value"]),) if chart.get("value") else (),
         )
     synthetic = AskDef(
         id="_ask_runtime",
@@ -1956,6 +2314,7 @@ def execute_spec(
         max_rows=cfg.max_rows,
         page_title=project.config.title,
         chart_context=chart_ctx,
+        style_hint=_style_hint(form),
     )
     adapter = project.get_llm_adapter()
     try:
@@ -1967,10 +2326,12 @@ def execute_spec(
 
     payload = {
         "question": question,
+        "title": answer_title(resolution),
         "resolved": resolved,
         "columns": serialized["columns"],
         "rows": wire_rows,
         "chart": chart,
+        "display": {"form": form},
         "answer_html": answer_html,
         "answer_text": answer_text,
         "annotations": annotations,
@@ -1995,6 +2356,12 @@ _KEEP_CHART_COMPONENTS = {
     "pie": "PieChart",
     "funnel": "FunnelChart",
     "treemap": "TreemapChart",
+    "radar": "RadarChart",
+    "gauge": "GaugeChart",
+    "calendar": "CalendarHeatmap",
+    "heatmap": "HeatmapChart",
+    "sankey": "SankeyChart",
+    "themeriver": "ThemeRiver",
 }
 
 
@@ -2013,11 +2380,60 @@ def _comment_safe(value: Any) -> str:
     return str(value).replace("--", "").replace("<", "").replace(">", "")
 
 
+# Canonical element vocabulary (and emission order) for a kept section. The
+# client sends a subset of these names (derived from the answer's display form
+# — "what lands = what the panel shows") — an ENUM choice, never free text —
+# and `_normalize_elements` re-validates it server-side.
+KEEP_ELEMENTS = ("chart", "value", "table", "ask")
+
+
+def _normalize_elements(
+    elements: Any, kind: str, chart: dict[str, Any] | None
+) -> list[str]:
+    """Validate + canonicalize the client's element choice for one keep.
+
+    ``None`` (an older client / the CLI) keeps the original fixed recipe per
+    kind — semantic → chart?+ask, query → chart?+table+ask, list → table — so
+    the API stays backward-compatible. An explicit list is deduped, checked
+    against :data:`KEEP_ELEMENTS`, restricted per kind (a list answer only has
+    rows to keep), and returned in canonical emission order. A ``chart`` element
+    without a chart shape is a client error (the client only sends what the
+    panel actually rendered)."""
+    if elements is None:
+        if kind == "semantic":
+            return (["chart"] if chart is not None else []) + ["ask"]
+        if kind == "list":
+            return ["table"]
+        return (["chart"] if chart is not None else []) + ["table", "ask"]
+    if not isinstance(elements, list) or not elements:
+        raise ValueError("'elements' must be a non-empty list of element names")
+    names: list[str] = []
+    for e in elements:
+        n = str(e).strip().lower()
+        if n not in KEEP_ELEMENTS:
+            raise ValueError(
+                f"unknown keep element {n!r} (one of: {', '.join(KEEP_ELEMENTS)})"
+            )
+        if n not in names:
+            names.append(n)
+    if kind == "list":
+        bad = [n for n in names if n != "table"]
+        if bad:
+            raise ValueError(
+                f"a list answer keeps only its rows — cannot keep {bad[0]!r}"
+            )
+    if "chart" in names and chart is None:
+        raise ValueError("this answer has no chart to keep")
+    return [n for n in KEEP_ELEMENTS if n in names]
+
+
 def build_kept_markdown(
     project: "Project",
     question: str,
     resolved: dict[str, Any],
     chart: dict[str, Any] | None,
+    elements: list[str] | None = None,
+    title: str | None = None,
 ) -> tuple[str, str]:
     """Render a liked runtime answer as an authored, **live** markdown section.
 
@@ -2063,9 +2479,24 @@ def build_kept_markdown(
     format; the two must stay in lockstep. The ``id`` is a fresh 8-hex token per
     keep.
 
+    ``elements`` is the client's choice of what lands (derived from the
+    answer's display form — the panel is the preview): a subset of
+    :data:`KEEP_ELEMENTS` (``chart``/``value``/``table``/``ask``), validated by
+    :func:`_normalize_elements` — ``None`` keeps the original fixed recipe per
+    kind, so older clients and the CLI are untouched.
+
+    ``title`` is the answer's generated heading ("Channel share" — the payload's
+    ``title``, echoed back by the client and re-cleaned by :func:`_clean_title`
+    since it crossed the browser). When present it becomes the section heading,
+    the chart/list ``title=``, and the ``<Ask>`` prompt — a conversational
+    question ("can you show me a pie chart of channel shares?") never lands as
+    page copy; the verbatim question is preserved in the kept-from comment
+    (``asked: “…”``) instead. ``None``/empty keeps the legacy question-as-heading
+    behavior (older clients, the CLI).
+
     Returns ``(section_text, keep_id)`` — the section text (leading blank line +
     opening marker + heading + components + closing marker) and the generated id;
-    the caller owns file I/O and blank-line separation."""
+    the caller owns file I/O and placement (:func:`insert_kept_section`)."""
     kind = str((resolved or {}).get("kind", "")).strip().lower()
     detail = (resolved or {}).get("detail") or {}
     # The kept-from provenance is rebuilt *server-side* from the re-validated
@@ -2084,9 +2515,11 @@ def build_kept_markdown(
             f"named-query, and list answers reference a re-runnable artifact ({why})"
         )
 
-    heading = " ".join(str(question or "").split())
-    if not heading:
+    question_txt = " ".join(str(question or "").split())
+    if not question_txt:
         raise ValueError("cannot keep an answer with an empty question")
+    heading_title = _clean_title(title)
+    heading = heading_title or question_txt
     q_attr = _attr_escape(heading)
 
     components: list[str] = []
@@ -2124,25 +2557,65 @@ def build_kept_markdown(
         by_ref = f"{res.model}.{res.by}" if res.by else None
         series_ref = f"{res.model}.{res.series}" if res.series else None
 
-        if chart is not None:
-            component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
-            attrs = [f"metric={{{metric_ref}}}"]
-            if by_ref:
-                attrs.append(f"by={{{by_ref}}}")
-            if series_ref:
-                attrs.append(f"series={{{series_ref}}}")
-            if res.grain:
-                attrs.append(f'grain="{res.grain}"')
-            attrs.append(f'title="{q_attr}"')
-            components.append(f"<{component} {' '.join(attrs)} />")
+        elems = _normalize_elements(elements, "semantic", chart)
+        if "value" in elems and res.by:
+            raise ValueError(
+                "a grouped answer has no single value to keep — keep the chart "
+                "or table instead"
+            )
 
-        ask_attrs = [f"metric={{{metric_ref}}}"]
-        if by_ref:
-            ask_attrs.append(f"by={{{by_ref}}}")
-        if series_ref:
-            ask_attrs.append(f"series={{{series_ref}}}")
-        ask_attrs.append(f'ask="{q_attr}"')
-        components.append(f"<Ask {' '.join(ask_attrs)} />")
+        # The shared metric/by/series/grain attr run every semantic component
+        # takes (chart, <Table>, <Ask> all resolve the same ref grammar).
+        def _sem_attrs() -> list[str]:
+            out = [f"metric={{{metric_ref}}}"]
+            if by_ref:
+                out.append(f"by={{{by_ref}}}")
+            if series_ref:
+                out.append(f"series={{{series_ref}}}")
+            return out
+
+        for elem in elems:
+            if elem == "chart":
+                ctype = chart.get("type")
+                component = _KEEP_CHART_COMPONENTS.get(ctype, "LineChart")
+                # Heatmap/Sankey speak value+two-dimensions, gauge a bare
+                # metric; everything else the shared metric/by/series grammar.
+                if ctype == "heatmap" and by_ref and series_ref:
+                    attrs = [
+                        f"by={{{by_ref}}}",
+                        f"series={{{series_ref}}}",
+                        f"value={{{metric_ref}}}",
+                    ]
+                elif ctype == "sankey" and by_ref and series_ref:
+                    attrs = [
+                        f"source={{{by_ref}}}",
+                        f"target={{{series_ref}}}",
+                        f"value={{{metric_ref}}}",
+                    ]
+                elif ctype == "gauge":
+                    attrs = [f"metric={{{metric_ref}}}"]
+                else:
+                    attrs = _sem_attrs()
+                    if res.grain:
+                        attrs.append(f'grain="{res.grain}"')
+                attrs.append(f'title="{q_attr}"')
+                components.append(f"<{component} {' '.join(attrs)} />")
+            elif elem == "value":
+                # The page-side twin of the panel's counter card — a big KPI
+                # number with the metric name as its label.
+                label = _attr_escape(_short_name(res.metric).title())
+                components.append(
+                    f'<Counter metric={{{metric_ref}}} label="{label}" />'
+                )
+            elif elem == "table":
+                attrs = _sem_attrs()
+                if res.grain:
+                    attrs.append(f'grain="{res.grain}"')
+                components.append(f"<Table {' '.join(attrs)} />")
+            elif elem == "ask":
+                ask_attrs = _sem_attrs()
+                ask_attrs.append(f'ask="{q_attr}"')
+                components.append(f"<Ask {' '.join(ask_attrs)} />")
 
     elif kind == "list":
         # Re-validate the client-supplied detail against the live catalog. A list
@@ -2169,6 +2642,10 @@ def build_kept_markdown(
         # kept-from comment when the validated resolution held any.
         filters_dropped = bool(res.filters) or bool(res.date_start) or bool(res.date_end)
 
+        # Validates the choice (a list keeps only its rows); the emission itself
+        # is the single <List /> either way.
+        _normalize_elements(elements, "list", chart)
+
         list_attrs = [
             f'model="{_attr_escape(res.model)}"',
             f'columns="{_attr_escape(", ".join(res.columns))}"',
@@ -2193,20 +2670,40 @@ def build_kept_markdown(
         # the *validated* name — never the client's provenance string.
         provenance = f"named query '{name}'"
 
-        if chart is not None:
-            component = _KEEP_CHART_COMPONENTS.get(chart.get("type"), "LineChart")
-            x = _attr_escape(chart.get("x", ""))
-            y = _attr_escape(chart.get("y", ""))
-            components.append(
-                f'<{component} data={{{name}}} x="{x}" y="{y}" title="{q_attr}" />'
-            )
-        components.append(f"<Table data={{{name}}} />")
-        components.append(f'<Ask data={{{name}}} ask="{q_attr}" />')
+        for elem in _normalize_elements(elements, "query", chart):
+            if elem == "chart":
+                ctype = chart.get("type")
+                component = _KEEP_CHART_COMPONENTS.get(ctype, "LineChart")
+                x = _attr_escape(chart.get("x", ""))
+                y = _attr_escape(chart.get("y", ""))
+                val = _attr_escape(chart.get("value", ""))
+                sb = _attr_escape(chart.get("series_by", ""))
+                if ctype == "sankey" and val:
+                    body = f'source="{x}" target="{y}" value="{val}"'
+                elif ctype == "heatmap" and val:
+                    body = f'x="{x}" y="{y}" value="{val}"'
+                else:
+                    body = f'x="{x}" y="{y}"'
+                    if sb:
+                        body += f' series="{sb}"'
+                components.append(
+                    f'<{component} data={{{name}}} {body} title="{q_attr}" />'
+                )
+            elif elem == "value":
+                components.append(f"<Value data={{{name}}} />")
+            elif elem == "table":
+                components.append(f"<Table data={{{name}}} />")
+            elif elem == "ask":
+                components.append(f'<Ask data={{{name}}} ask="{q_attr}" />')
 
     date = datetime.now().strftime("%Y-%m-%d")
     note = " · filters not carried over" if filters_dropped else ""
+    # When a generated title supplies the heading, the operator's verbatim
+    # question survives here (the trust/provenance surface); with the legacy
+    # question-as-heading there's nothing to repeat.
+    asked = f" · asked: “{_comment_safe(question_txt)}”" if heading_title else ""
     comment = (
-        f"<!-- kept from an ask answer · {_comment_safe(provenance)} · "
+        f"<!-- kept from an ask answer{asked} · {_comment_safe(provenance)} · "
         f"{date}{note} -->"
     )
     keep_id = uuid.uuid4().hex[:8]
@@ -2217,6 +2714,43 @@ def build_kept_markdown(
     close_marker = f"<!-- /dashdown:keep id={keep_id} -->"
     parts = [open_marker, f"## {heading}", comment, *components, close_marker]
     return "\n" + "\n".join(parts) + "\n", keep_id
+
+
+def insert_kept_section(markdown: str, section: str, position: str = "end") -> str:
+    """Splice a kept/composed ``section`` (:func:`build_kept_markdown`'s return —
+    leading newline + content + trailing newline) into a page's markdown.
+
+    ``end`` (default) appends after the existing body with one blank line
+    separating — byte-identical to the pre-``position`` endpoint behavior.
+    ``top`` inserts *before* the existing content but **after** the YAML
+    frontmatter and a leading ``# `` H1 (the page keeps its identity above
+    anything kept), so "put it at the top" never buries the title. Any other
+    value raises :class:`ValueError` (the endpoint maps it to a 400)."""
+    if position == "end":
+        base = markdown.rstrip("\n")
+        return (base + "\n" + section) if base else section.lstrip("\n")
+    if position != "top":
+        raise ValueError(f"unknown position {position!r} (expected 'top' or 'end')")
+
+    idx = 0
+    m = re.match(r"^---[ \t]*\n.*?\n---[ \t]*\n", markdown, re.DOTALL)
+    if m:
+        idx = m.end()
+    rest = markdown[idx:]
+    body_start = idx + (len(rest) - len(rest.lstrip("\n")))
+    body = markdown[body_start:]
+    if body.startswith("# "):
+        nl = body.find("\n")
+        anchor = body_start + (nl + 1 if nl != -1 else len(body))
+    else:
+        anchor = body_start
+    head = markdown[:anchor].rstrip("\n")
+    tail = markdown[anchor:].lstrip("\n")
+    out = (head + "\n" + section) if head else section.lstrip("\n")
+    out = out.rstrip("\n") + "\n"
+    if tail:
+        out += "\n" + tail
+    return out
 
 
 @dataclass(frozen=True)

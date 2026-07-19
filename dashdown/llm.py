@@ -534,6 +534,12 @@ class AskDef:
     # when set, so plain asks keep byte-identical ids — while a changed chart
     # shape correctly busts its explain cache.
     chart_context: ChartContext | None = None
+    # An answer-length/style instruction appended to the prompt (build_ask_prompt).
+    # Set only by the runtime ask engine, which sizes commentary to the answer's
+    # display form (value/chart/table — ask_engine._style_hint); authored <Ask />
+    # cards never set it, so it stays out of the id hash and existing ids/caches
+    # are untouched.
+    style_hint: str = ""
 
     @property
     def query_name(self) -> str:
@@ -757,6 +763,8 @@ def build_ask_prompt(
     # model grounds in truncated data would just fail validation).
     if ask.chart_context is not None and results:
         lines.append("\n" + annotation_instructions(ask.chart_context, results[0]))
+    if ask.style_hint:
+        lines.append(f"\nAnswer style: {ask.style_hint}")
     return "\n".join(lines)
 
 

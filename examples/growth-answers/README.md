@@ -79,10 +79,11 @@ Open <http://127.0.0.1:8000>.
    `allow_sql: false` in `dashdown.yaml`), answering under the same box with
    a chart, the backing rows, and a provenance line describing exactly which
    query answered it.
-3. **Keep it.** Like the answer? Click **Keep on this page** at the bottom of
-   the panel — the answer is appended to this page's markdown as a *live*
-   section (chart + table + a pinned `<Ask>` that re-answers with fresh data
-   on every visit). Dev server only; the page reloads with the new section.
+3. **Keep it.** Like the answer? Click **Add to page** at the bottom of
+   the panel — exactly what the panel shows is appended to this page's
+   markdown as a *live* section (e.g. the chart + a pinned `<Ask>` that
+   re-answers with fresh data on every visit). Dev server only; the page
+   reloads with the new section.
 4. **Same question from the CLI:**
 
    ```bash

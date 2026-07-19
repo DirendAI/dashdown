@@ -1,42 +1,41 @@
 // Dashdown Ask Integration (omnibox answer panel)
 //
 // The runtime operator "ask" surface, merged into the centered site-search box
-// (site_search.js). There is no standalone ask box any more: the search input
-// doubles as the ask input, and this module attaches an answer panel *under the
-// same box*. Flow: the user picks the "Ask the data" row (or, in ask-only mode,
-// just hits Enter); site_search.js fires a `dashdown:ask` DOM event; this module
-// runs the submit — POST /_dashdown/api/ask, which resolves the question against
-// the project's semantic models / named queries and returns a single JSON
-// payload — then paints provenance + an auto-inferred chart + a result table +
-// a typewriter answer (answer-first order preserved).
+// (site_search.js). There is no standalone ask box: the search input doubles as
+// the ask input, and this module attaches an answer panel *under the same box*.
+// Flow: the user picks the "Ask the data" row (or, in ask-only mode, just hits
+// Enter); site_search.js fires a `dashdown:ask` DOM event; this module runs the
+// submit — POST /_dashdown/api/ask (staged SSE) — and paints the answer.
 //
-// This is the free-form sibling of the authored <Ask /> card (ask.js): it reuses
-// the same typewriter feel, the same chart-annotation ref chips, and the same
-// chart/table renderers, but the question is the operator's, not the author's.
+// v2 design: ONE INPUT, ONE ANSWER, ONE ACTION. The panel is a glance, not a
+// cockpit:
 //
-// Answer refinement (semantic answers only): the static provenance line becomes
-// an *interactive chip row* — metric / by / grain selects, removable filter
-// chips, and a "+ filter" popover. Editing a chip is treated as editing a query
-// (not a chat): it POSTs to /_dashdown/api/ask/execute with the edited spec and
-// `commentary:false`, repaints the chart + table, and marks the answer prose
-// *stale* (dimmed, with an "↻ Update commentary" button) rather than re-writing
-// it on every twiddle. A slim follow-up input at the panel bottom re-asks with
-// the whole session trail as context (`history`, oldest-first — the server keeps
-// the last few), and echoes the new question into the header omnibox so a
-// re-Enter re-asks it. The trail also drives a pill row at the panel top: each
-// ask/follow-up is a pill, and clicking an older one restores that answer
-// client-side (the payloads are held in the trail, so no server round-trip).
+//   topbar   ✦ AI · <provenance, muted> · ⤢ ✕
+//   answer   one or two typed sentences (form-sized server-side)
+//   evidence shaped by the server's display form — a headline number card
+//            ("value"), a chart with its rows folded behind a collapsed
+//            "Data · N rows" disclosure ("chart"), or the open table ("table")
+//   footer   [Add to page] + the follow-up input
+//
+// Refinement is LANGUAGE-ONLY: the follow-up field re-asks with the whole
+// session as context (`history`, oldest-first — the server keeps the last few)
+// and echoes the new question into the omnibox. There is no chip editor, no
+// trail pill row, no per-answer options — the session history still rides
+// invisibly as LLM context. (POST /_dashdown/api/ask/execute remains a
+// server-side programmatic API; this client no longer calls it.)
+//
+// "Add to page" adds EXACTLY what the panel shows (the display form picks the
+// kept elements; the panel is the preview — no menu) by POSTing to
+// /_dashdown/api/ask/keep; the dev server's watcher live-reloads the page and
+// page_edit.js flashes the new section. Typing an imperative ("add a KPI row
+// with revenue…") in the omnibox composes NEW content instead: site_search.js
+// fires `dashdown:compose`, one constrained LLM call plans validated elements,
+// and a plain-words preview (Add / Cancel) confirms before anything is written.
 //
 // Ask is gated server-side (the box's data-config `ask` flag comes from
-// `ask_enabled` — llm on ∧ ask on ∧ not embed), so this never wires up in static
-// builds or embeds. The panel is only built on user interaction, so a headless
-// print/screenshot run (which never asks) is untouched.
-//
-// The "Keep on this page" button (when `ask_keep` is on and the answer resolved
-// to a semantic metric or named query) POSTs to /_dashdown/api/ask/keep to append
-// the answer's chart to the current page's source markdown; the dev server's file
-// watcher then live-reloads the page. It keeps the *current edited* spec — the
-// keep footer always reads the latest /ask or /ask/execute payload.
+// `ask_enabled` — llm on ∧ ask on ∧ not embed), so this never wires up in
+// static builds or embeds. The panel is only built on user interaction, so a
+// headless print/screenshot run (which never asks) is untouched.
 
 "use strict";
 
@@ -59,12 +58,12 @@ import {
 } from "./ask.js";
 
 const _ASK_URL = "/_dashdown/api/ask";
-const _EXECUTE_URL = "/_dashdown/api/ask/execute";
 const _KEEP_URL = "/_dashdown/api/ask/keep";
+const _COMPOSE_URL = "/_dashdown/api/ask/compose";
+const _COMPOSE_APPLY_URL = "/_dashdown/api/ask/compose/apply";
 
 // localStorage key of the operator's recent questions (newest-first), read by
-// site_search.js's empty-focus dropdown; sessionStorage key prefix of the
-// persisted, payload-light session (keyed per path, below).
+// site_search.js's empty-focus dropdown.
 const _RECENT_KEY = "dashdown-recent-asks";
 
 /**
@@ -89,6 +88,106 @@ function pushRecent(question) {
   } catch (e) {
     /* private mode / quota — recents are best-effort */
   }
+}
+
+// Session-remembered open state of the chart form's "Data · N rows" disclosure,
+// so an operator who wants rows-with-every-chart opens it once per session.
+// Best-effort like the recents (private mode / quota errors are swallowed).
+const _DATA_OPEN_KEY = "dashdown-ask-data-open";
+
+function dataDisclosureOpen() {
+  try {
+    return window.sessionStorage.getItem(_DATA_OPEN_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function rememberDataOpen(open) {
+  try {
+    window.sessionStorage.setItem(_DATA_OPEN_KEY, open ? "1" : "0");
+  } catch (e) {
+    /* best-effort */
+  }
+}
+
+/**
+ * Pick the headline cell for a value-form answer: the sole column, else the
+ * column matching the resolved semantic metric (short-name match, mirroring the
+ * server's `_find_col`), else the first numeric column, else the first cell.
+ * @param {Object} payload
+ * @returns {{label: string, value: *}|null}
+ */
+function headlineCell(payload) {
+  const cols = payload.columns || [];
+  const row = (payload.rows || [])[0] || [];
+  if (!cols.length) return null;
+  if (cols.length === 1) return { label: cols[0], value: row[0] };
+  const detail = (payload.resolved || {}).detail || {};
+  const metric = String(detail.metric || "");
+  const short = metric.split(".").pop();
+  for (let i = 0; i < cols.length; i++) {
+    const c = String(cols[i]);
+    if (metric && (c === metric || c.split(".").pop() === short)) {
+      return { label: cols[i], value: row[i] };
+    }
+  }
+  for (let i = 0; i < cols.length; i++) {
+    if (typeof row[i] === "number") return { label: cols[i], value: row[i] };
+  }
+  return { label: cols[0], value: row[0] };
+}
+
+function formatHeadline(v) {
+  if (typeof v === "number") {
+    return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return v == null ? "—" : String(v);
+}
+
+// The display form of a payload — the server derives it; the fallback covers
+// older cached payloads that predate the field.
+function displayForm(payload) {
+  return (
+    (payload.display && payload.display.form) ||
+    (payload.chart ? "chart" : "table")
+  );
+}
+
+// One human line per validated compose-plan entry, for the plain-words preview
+// ("what will land on the page"). Derived from the SAME plan the apply endpoint
+// re-compiles, so the summary and the write can't disagree on substance.
+function describePlanEntry(entry) {
+  const short = (ref) => String(ref || "").split(".").pop().replace(/_/g, " ");
+  const arr = (v) => (Array.isArray(v) ? v : []); // model output — never trust shape
+  const el = String((entry && entry.element) || "").toLowerCase();
+  if (el === "heading") return `A heading — “${entry.text || ""}”`;
+  if (el === "prose") return "A short note";
+  if (el === "kpi_row") {
+    const names = arr(entry.metrics).map(short).join(", ");
+    return `Headline numbers: ${names}`;
+  }
+  if (el === "value") {
+    return `A headline number: ${short(entry.metric) || entry.query || ""}`;
+  }
+  if (el === "chart") {
+    const what = entry.query
+      ? String(entry.query)
+      : `${short(entry.metric)} by ${short(entry.by)}`;
+    // An untyped semantic chart compiles to a concrete line/bar pick
+    // server-side — don't claim "auto", just say "chart".
+    return `A ${entry.chart ? entry.chart + " " : ""}chart of ${what}`;
+  }
+  if (el === "table") {
+    return `A table of ${
+      entry.query ? String(entry.query) : `${short(entry.metric)} by ${short(entry.by)}`
+    }`;
+  }
+  if (el === "list") {
+    const cols = arr(entry.columns).map(short).join(", ");
+    return `A list of ${cols}${entry.limit ? ` (latest ${entry.limit})` : ""}`;
+  }
+  return "An element";
 }
 
 /** ✦ AI badge markup — mirrors the authored ask card's provenance sparkle. */
@@ -117,7 +216,8 @@ function mkDiv(className) {
 /**
  * Wire the ask surface onto one omnibox (a `[data-async-component="site-search"]`
  * element whose config has `ask: true`). Builds the answer panel, attaches it
- * under the box, and listens for the `dashdown:ask` event site_search.js fires.
+ * under the box, and listens for the `dashdown:ask` / `dashdown:compose` events
+ * site_search.js fires.
  * @param {HTMLElement} el - The `.dashdown-site-search` wrapper.
  */
 function initOne(el) {
@@ -134,8 +234,7 @@ function initOne(el) {
   if (!input) return;
 
   // The answer panel isn't in the template (the omnibox ships as a search box);
-  // build it and anchor it under the same box. It reuses the ask-box panel
-  // chrome; a scoping class widens it to the search slot (see dashdown.css).
+  // build it and anchor it under the same box.
   const panel = document.createElement("div");
   panel.className = "dashdown-ask-box-panel dashdown-ask-answer-panel";
   panel.setAttribute("role", "dialog");
@@ -156,78 +255,27 @@ function initOne(el) {
     liveRegion.textContent = msg || "";
   };
 
-  const MAX_TRAIL = 6; // cap the session trail; drop-oldest beyond this
+  const MAX_TRAIL = 6; // cap the session context; drop-oldest beyond this
 
-  let requestSeq = 0; // drop responses a newer question/execute superseded
+  let requestSeq = 0; // drop responses a newer question superseded
   let abortController = null;
   let dismissed = false; // set by close(); guards late async continuations from
   // re-opening the panel (a response landing after close never auto-opens). A
-  // new submit/execute clears it.
+  // new submit clears it.
   let expanded = false; // panel promoted into the expand <dialog>
   let expandDialog = null; // the live <dialog> while expanded, else null
   let hasAnswer = false; // panel holds a rendered answer (for reopen)
-  // Session trail: the ask → follow-up chain, oldest-first. Each entry is
-  // `{question, payload}` where payload is the full /ask (or /ask/execute)
-  // response the operator is looking at. A fresh header ask starts a new
-  // session (clears the trail); a follow-up appends; a chip edit / ↻ commentary
-  // updates the CURRENT (last) entry's payload in place; a trail-pill click
-  // restores an older entry (truncating everything after it). All the
-  // "current answer" reads (keep, refinement, follow-up context) go through the
-  // last entry via currentEntry/currentPayload/currentQuestion.
+  let suppressReopen = false; // one-shot: a programmatic input.focus() right
+  // after ✕-close must not fire the reopen listener (Chromium moves focus to
+  // the button on mousedown, so the omnibox focus event lands synchronously).
+  // Session trail: the ask → follow-up chain, oldest-first, each entry
+  // `{question, payload}`. INVISIBLE in the UI — it exists so a follow-up can
+  // send the session as `history` context and so "Add to page" reads the
+  // current (last) answer. A fresh header ask starts a new session.
   let trail = []; // [{question, payload}]
   // The live panel chart, so a theme toggle can dispose + re-init it (it's not
   // in chart.js's registry, so onThemeChange there won't reach it).
   let chartState = null; // { card, container, config }
-
-  // Persist-light session (4A-b): a per-path sessionStorage snapshot of the
-  // trail carrying ONLY question + resolved {kind, detail} + chart (never rows /
-  // columns / answer text — quota safety; the trail cap already bounds it). On
-  // reload it powers site_search.js's "Continue" row via el.dataset.askResume; a
-  // restored ask re-asks through the normal path and rebuilds a FRESH session —
-  // v1 does NOT reconstruct trail pills from these payload-less entries.
-  const _SESSION_KEY = "dashdown-ask-session:" + window.location.pathname;
-
-  function persistSession() {
-    try {
-      const entries = trail.map((e) => ({
-        question: e.question,
-        resolved: {
-          kind: e.payload && e.payload.resolved ? e.payload.resolved.kind : undefined,
-          detail: e.payload && e.payload.resolved ? e.payload.resolved.detail : undefined,
-        },
-        chart: (e.payload && e.payload.chart) || null,
-      }));
-      window.sessionStorage.setItem(
-        _SESSION_KEY,
-        JSON.stringify({ v: 1, entries })
-      );
-    } catch (e) {
-      /* private mode / quota — the session snapshot is best-effort */
-    }
-  }
-
-  // Expose (or clear) the restored session's last question to the empty-focus
-  // dropdown via a data attribute site_search.js reads (a decoupled channel — no
-  // import either way). Cleared once a live answer exists (the answer panel
-  // reopens on focus, so a "Continue" row would be redundant). site_search fires
-  // "dashdown:ask-resume" before rendering that dropdown to pull a fresh value.
-  function refreshResume() {
-    if (hasAnswer) {
-      delete el.dataset.askResume;
-      return;
-    }
-    try {
-      const raw = window.sessionStorage.getItem(_SESSION_KEY);
-      const stored = raw ? JSON.parse(raw) : null;
-      const entries = stored && Array.isArray(stored.entries) ? stored.entries : [];
-      const last = entries.length ? entries[entries.length - 1] : null;
-      const q = last && typeof last.question === "string" ? last.question.trim() : "";
-      if (q) el.dataset.askResume = q;
-      else delete el.dataset.askResume;
-    } catch (e) {
-      delete el.dataset.askResume;
-    }
-  }
 
   const currentEntry = () => (trail.length ? trail[trail.length - 1] : null);
   const currentPayload = () => {
@@ -238,28 +286,15 @@ function initOne(el) {
     const e = currentEntry();
     return e ? e.question : "";
   };
-  const updateCurrentPayload = (payload) => {
-    if (trail.length) trail[trail.length - 1].payload = payload;
-    persistSession();
-  };
 
-  // Rebuilt on each answer render (buildAnswerSkeleton); the refinement paths
-  // target these stable slots instead of the whole panel.
-  let slots = null; // { trail, prov, err, bodyWrap, chart, table, keep, followup }
+  // Rebuilt on each answer render (buildAnswerSkeleton); later paints target
+  // these stable slots instead of the whole panel.
+  let slots = null; // { err, bodyWrap, chart, table, keep, followup }
   let answerBody = null; // the .dashdown-ask-body that holds the typed prose
-  let updateBtn = null; // "↻ Update commentary" (revealed when prose is stale)
   let followupInput = null; // the bottom "refine or follow-up" field
   let followupBusyRow = null; // slim inline busy row while a follow-up loads
-  let chipDebounceTimer = null; // coalesces a burst of chip edits (see 15A)
-
-  // Semantic-refinement state. `chipState` is the editable spec the chip row
-  // builds from; `semanticOptions` is the payload's option lists (measures,
-  // dimensions, grains, the time dimension). Both are reset by renderChips.
-  let chipState = null;
-  let semanticOptions = null;
 
   function setBusy(busy) {
-    el.classList.toggle("dashdown-ask-answer-busy", busy);
     input.setAttribute("aria-busy", busy ? "true" : "false");
   }
 
@@ -282,7 +317,7 @@ function initOne(el) {
   function close() {
     // Abort any in-flight request and mark the panel dismissed so a response
     // that lands after this can't re-open it (the async continuations all
-    // check `dismissed`). A new submit/execute clears the flag.
+    // check `dismissed`). A new submit clears the flag.
     if (abortController) abortController.abort();
     setBusy(false);
     dismissed = true;
@@ -298,7 +333,6 @@ function initOne(el) {
   function pushTrail(entry) {
     trail.push(entry);
     if (trail.length > MAX_TRAIL) trail = trail.slice(trail.length - MAX_TRAIL);
-    persistSession();
     return entry;
   }
 
@@ -328,6 +362,10 @@ function initOne(el) {
     dlg.showModal();
     const inst = chartInstance();
     if (inst) inst.resize();
+    // The bigger view shows the data rows open (a programmatic open, so the
+    // operator's remembered disclosure preference is untouched).
+    const details = panel.querySelector(".dashdown-ask-box-data");
+    if (details) details.open = true;
     // Native close (Collapse button, Esc, or close()) moves the panel back
     // under the omnibox anchor in its original position and resizes the chart.
     dlg.addEventListener("close", () => {
@@ -338,6 +376,9 @@ function initOne(el) {
       updateExpandBtn();
       const back = chartInstance();
       if (back) back.resize();
+      // Back to compact: the disclosure returns to the remembered preference.
+      const det = panel.querySelector(".dashdown-ask-box-data");
+      if (det) det.open = dataDisclosureOpen();
     });
   }
 
@@ -375,108 +416,84 @@ function initOne(el) {
     hasAnswer = false;
     slots = null;
     answerBody = null;
-    updateBtn = null;
     followupInput = null;
     followupBusyRow = null;
   }
 
-  // Build a shareable deep link to the current question: this page's URL with a
-  // `?_ask=<question>` param added (existing non-_ask params preserved). Opening
-  // it prefills the omnibox but never auto-submits (see the init handler).
-  function copyLinkUrl() {
-    const params = new URLSearchParams(window.location.search);
-    params.set("_ask", currentQuestion());
-    const qs = params.toString();
-    return (
-      window.location.origin +
-      window.location.pathname +
-      (qs ? "?" + qs : "")
-    );
-  }
-
-  // Copy the deep link to the clipboard with brief "✓" feedback on the button.
-  function onCopyLink() {
-    const btn = panel.querySelector(".dashdown-ask-box-copy");
-    const flashDone = () => {
-      if (!btn) return;
-      btn.textContent = "✓";
-      btn.classList.add("dashdown-ask-box-copy-done");
-      setTimeout(() => {
-        btn.textContent = "🔗";
-        btn.classList.remove("dashdown-ask-box-copy-done");
-      }, 1500);
-    };
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(copyLinkUrl()).then(flashDone, () => {});
-      }
-    } catch (e) {
-      /* clipboard unavailable — no-op */
-    }
-  }
-
-  // Topbar (badge + copy + expand + close) shared by the transient states and
-  // the full answer. buildTopbar reads `expanded` so a rebuild while expanded
-  // keeps the Collapse affordance. The copy-link button is offered only once a
-  // question exists (the transient loading shell has an empty trail).
-  function buildTopbar() {
+  // Topbar: ✦ badge · one muted provenance line (the trust surface, truncating,
+  // full text on its tooltip) · expand + close. buildTopbar reads `expanded` so
+  // a rebuild while expanded keeps the Collapse affordance. `minimal` (the
+  // transient loading/error/notice/compose shells) drops the badge and expand —
+  // an HTTP error isn't "AI-generated" and "Thinking…" has nothing to enlarge.
+  function buildTopbar(provenance, minimal) {
     const header = document.createElement("div");
     header.className = "dashdown-ask-box-topbar";
     const expandGlyph = expanded ? "⤡" : "⤢";
     const expandLabel = expanded ? "Collapse answer" : "Expand answer";
-    const showCopy = !!currentQuestion();
     header.innerHTML =
-      _AI_BADGE +
-      '<span class="dashdown-ask-box-topbar-actions">' +
-      (showCopy
-        ? '<button type="button" class="dashdown-ask-box-copy" aria-label="Copy link to this question">🔗</button>'
+      (minimal ? "" : _AI_BADGE) +
+      (provenance
+        ? `<span class="dashdown-ask-box-topbar-prov" title="${esc(provenance)}">${esc(provenance)}</span>`
         : "") +
-      `<button type="button" class="dashdown-ask-box-expand" aria-label="${expandLabel}">${expandGlyph}</button>` +
+      '<span class="dashdown-ask-box-topbar-actions">' +
+      (minimal
+        ? ""
+        : `<button type="button" class="dashdown-ask-box-expand" aria-label="${expandLabel}">${expandGlyph}</button>`) +
       '<button type="button" class="dashdown-ask-box-close" aria-label="Close answer">✕</button>' +
       "</span>";
-    const copyBtn = header.querySelector(".dashdown-ask-box-copy");
-    if (copyBtn) copyBtn.addEventListener("click", onCopyLink);
-    header
-      .querySelector(".dashdown-ask-box-expand")
-      .addEventListener("click", toggleExpand);
+    const expandBtn = header.querySelector(".dashdown-ask-box-expand");
+    if (expandBtn) expandBtn.addEventListener("click", toggleExpand);
     header
       .querySelector(".dashdown-ask-box-close")
       .addEventListener("click", () => {
         close();
+        // Return focus to the omnibox WITHOUT the focus listener re-opening
+        // the panel we just closed (the focus event fires synchronously here).
+        suppressReopen = true;
         input.focus();
+        suppressReopen = false;
       });
     return header;
   }
 
-  // Minimal shell for transient states (loading / error / notice): topbar only.
+  // Minimal shell for transient states (loading / error / notice / compose):
+  // a close-only topbar, no AI badge, no expand. Resets the dialog's accessible
+  // name (the compose preview overrides it after calling this).
   function panelShell() {
     resetPanel();
-    panel.appendChild(buildTopbar());
+    panel.setAttribute("aria-label", "Answer");
+    panel.appendChild(buildTopbar("", true));
     open();
     return panel;
   }
 
-  // Full answer skeleton: topbar + the stable slots the refinement paths target.
-  function buildAnswerSkeleton() {
+  // Full answer skeleton: topbar (with the payload's provenance) + the stable
+  // slots later paints target. A muted question line rides along but is shown
+  // by CSS only inside the expanded <dialog> — the compact panel sits under the
+  // omnibox that already displays the question; the modal covers it.
+  function buildAnswerSkeleton(payload) {
     resetPanel();
-    panel.appendChild(buildTopbar());
+    panel.setAttribute("aria-label", "Answer");
+    const provenance =
+      (payload && payload.resolved && payload.resolved.kind !== "none"
+        ? payload.resolved.provenance
+        : "") || "";
+    panel.appendChild(buildTopbar(provenance));
+    const questionText = (payload && payload.question) || currentQuestion();
+    if (questionText) {
+      const q = mkDiv("dashdown-ask-box-question");
+      q.textContent = questionText;
+      panel.appendChild(q);
+    }
 
     slots = {};
-    slots.trail = mkDiv("dashdown-ask-box-trail");
-    slots.trail.hidden = true;
-    slots.prov = mkDiv("dashdown-ask-box-prov");
-    slots.err = mkDiv("dashdown-ask-error dashdown-ask-box-message dashdown-ask-box-inline-error");
+    slots.err = mkDiv(
+      "dashdown-ask-error dashdown-ask-box-message dashdown-ask-box-inline-error"
+    );
     slots.err.hidden = true;
 
     slots.bodyWrap = mkDiv("dashdown-ask-box-body-wrap");
-    updateBtn = document.createElement("button");
-    updateBtn.type = "button";
-    updateBtn.className = "dashdown-ask-box-update";
-    updateBtn.hidden = true;
-    updateBtn.textContent = "↻ Update commentary";
-    updateBtn.addEventListener("click", onUpdateCommentary);
     answerBody = mkDiv("dashdown-ask-body dashdown-ask-box-body");
-    slots.bodyWrap.appendChild(updateBtn);
     slots.bodyWrap.appendChild(answerBody);
 
     slots.chart = mkDiv("dashdown-ask-box-chart-slot");
@@ -484,8 +501,6 @@ function initOne(el) {
     slots.keep = mkDiv("dashdown-ask-box-keep-slot");
     slots.followup = mkDiv("dashdown-ask-box-followup-slot");
 
-    panel.appendChild(slots.trail);
-    panel.appendChild(slots.prov);
     panel.appendChild(slots.err);
     panel.appendChild(slots.bodyWrap);
     panel.appendChild(slots.chart);
@@ -506,6 +521,9 @@ function initOne(el) {
     panel.appendChild(body);
   }
 
+  // Error/notice shells deliberately DON'T set hasAnswer: an error card is not
+  // worth re-showing on the next omnibox focus — Enter re-asks instead (the
+  // retry path; site_search.js falls through to ask when no row is active).
   function renderError(message) {
     panelShell();
     const div = document.createElement("div");
@@ -513,7 +531,6 @@ function initOne(el) {
     div.textContent = message || "Ask request failed";
     panel.appendChild(div);
     announce("Ask failed: " + (message || "Ask request failed"));
-    hasAnswer = true;
   }
 
   function renderNotice(message) {
@@ -523,7 +540,6 @@ function initOne(el) {
     div.textContent = message || "Ask is unavailable";
     panel.appendChild(div);
     announce(message || "Ask is unavailable");
-    hasAnswer = true;
   }
 
   // A follow-up keeps the current answer fully visible while it loads: no
@@ -549,37 +565,35 @@ function initOne(el) {
     }
   }
 
-  // Inline (non-destructive) error for the refinement paths — a 429/rate-limit
-  // or an invalid-spec 400 shows here without blowing away the answer.
-  function showExecError(message) {
+  // Inline (non-destructive) error slot — a follow-up failure (429 / notice /
+  // network) shows here without blowing away the visible answer.
+  function showInlineError(message) {
     if (!slots || !slots.err) return;
-    slots.err.textContent = message || "Refine request failed";
+    slots.err.textContent = message || "Ask request failed";
     slots.err.hidden = false;
-    announce("Ask failed: " + (message || "Refine request failed"));
-  }
-  function clearExecError() {
-    if (!slots || !slots.err) return;
-    slots.err.textContent = "";
-    slots.err.hidden = true;
+    announce("Ask failed: " + (message || "Ask request failed"));
   }
 
   // Paint (or repaint) the panel chart, then suppress the y-axis name ECharts
-  // draws above the axis: the compact panel has no headroom for it (it clips
-  // against the provenance line) and the provenance + table header already name
-  // the metric. This is the single place the suppression lives, so renderChart,
-  // the repaint() shim, and the theme-change re-init can't drift out of sync
-  // (a theme toggle re-inits the chart, which would otherwise bring it back).
+  // draws above the axis: the compact panel has no headroom for it and the
+  // topbar + table header already name the metric. Single place, so renderChart,
+  // the repaint() shim, and the theme-change re-init can't drift out of sync.
+  // ONLY cartesian types have a yAxis — merging one into an axis-less chart
+  // (pie/funnel/treemap, the chart-preference answers) throws inside ECharts
+  // ("reading 'coordinateSystem'"), which used to knock the whole chart out
+  // and drop the panel to its table fallback.
+  const _CARTESIAN_TYPES = ["line", "bar", "scatter"];
+
   function paintPanelChart(card, records, config) {
     updateChart(card, records, config);
-    if (card._echarts_instance) {
+    if (_CARTESIAN_TYPES.includes(config.type) && card._echarts_instance) {
       card._echarts_instance.setOption({ yAxis: { name: "" } });
     }
   }
 
   // Build a chart host that speaks the same _chartConfig/_echarts_instance/
   // _chartInstance contract the annotation helpers expect, so setChartAnnotations
-  // + emphasizeChartAnnotation work unchanged against it. Appended to `parent`
-  // (a stable chart slot), so a repaint can clear the slot and rebuild.
+  // + emphasizeChartAnnotation work unchanged against it.
   function renderChart(payload, parent) {
     const records = recordsOf(payload);
     const spec = payload.chart || {};
@@ -587,7 +601,9 @@ function initOne(el) {
       type: spec.type,
       x: spec.x,
       y: spec.y,
-      title: spec.title || "",
+      // The generated answer title ("Channel share") headlines the chart — the
+      // same text a kept section will wear, so panel and page agree.
+      title: payload.title || spec.title || "",
     };
     // The server ships a concrete chart type, which skips chart.js's
     // resolveAutoConfig — where an auto-chart would derive sort_by for a temporal
@@ -597,9 +613,13 @@ function initOne(el) {
     // A series-split answer (by + series, e.g. "revenue by week per channel")
     // carries the splitting column — chart.js's series_by config key.
     if (spec.series_by) config.series_by = spec.series_by;
+    // Value-keyed types (heatmap: cell magnitude; sankey: flow width) carry the
+    // metric column under `value` — x/y are the two groupings there.
+    if (spec.value) config.value = spec.value;
     const card = document.createElement("div");
     card.className = "dashdown-chart dashdown-ask-box-chart";
-    card.innerHTML = '<div class="dashdown-chart-container dashdown-ask-box-chart-container"></div>';
+    card.innerHTML =
+      '<div class="dashdown-chart-container dashdown-ask-box-chart-container"></div>';
     parent.appendChild(card);
     const container = card.querySelector(".dashdown-chart-container");
 
@@ -640,97 +660,189 @@ function initOne(el) {
     });
   }
 
-  // Repaint a mounted chart in place from a fresh payload of the SAME type: keep
-  // the ECharts instance (no dispose+init flicker) and drive it via setOption,
-  // updating the config fields the panel threads. Returns the existing card.
-  function reuseChart(payload) {
-    const card = chartState.card;
-    const config = card._chartConfig;
-    const spec = payload.chart || {};
-    // type is unchanged (that's the reuse gate) — refresh the rest in place.
-    config.x = spec.x;
-    config.y = spec.y;
-    config.title = spec.title || "";
-    if (spec.sort_by) config.sort_by = spec.sort_by;
-    else delete config.sort_by;
-    if (spec.series_by) config.series_by = spec.series_by;
-    else delete config.series_by;
-    paintPanelChart(card, recordsOf(payload), config);
-    // Re-apply (or clear) annotations for the fresh payload; setChartAnnotations
-    // with [] clears any stale marks left from the prior spec.
-    const anns = Array.isArray(payload.annotations) ? payload.annotations : [];
-    const hadAnns =
-      Array.isArray(config.annotations) && config.annotations.length;
-    if (anns.length || hadAnns) setChartAnnotations(card, anns);
-    return card;
+  // A capped result set flags how much was withheld (server: `truncated` +
+  // `total_rows`). Re-rendered with each repaint, so a follow-up that returns a
+  // full set drops the note.
+  function appendTruncationNote(payload, parent) {
+    if (!payload.truncated) return;
+    const foot = mkDiv("dashdown-ask-box-truncated");
+    const shown = (payload.rows && payload.rows.length) || 0;
+    const total = Number(payload.total_rows);
+    foot.textContent =
+      `Showing first ${shown.toLocaleString()} of ` +
+      `${(isFinite(total) ? total : shown).toLocaleString()} rows`;
+    parent.appendChild(foot);
   }
 
-  // Rebuild the chart + table slots from a payload. Returns the chart card (or
-  // null when the payload carries no chart / no data) so the answer's annotation
-  // ref chips can wire against it. Shared by the first render and every refine.
-  // A same-type repaint reuses the mounted ECharts instance (setOption); only a
-  // type change / no-chart payload disposes and rebuilds.
+  // The headline card for a value-form answer: the number, big, with the
+  // generated title (else the metric name) as caption. No chart, no table —
+  // the answer IS the number.
+  function renderValueCard(payload, parent) {
+    const cell = headlineCell(payload);
+    if (!cell) return;
+    const card = mkDiv("dashdown-ask-box-value");
+    const num = document.createElement("div");
+    num.className = "dashdown-ask-box-value-number";
+    num.textContent = formatHeadline(cell.value);
+    const label = document.createElement("div");
+    label.className = "dashdown-ask-box-value-label";
+    label.textContent =
+      payload.title || String(cell.label).split(".").pop().replace(/_/g, " ");
+    card.appendChild(num);
+    card.appendChild(label);
+    parent.appendChild(card);
+  }
+
+  // A row of counter cards — the "counters" display form. Two shapes: a single
+  // row renders one card per NUMERIC column (a KPI set: revenue · orders ·
+  // aov); a small breakdown renders one card per ROW, labeled by its first
+  // non-numeric column ("as counters" on revenue by channel). Capped at 12
+  // cards (the server's viability rule), full data in the disclosure below.
+  function renderCountersRow(payload, parent) {
+    const cols = payload.columns || [];
+    const rows = payload.rows || [];
+    if (!cols.length || !rows.length) return;
+    const numericCol = (i) => rows.some((r) => typeof r[i] === "number");
+
+    const wrap = mkDiv("dashdown-ask-box-counters");
+    const addCard = (value, label) => {
+      if (wrap.children.length >= 12) return;
+      const card = mkDiv("dashdown-ask-box-counter");
+      const num = mkDiv("dashdown-ask-box-counter-number");
+      num.textContent = formatHeadline(value);
+      const cap = mkDiv("dashdown-ask-box-counter-label");
+      cap.textContent = String(label || "").split(".").pop().replace(/_/g, " ");
+      card.appendChild(num);
+      card.appendChild(cap);
+      wrap.appendChild(card);
+    };
+
+    if (rows.length === 1) {
+      cols.forEach((c, i) => {
+        if (numericCol(i)) addCard(rows[0][i], c);
+      });
+    } else {
+      const numIdx = cols.findIndex((_, i) => numericCol(i));
+      const labelIdx = cols.findIndex((_, i) => i !== numIdx && !numericCol(i));
+      rows.forEach((r) => {
+        addCard(r[numIdx], labelIdx >= 0 ? r[labelIdx] : "");
+      });
+    }
+    if (wrap.children.length) parent.appendChild(wrap);
+  }
+
+  // The chart form's evidence: the data table collapsed behind a native
+  // <details> disclosure whose summary carries the row count (trust survives
+  // the fold). The table renders lazily on first open. The open state persists
+  // per session (an explicit summary click only — a programmatic open from the
+  // expanded view never overwrites the operator's preference).
+  function renderDataDisclosure(payload) {
+    const details = document.createElement("details");
+    details.className = "dashdown-ask-box-data";
+    const shown = (payload.rows && payload.rows.length) || 0;
+    const total = payload.truncated ? Number(payload.total_rows) : shown;
+    const count = isFinite(total) ? total : shown;
+    const summary = document.createElement("summary");
+    summary.className = "dashdown-ask-box-data-summary";
+    summary.textContent =
+      `Data · ${count.toLocaleString()} row${count === 1 ? "" : "s"}`;
+    details.appendChild(summary);
+    const body = mkDiv("dashdown-ask-box-data-body");
+    details.appendChild(body);
+
+    let rendered = false;
+    details.addEventListener("toggle", () => {
+      if (!details.open || rendered) return;
+      rendered = true;
+      try {
+        renderTable(payload, body);
+        appendTruncationNote(payload, body);
+      } catch (e) {
+        console.error("dashdown ask box: table render failed", e);
+      }
+    });
+    // The click fires before `open` flips, so the new state is the negation.
+    // (Keyboard activation on a summary synthesizes a click, so this covers it.)
+    summary.addEventListener("click", () => rememberDataOpen(!details.open));
+    if (expanded || dataDisclosureOpen()) details.open = true;
+    slots.table.appendChild(details);
+  }
+
+  // Rebuild the evidence slots from a payload, shaped by its display form:
+  // "value" → a headline number card (with the underlying cells behind the
+  // disclosure when there's more than the one headline); "chart" → the chart
+  // with the table collapsed behind a "Data · N rows" disclosure; "table" → the
+  // table itself, open (a list answer IS its rows). Every paint follows a
+  // skeleton rebuild, so the chart is always disposed + freshly initialized.
+  // Returns the chart card (or null) so the answer's annotation ref chips can
+  // wire against it; a chart render failure clears its slot and falls back to
+  // the open table ("Add to page" reads the DOM, so what lands matches).
   function repaintChartAndTable(payload) {
     slots.table.innerHTML = "";
-    const spec = payload.chart || {};
     const hasData = payload.columns && payload.rows && payload.rows.length;
-    const canReuse =
-      chartState &&
-      chartState.card &&
-      chartState.card._echarts_instance &&
-      payload.chart &&
-      hasData &&
-      chartState.config &&
-      chartState.config.type === spec.type;
+    const form = displayForm(payload);
+    disposeChart();
+    slots.chart.innerHTML = "";
+
+    // Zero rows: one muted note, no chart/value/table chrome.
+    if (!hasData) {
+      if (payload.columns && payload.rows) {
+        const none = mkDiv("dashdown-ask-box-nodata");
+        none.textContent = "No matching data";
+        slots.table.appendChild(none);
+      }
+      return null;
+    }
+
+    if (form === "value") {
+      renderValueCard(payload, slots.chart);
+      // More than the one headline cell? Keep the evidence reachable — the
+      // same disclosure the chart form uses (a true 1×1 result stays bare).
+      if (payload.columns.length > 1 || payload.rows.length > 1) {
+        renderDataDisclosure(payload);
+      }
+      return null;
+    }
+
+    if (form === "counters") {
+      renderCountersRow(payload, slots.chart);
+      renderDataDisclosure(payload);
+      return null;
+    }
 
     let chartCard = null;
-    if (canReuse) {
+    if (form === "chart" && payload.chart) {
       try {
-        chartCard = reuseChart(payload);
+        chartCard = renderChart(payload, slots.chart);
       } catch (e) {
-        console.error("dashdown ask box: chart repaint failed", e);
+        console.error("dashdown ask box: chart render failed", e);
+        // A partially-built card must not linger — elementsForKeep reads the
+        // DOM to decide chart-vs-table, so the slot has to reflect the failure.
         disposeChart();
         slots.chart.innerHTML = "";
         chartCard = null;
       }
-    } else {
-      disposeChart();
-      slots.chart.innerHTML = "";
-      if (payload.chart && hasData) {
-        try {
-          chartCard = renderChart(payload, slots.chart);
-        } catch (e) {
-          console.error("dashdown ask box: chart render failed", e);
-          chartCard = null;
-        }
-      }
     }
-    if (hasData) {
+
+    // Evidence: beside a chart the table folds into the disclosure; a
+    // table-form answer (or a failed chart render) shows the table open.
+    if (chartCard) {
+      renderDataDisclosure(payload);
+    } else {
       try {
         renderTable(payload, slots.table);
+        appendTruncationNote(payload, slots.table);
       } catch (e) {
         console.error("dashdown ask box: table render failed", e);
-      }
-      // A capped result set flags how much was withheld (server: `truncated` +
-      // `total_rows`). Re-rendered with each repaint (the table slot is cleared
-      // above), so a refine that returns a full set drops the note.
-      if (payload.truncated) {
-        const foot = mkDiv("dashdown-ask-box-truncated");
-        const shown = (payload.rows && payload.rows.length) || 0;
-        const total = Number(payload.total_rows);
-        foot.textContent =
-          `Showing first ${shown.toLocaleString()} of ` +
-          `${(isFinite(total) ? total : shown).toLocaleString()} rows`;
-        slots.table.appendChild(foot);
       }
     }
     return chartCard;
   }
 
   // Type the answer out (the shared ask.js typewriter cadence) into `bodyEl`,
-  // then swap in the sanitized answer_html and wire its ref chips. `skipTypewriter`
-  // (restoring a stored answer from the trail) short-circuits to the final HTML;
-  // typewriterInto itself handles the reduced-motion / no-words fast path.
+  // then swap in the sanitized answer_html and wire its ref chips.
+  // `skipTypewriter` (restoring an already-read answer, e.g. compose Cancel)
+  // paints the final HTML instantly.
   function renderAnswer(payload, chartCard, seq, bodyEl, skipTypewriter) {
     bodyEl.innerHTML = "";
 
@@ -749,437 +861,53 @@ function initOne(el) {
     });
   }
 
-  // ---- Semantic refinement: the interactive provenance chip row -----------
+  // ---- Add to page ---------------------------------------------------------
 
-  // Provenance region: the interactive chip row for a semantic answer (when the
-  // payload carries `semantic_options`), else the static provenance text a query
-  // answer keeps as before.
-  function renderProvenance(payload) {
-    if (!slots) return;
-    slots.prov.innerHTML = "";
-    const resolved = payload.resolved || {};
-    if (resolved.kind === "semantic" && payload.semantic_options) {
-      renderChips(payload);
-    } else if (resolved.provenance && resolved.kind !== "none") {
-      // An unresolved answer's provenance is "unresolved: <reason>" — the exact
-      // text the body already shows. Skip the redundant line.
-      const prov = document.createElement("div");
-      prov.className = "dashdown-ask-box-provenance";
-      prov.textContent = resolved.provenance;
-      slots.prov.appendChild(prov);
-    }
-  }
-
-  // A native <select> styled chip-like (keyboard/a11y for free), captioned with
-  // the field it edits. `options` is [{value, text}]; `onChange(value)` fires.
-  function makeChipSelect(label, options, value, onChange) {
-    const wrap = document.createElement("label");
-    wrap.className = "dashdown-ask-chip dashdown-ask-chip-select";
-    const cap = document.createElement("span");
-    cap.className = "dashdown-ask-chip-label";
-    cap.textContent = label;
-    const sel = document.createElement("select");
-    sel.className = "dashdown-ask-chip-control";
-    sel.setAttribute("aria-label", label);
-    for (const opt of options) {
-      const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.text;
-      if (opt.value === value) o.selected = true;
-      sel.appendChild(o);
-    }
-    sel.addEventListener("change", () => onChange(sel.value));
-    wrap.appendChild(cap);
-    wrap.appendChild(sel);
-    return wrap;
-  }
-
-  // A removable filter chip: "dim: v1, v2 ×".
-  function makeFilterChip(dim, values) {
-    const chip = document.createElement("span");
-    chip.className = "dashdown-ask-chip dashdown-ask-chip-filter";
-    const txt = document.createElement("span");
-    txt.className = "dashdown-ask-chip-filter-text";
-    txt.textContent = `${dim}: ${values.join(", ")}`;
-    const x = document.createElement("button");
-    x.type = "button";
-    x.className = "dashdown-ask-chip-remove";
-    x.setAttribute("aria-label", `Remove filter ${dim}`);
-    x.textContent = "×";
-    x.addEventListener("click", () => {
-      delete chipState.filters[dim];
-      scheduleChipChange();
-    });
-    chip.appendChild(txt);
-    chip.appendChild(x);
-    return chip;
-  }
-
-  // The "+ filter" chip: a button toggling a small popover with a dimension
-  // select, a comma-separated value input, and Add.
-  function makeAddFilterChip(dims) {
-    const wrap = document.createElement("span");
-    wrap.className = "dashdown-ask-chip dashdown-ask-chip-add";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "dashdown-ask-chip-add-btn";
-    btn.textContent = "+ filter";
-    btn.setAttribute("aria-haspopup", "true");
-    btn.setAttribute("aria-expanded", "false");
-
-    const pop = mkDiv("dashdown-ask-filter-pop");
-    pop.hidden = true;
-    const sel = document.createElement("select");
-    sel.className = "dashdown-ask-filter-pop-dim";
-    sel.setAttribute("aria-label", "Filter dimension");
-    for (const d of dims) {
-      const o = document.createElement("option");
-      o.value = d;
-      o.textContent = d;
-      sel.appendChild(o);
-    }
-    const val = document.createElement("input");
-    val.type = "text";
-    val.className = "dashdown-ask-filter-pop-val";
-    val.placeholder = "value, value…";
-    val.setAttribute("aria-label", "Filter values (comma-separated)");
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "dashdown-ask-filter-pop-add";
-    add.textContent = "Add";
-
-    const closePop = () => {
-      pop.hidden = true;
-      btn.setAttribute("aria-expanded", "false");
-    };
-    const applyAdd = () => {
-      const dim = sel.value;
-      const values = val.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      closePop();
-      if (!dim || !values.length) return;
-      chipState.filters[dim] = values;
-      scheduleChipChange();
-    };
-
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const show = pop.hidden;
-      pop.hidden = !show;
-      btn.setAttribute("aria-expanded", String(show));
-      if (show) val.focus();
-    });
-    add.addEventListener("click", applyAdd);
-    val.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        applyAdd();
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closePop();
-        btn.focus();
-      }
-    });
-    // Clicks inside the popover stay inside it (don't reach the panel-close
-    // document handler, and don't count as an outside click).
-    pop.addEventListener("click", (ev) => ev.stopPropagation());
-
-    pop.appendChild(sel);
-    pop.appendChild(val);
-    pop.appendChild(add);
-    wrap.appendChild(btn);
-    wrap.appendChild(pop);
-    return wrap;
-  }
-
-  // Build the chip row from a semantic payload and seed `chipState` from its
-  // resolution detail. Also keeps the muted provenance text line beneath the
-  // chips (the trust surface) so the provenance node is always present.
-  function renderChips(payload) {
-    const opts = payload.semantic_options || {};
-    const detail = (payload.resolved && payload.resolved.detail) || {};
-    semanticOptions = opts;
-    chipState = {
-      model: opts.model || detail.model || "",
-      metric: detail.metric || "",
-      by: detail.by || null,
-      series: detail.series || null,
-      grain: detail.grain || null,
-      chart: detail.chart || "",
-      filters: {},
-    };
-    const rawFilters = detail.filters || {};
-    for (const k of Object.keys(rawFilters)) {
-      const v = rawFilters[k];
-      chipState.filters[k] = Array.isArray(v) ? v.slice() : [String(v)];
-    }
-
-    const row = mkDiv("dashdown-ask-chips");
-    const spark = document.createElement("span");
-    spark.className = "dashdown-ask-chips-spark";
-    spark.textContent = "✦";
-    spark.setAttribute("aria-hidden", "true");
-    row.appendChild(spark);
-
-    // metric — one of the model's measures.
-    const measures = opts.measures || [];
-    row.appendChild(
-      makeChipSelect(
-        "metric",
-        measures.map((m) => ({ value: m, text: m })),
-        chipState.metric,
-        (v) => {
-          chipState.metric = v;
-          scheduleChipChange();
-        }
-      )
+  // What lands = what the panel shows — and the DOM is the truth for "shows":
+  // a chart card is mounted iff a chart is on screen right now (any state-flag
+  // mirror of that can desync across paints; the querySelector cannot). So
+  // "Add to page" writes a chart exactly when the operator is LOOKING at one,
+  // and falls back to the table only when the panel itself did. (The server's
+  // `elements` enum API supports finer choices; this client deliberately
+  // doesn't surface them — the panel is the preview.)
+  function elementsForKeep(payload) {
+    const kind = ((payload.resolved || {}).kind || "").toLowerCase();
+    if (kind === "list") return undefined; // server default: the rows
+    if (displayForm(payload) === "value") return ["value", "ask"];
+    const chartShown = !!(
+      slots &&
+      slots.chart &&
+      slots.chart.querySelector(".dashdown-ask-box-chart")
     );
-
-    // by — a dimension, or "—" for none.
-    const dims = opts.dimensions || [];
-    const byOptions = [{ value: "", text: "—" }].concat(
-      dims.map((d) => ({ value: d, text: d }))
-    );
-    row.appendChild(
-      makeChipSelect("by", byOptions, chipState.by || "", (v) => {
-        chipState.by = v || null;
-        scheduleChipChange();
-      })
-    );
-
-    // series — a second grouping dimension ("per channel"), splitting the
-    // metric into one colored series per value. Only offered once a primary
-    // `by` exists, and never the same dimension as `by`.
-    if (chipState.by) {
-      const seriesOptions = [{ value: "", text: "—" }].concat(
-        dims
-          .filter((d) => d !== chipState.by)
-          .map((d) => ({ value: d, text: d }))
-      );
-      row.appendChild(
-        makeChipSelect("per", seriesOptions, chipState.series || "", (v) => {
-          chipState.series = v || null;
-          scheduleChipChange();
-        })
-      );
-    }
-
-    // grain — only meaningful (and only rendered) when `by` is the time
-    // dimension. A grain on a categorical dimension is meaningless.
-    if (
-      chipState.by &&
-      opts.time_dimension &&
-      chipState.by === opts.time_dimension
-    ) {
-      const grains = opts.grains || [];
-      if (grains.length) {
-        row.appendChild(
-          makeChipSelect(
-            "grain",
-            grains.map((g) => ({ value: g, text: g })),
-            chipState.grain || grains[0],
-            (v) => {
-              chipState.grain = v || null;
-              scheduleChipChange();
-            }
-          )
-        );
-      }
-    }
-
-    // chart — the presentation wish ("as a funnel"). "auto" clears it and the
-    // server re-infers; an incompatible wish is soft-dropped server-side.
-    const chartTypes = ["line", "bar", "scatter", "pie", "funnel", "treemap"];
-    row.appendChild(
-      makeChipSelect(
-        "chart",
-        [{ value: "", text: "auto" }].concat(
-          chartTypes.map((t) => ({ value: t, text: t }))
-        ),
-        chipState.chart || "",
-        (v) => {
-          chipState.chart = v || "";
-          scheduleChipChange();
-        }
-      )
-    );
-
-    // Existing filters as removable chips.
-    for (const dim of Object.keys(chipState.filters)) {
-      row.appendChild(makeFilterChip(dim, chipState.filters[dim]));
-    }
-
-    // + filter.
-    row.appendChild(makeAddFilterChip(dims));
-
-    slots.prov.innerHTML = "";
-    slots.prov.appendChild(row);
-
-    const resolved = payload.resolved || {};
-    if (resolved.provenance) {
-      const prov = document.createElement("div");
-      prov.className =
-        "dashdown-ask-box-provenance dashdown-ask-chips-provenance";
-      prov.textContent = resolved.provenance;
-      slots.prov.appendChild(prov);
-    }
+    if (chartShown && payload.chart) return ["chart", "ask"];
+    return ["table", "ask"];
   }
 
-  // Build the /ask/execute spec from the live chip state. Grain rides only when
-  // `by` is the time dimension (mirrors the render gate).
-  function buildSpecFromChips() {
-    const byIsTime =
-      chipState.by &&
-      semanticOptions &&
-      chipState.by === semanticOptions.time_dimension;
-    return {
-      kind: "semantic",
-      model: chipState.model,
-      metric: chipState.metric,
-      by: chipState.by || null,
-      // A series without a primary grouping is meaningless — dropped with by.
-      series: chipState.by ? chipState.series || null : null,
-      grain: byIsTime ? chipState.grain || null : null,
-      chart: chipState.chart || null,
-      filters: chipState.filters || {},
-    };
-  }
-
-  function markCommentaryStale() {
-    if (answerBody) answerBody.classList.add("dashdown-ask-box-body-stale");
-    if (updateBtn) updateBtn.hidden = false;
-  }
-  function unmarkCommentaryStale() {
-    if (answerBody) answerBody.classList.remove("dashdown-ask-box-body-stale");
-    if (updateBtn) updateBtn.hidden = true;
-  }
-
-  // POST the edited spec to /ask/execute. Reuses the requestSeq/abort pattern so
-  // a stale execute response never paints over a newer one. Returns
-  // {data, seq} on success, {error, seq} on a handled failure (400/429/notice),
-  // or null when superseded/aborted (caller no-ops).
-  async function executeSpec(spec, commentary) {
-    dismissed = false; // a fresh execute re-activates the panel
-    const seq = ++requestSeq;
-    if (abortController) abortController.abort();
-    const controller = new AbortController();
-    abortController = controller;
-    setBusy(true);
-    try {
-      const response = await postJson(
-        _EXECUTE_URL,
-        {
-          question: currentQuestion(),
-          spec,
-          params: gatherParams(),
-          commentary: !!commentary,
-          refresh: false,
-        },
-        { signal: controller.signal }
-      );
-      if (dismissed || seq !== requestSeq) return null;
-      const data = await response.json().catch(() => null);
-      if (dismissed || seq !== requestSeq) return null;
-      setBusy(false);
-      if (!data) return { error: `HTTP ${response.status}`, seq };
-      if (data.notice) return { error: data.notice, seq };
-      if (!response.ok || data.error) {
-        return {
-          error: data.error || data.detail || `HTTP ${response.status}`,
-          seq,
-        };
-      }
-      return { data, seq };
-    } catch (error) {
-      if (dismissed || seq !== requestSeq || (error && error.name === "AbortError")) {
-        return null;
-      }
-      setBusy(false);
-      return { error: (error && error.message) || "Refine request failed", seq };
-    }
-  }
-
-  // Debounce a burst of chip twiddles (select changes + filter add/remove all
-  // share this one timer) so a rapid sequence coalesces into a single execute.
-  // The client abort in executeSpec bounds only the *paint* — a superseded
-  // response is dropped, but its server-side query may already be running — so
-  // coalescing here is what actually avoids billing an execute per keystroke.
-  const _CHIP_DEBOUNCE_MS = 250;
-  function scheduleChipChange() {
-    clearTimeout(chipDebounceTimer);
-    chipDebounceTimer = setTimeout(() => {
-      chipDebounceTimer = null;
-      onChipChange();
-    }, _CHIP_DEBOUNCE_MS);
-  }
-
-  // A chip edit: re-run the spec with commentary OFF (fast, cheap), repaint the
-  // chart + table + chips, and mark the prose stale rather than re-writing it.
-  async function onChipChange() {
-    clearExecError();
-    const spec = buildSpecFromChips();
-    const res = await executeSpec(spec, false);
-    if (!res) return; // superseded / aborted
-    if (res.error) {
-      showExecError(res.error);
-      return;
-    }
-    // A chip edit updates what the operator sees, so it updates the CURRENT
-    // trail entry's payload in place (the next follow-up's history reflects it).
-    updateCurrentPayload(res.data);
-    repaintChartAndTable(res.data);
-    renderChips(res.data); // repaint chips + provenance from the response
-    renderKeepFooter(res.data); // reset keep to the current edited spec
-    markCommentaryStale();
-  }
-
-  // "↻ Update commentary": re-run the current chip spec with commentary ON, then
-  // typewriter the fresh answer in and un-dim.
-  async function onUpdateCommentary() {
-    clearExecError();
-    if (updateBtn) updateBtn.disabled = true;
-    const spec = buildSpecFromChips();
-    const res = await executeSpec(spec, true);
-    if (updateBtn) updateBtn.disabled = false;
-    if (!res) return;
-    if (res.error) {
-      showExecError(res.error);
-      return;
-    }
-    updateCurrentPayload(res.data);
-    const chartCard = repaintChartAndTable(res.data);
-    renderChips(res.data);
-    renderKeepFooter(res.data);
-    renderAnswer(res.data, chartCard, res.seq, answerBody);
-    unmarkCommentaryStale();
-  }
-
-  // ---- Keep + follow-up ---------------------------------------------------
-
-  // "Keep on this page": append this answer's chart to the current page's source
-  // markdown, so the operator's ad-hoc question becomes a permanent card. For
-  // answers that resolved to a semantic metric, a named query, or a semantic
-  // list (kept as an authored <List>) — a raw-SQL answer has no stable,
-  // re-runnable reference to embed. Gated by the box's `ask_keep` config flag
-  // (server: `ask_keep_enabled`). Rebuilt on every render/refine so it always
-  // keeps the *current* edited spec (it posts the current trail entry's
-  // `resolved`, which the server re-validates).
   const _KEEPABLE_KINDS = ["semantic", "query", "list"];
 
+  // The one action on an answer: a single button that appends what the panel
+  // shows to this page's source markdown (the dev watcher live-reloads and
+  // page_edit.js flashes the new section — remove is one hover away there).
   function renderKeepFooter(payload) {
     slots.keep.innerHTML = "";
     if (!config.ask_keep) return;
     const resolved = payload.resolved || {};
-    if (!_KEEPABLE_KINDS.includes(resolved.kind)) return;
+    if (!_KEEPABLE_KINDS.includes(resolved.kind)) {
+      // A raw-SQL answer has no named artifact to embed — say so in one muted
+      // line rather than silently missing the panel's one action.
+      if (resolved.kind === "sql") {
+        const note = mkDiv("dashdown-ask-box-keep-note");
+        note.textContent = "SQL answers can't be added to a page";
+        slots.keep.appendChild(note);
+      }
+      return;
+    }
 
     const footer = mkDiv("dashdown-ask-box-keep");
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "dashdown-ask-box-keep-btn";
-    btn.textContent = "Keep on this page";
+    btn.textContent = "Add to page";
     const err = document.createElement("span");
     err.className = "dashdown-ask-box-keep-error";
     footer.appendChild(btn);
@@ -1190,21 +918,26 @@ function initOne(el) {
       btn.disabled = true;
       err.textContent = "";
       try {
-        // Keep the CURRENT edited answer: the last trail entry's payload is the
-        // latest /ask or /ask/execute response, so chip edits are reflected.
+        // Add the CURRENT answer: the last trail entry's payload is the latest
+        // /ask response (follow-ups update it).
         const current = currentPayload() || payload;
-        const resp = await postJson(_KEEP_URL, {
+        const body = {
           question: currentQuestion(),
           resolved: current.resolved,
           chart: current.chart,
           path: window.location.pathname,
-        });
+        };
+        // The generated title becomes the kept section's heading / chart title
+        // / <Ask> prompt — the conversational question stays out of page copy
+        // (the server keeps it in the section's provenance comment).
+        if (current.title) body.title = current.title;
+        const elements = elementsForKeep(current);
+        if (elements) body.elements = elements;
+        const resp = await postJson(_KEEP_URL, body);
         const data = await resp.json().catch(() => null);
         if (resp.ok && data && data.ok) {
-          // Success: the server appended the card; the dev server's watcher will
-          // live-reload the page shortly. Don't reload programmatically.
-          // Stash the new section's id so page_edit.js can flash it once the
-          // reloaded page comes back up (best-effort — storage may be blocked).
+          // Success: the server appended the section; the dev watcher will
+          // live-reload shortly. Stash the id so page_edit.js can flash it.
           if (data.id) {
             try {
               window.sessionStorage.setItem("dashdown-keep-flash", data.id);
@@ -1212,24 +945,24 @@ function initOne(el) {
               /* storage blocked — skip the flash */
             }
           }
-          btn.textContent = "Kept ✓ — added below";
+          btn.textContent = "Added ✓";
           btn.classList.add("dashdown-ask-box-keep-done");
         } else {
           btn.disabled = false;
           err.textContent =
-            (data && data.detail) || `Keep failed (HTTP ${resp.status})`;
+            (data && data.detail) || `Add failed (HTTP ${resp.status})`;
         }
       } catch (e) {
         btn.disabled = false;
-        err.textContent = (e && e.message) || "Keep failed";
+        err.textContent = (e && e.message) || "Add failed";
       }
     });
   }
 
-  // A slim follow-up field at the panel bottom. Enter re-asks via the normal
-  // submit flow, threading the whole session trail as `history` context (the
-  // server keeps the last few), and echoes the new question into the header
-  // omnibox so a re-Enter re-asks it.
+  // A slim follow-up field at the panel bottom — the ONE refinement path.
+  // Enter re-asks via the normal submit flow, threading the whole session trail
+  // as `history` context, and echoes the new question into the header omnibox
+  // so a re-Enter re-asks it.
   function renderFollowUp() {
     slots.followup.innerHTML = "";
     const row = mkDiv("dashdown-ask-box-followup");
@@ -1248,8 +981,7 @@ function initOne(el) {
         const q = inp.value.trim();
         if (!q) return;
         // History = the whole current trail, oldest-first (the server keeps the
-        // last 6). Chip edits already updated the last entry's payload, so this
-        // reflects exactly what the operator is looking at.
+        // last 6) — exactly what the operator is looking at.
         const history = trail.map((t) => ({
           question: t.question,
           resolved: {
@@ -1263,9 +995,8 @@ function initOne(el) {
         submit(q, { history });
       } else if (ev.key === "Escape") {
         // While expanded the panel lives in a modal <dialog>: let Escape fall
-        // through to the dialog's native cancel/close (which collapses the
-        // panel) — don't preventDefault it or steal focus to the omnibox that
-        // sits outside the modal.
+        // through to the dialog's native cancel/close — don't preventDefault it
+        // or steal focus to the omnibox that sits outside the modal.
         if (expanded) return;
         // First Escape inside the follow-up field only steps out to panel scope
         // (focus the omnibox input); a second Escape then closes the panel via
@@ -1277,9 +1008,201 @@ function initOne(el) {
     });
   }
 
+  // ---- Compose: "add …" typed in the omnibox ------------------------------
+
+  // Restore whatever answer the operator was looking at (compose borrows the
+  // panel; cancel must never strand them on a blank shell). `dismissed` may be
+  // true here (an Esc-close + reopen on the way), which would starve the
+  // typewriter's isStale gate — clear it, and paint instantly (the answer was
+  // already read once; re-typing it is noise).
+  function restoreCurrentAnswer() {
+    const entry = currentEntry();
+    if (entry) {
+      dismissed = false;
+      renderAnswerPayload(entry.payload, ++requestSeq, { skipTypewriter: true });
+    } else {
+      close();
+    }
+  }
+
+  function renderComposeLoading(instruction) {
+    panelShell();
+    const body = document.createElement("div");
+    body.className = "dashdown-ask-box-loading";
+    body.setAttribute("role", "status");
+    body.innerHTML =
+      '<span class="dashdown-ask-cursor" aria-hidden="true"></span>' +
+      '<span class="dashdown-ask-box-loading-text">Planning “' +
+      esc(instruction) +
+      "”…</span>";
+    panel.appendChild(body);
+  }
+
+  // Preview → confirm, in plain words: one line per element that will land,
+  // then Add / Cancel. The server re-validates the echoed plan on apply, so the
+  // preview and the write can't disagree.
+  function renderComposePreview(instruction, data) {
+    panelShell();
+    panel.setAttribute("aria-label", "Add to page preview");
+    hasAnswer = true;
+    const wrap = mkDiv("dashdown-ask-compose");
+    const head = mkDiv("dashdown-ask-compose-head");
+    head.textContent = "✎ Add to page";
+    const instr = mkDiv("dashdown-ask-compose-instruction");
+    instr.textContent = instruction;
+    wrap.appendChild(head);
+    wrap.appendChild(instr);
+
+    const list = document.createElement("ul");
+    list.className = "dashdown-ask-compose-summary";
+    const plan = data.plan || {};
+    const sections = plan.sections || [];
+    // The dropped entries came through one JSON round-trip, so identity can't
+    // match — compare serialized content (both copies parse from the same
+    // response text, so key order and stringification agree).
+    const droppedKeys = new Set(
+      (Array.isArray(data.dropped) ? data.dropped : []).map((d) =>
+        JSON.stringify(d.entry)
+      )
+    );
+    // The plan-level title compiles into a `##` heading — a substantive element
+    // the summary must mention.
+    if (plan.title) {
+      const li = document.createElement("li");
+      li.textContent = `A heading — “${plan.title}”`;
+      list.appendChild(li);
+    }
+    for (const entry of sections) {
+      if (droppedKeys.has(JSON.stringify(entry))) continue;
+      const li = document.createElement("li");
+      li.textContent = describePlanEntry(entry);
+      list.appendChild(li);
+    }
+    // The server refuses all-dropped plans, so an empty list here can only be
+    // over-matching on duplicate entries — keep the preview honest anyway.
+    if (!list.children.length) {
+      const li = document.createElement("li");
+      li.textContent = "The planned content";
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+
+    if (droppedKeys.size) {
+      const note = mkDiv("dashdown-ask-compose-dropped");
+      note.textContent =
+        droppedKeys.size === 1
+          ? "1 item couldn't be added (not found in your data)"
+          : `${droppedKeys.size} items couldn't be added (not found in your data)`;
+      wrap.appendChild(note);
+    }
+
+    const controls = mkDiv("dashdown-ask-compose-controls");
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "dashdown-ask-box-keep-btn dashdown-ask-compose-apply";
+    applyBtn.textContent = "Add to page";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "dashdown-ask-compose-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", restoreCurrentAnswer);
+    const err = document.createElement("span");
+    err.className = "dashdown-ask-box-keep-error";
+    controls.appendChild(applyBtn);
+    controls.appendChild(cancel);
+    controls.appendChild(err);
+    wrap.appendChild(controls);
+    panel.appendChild(wrap);
+    announce("Preview ready — confirm to add to the page");
+
+    applyBtn.addEventListener("click", async () => {
+      applyBtn.disabled = true;
+      err.textContent = "";
+      try {
+        const resp = await postJson(_COMPOSE_APPLY_URL, {
+          instruction,
+          plan: data.plan,
+          path: window.location.pathname,
+        });
+        const out = await resp.json().catch(() => null);
+        if (resp.ok && out && out.ok) {
+          // The dev watcher live-reloads the page; page_edit.js flashes the new
+          // section via the shared sessionStorage key (best-effort).
+          if (out.id) {
+            try {
+              window.sessionStorage.setItem("dashdown-keep-flash", out.id);
+            } catch (e) {
+              /* storage blocked — skip the flash */
+            }
+          }
+          applyBtn.textContent = "Added ✓";
+          applyBtn.classList.add("dashdown-ask-box-keep-done");
+          announce("Added to the page");
+        } else {
+          applyBtn.disabled = false;
+          err.textContent =
+            (out && out.detail) || `Add failed (HTTP ${resp.status})`;
+        }
+      } catch (e) {
+        applyBtn.disabled = false;
+        err.textContent = (e && e.message) || "Add failed";
+      }
+    });
+  }
+
+  // POST the instruction for a plan+preview. Same seq/abort discipline as ask.
+  async function submitCompose(instruction) {
+    dismissed = false;
+    const seq = ++requestSeq;
+    if (abortController) abortController.abort();
+    const controller = new AbortController();
+    abortController = controller;
+    setBusy(true);
+    renderComposeLoading(instruction);
+    try {
+      const resp = await postJson(
+        _COMPOSE_URL,
+        { instruction, path: window.location.pathname },
+        { signal: controller.signal }
+      );
+      if (dismissed || seq !== requestSeq) return;
+      const data = await resp.json().catch(() => null);
+      if (dismissed || seq !== requestSeq) return;
+      setBusy(false);
+      if (!data) {
+        renderError(`HTTP ${resp.status}`);
+        return;
+      }
+      if (data.notice) {
+        renderNotice(data.notice);
+        return;
+      }
+      if (!resp.ok || !data.plan) {
+        renderError(
+          data.detail || data.error || `Compose failed (HTTP ${resp.status})`
+        );
+        return;
+      }
+      renderComposePreview(instruction, data);
+    } catch (error) {
+      if (
+        dismissed ||
+        seq !== requestSeq ||
+        (error && error.name === "AbortError")
+      ) {
+        return;
+      }
+      setBusy(false);
+      console.error("dashdown ask box: compose failed", error);
+      renderError((error && error.message) || "Compose failed");
+    }
+  }
+
+  // ---- Answer assembly + the staged SSE consumer --------------------------
+
   function applyModelTooltip(payload) {
     // Model attribution on the ✦ badge tooltip — the same trust affordance the
-    // authored ask cards carry (theirs hover-reveals a .dashdown-ask-model).
+    // authored ask cards carry.
     if (payload.model) {
       const badge = panel.querySelector(".dashdown-ask-box-badge");
       if (badge) {
@@ -1288,85 +1211,12 @@ function initOne(el) {
     }
   }
 
-  // ---- Session trail pills ------------------------------------------------
-
-  // A slim pill row at the top of the panel: one pill per trail entry (the
-  // question, truncated ~40 chars), separated by "→". The current (last) pill is
-  // emphasized and inert; older pills are buttons that restore that answer. Only
-  // shown when the trail has ≥2 entries.
-  function renderTrailPills() {
-    if (!slots || !slots.trail) return;
-    slots.trail.innerHTML = "";
-    if (trail.length < 2) {
-      slots.trail.hidden = true;
-      return;
-    }
-    slots.trail.hidden = false;
-    const row = mkDiv("dashdown-ask-trail");
-    trail.forEach((entry, idx) => {
-      if (idx > 0) {
-        const sep = document.createElement("span");
-        sep.className = "dashdown-ask-trail-sep";
-        sep.textContent = "→";
-        sep.setAttribute("aria-hidden", "true");
-        row.appendChild(sep);
-      }
-      const full = entry.question || "";
-      const short = full.length > 40 ? `${full.slice(0, 39)}…` : full;
-      const isCurrent = idx === trail.length - 1;
-      if (isCurrent) {
-        const pill = document.createElement("span");
-        pill.className =
-          "dashdown-ask-trail-pill dashdown-ask-trail-pill-active";
-        pill.textContent = short;
-        pill.title = full;
-        pill.setAttribute("aria-current", "true");
-        row.appendChild(pill);
-      } else {
-        const pill = document.createElement("button");
-        pill.type = "button";
-        pill.className = "dashdown-ask-trail-pill";
-        pill.textContent = short;
-        pill.title = full;
-        pill.addEventListener("click", (ev) => {
-          // The restore rebuilds the panel synchronously, detaching this pill;
-          // stop the click bubbling so the document click-away handler doesn't
-          // then see the detached target as "outside" and close the panel.
-          ev.stopPropagation();
-          restoreTrailEntry(idx);
-        });
-        row.appendChild(pill);
-      }
-    });
-    slots.trail.appendChild(row);
-  }
-
-  // Clicking an older trail pill restores that answer entirely client-side (the
-  // payload is in hand — no server call): truncate the trail after it, then
-  // repaint the panel from the stored payload (typewriter skipped — the answer
-  // is already known) and write its question back into the omnibox.
-  function restoreTrailEntry(idx) {
-    if (idx < 0 || idx >= trail.length) return;
-    trail = trail.slice(0, idx + 1);
-    persistSession();
-    const entry = currentEntry();
-    if (!entry) return;
-    input.value = entry.question;
-    // Bump the seq so any in-flight typewriter/response can't paint over this.
-    renderAnswerPayload(entry.payload, ++requestSeq, { skipTypewriter: true });
-  }
-
   function renderAnswerPayload(payload, seq, opts = {}) {
-    buildAnswerSkeleton();
+    buildAnswerSkeleton(payload);
     applyModelTooltip(payload);
-
     // Answer-first hierarchy: the operator asked a question, so the answer text
-    // is the headline (it types in above the evidence). renderTrailPills shows
-    // the session chain; renderProvenance builds the interactive chip row
-    // (semantic) or the static provenance line; the chart must render before
-    // renderAnswer so the answer's annotation ref chips have a chart host.
-    renderTrailPills();
-    renderProvenance(payload);
+    // is the headline. The chart must render before renderAnswer so the
+    // answer's annotation ref chips have a chart host.
     const chartCard = repaintChartAndTable(payload);
     renderAnswer(payload, chartCard, seq, answerBody, opts.skipTypewriter);
     renderKeepFooter(payload);
@@ -1376,22 +1226,20 @@ function initOne(el) {
   }
 
   // A wait state for the answer body while the commentary streams in: the same
-  // blinking cursor the loading state uses, held below the already-painted
-  // provenance + chart + table until the `done` event arrives.
+  // blinking cursor the loading state uses, held above the already-painted
+  // evidence until the `done` event arrives.
   function renderAnswerWaiting(bodyEl) {
     bodyEl.innerHTML =
       '<span class="dashdown-ask-cursor" aria-hidden="true"></span>';
   }
 
   // Consume a staged SSE ask response (POST /api/ask with stream:true). Two
-  // events: `resolved` paints the full panel skeleton — provenance/chips, chart,
-  // table, keep footer, follow-up — with the answer body in a wait state; `done`
-  // merges the commentary into the trail entry, wires chart annotations, and
-  // typewriters the answer in. `error` (after headers) surfaces a fresh ask's
-  // error card, or — for a follow-up — the inline error slot without blowing
-  // away the current answer. `dismissed`/`requestSeq` are re-checked on every
-  // event so a superseded or closed panel never paints. The frame parser + the
-  // stale-aware read loop live in core.js (readSseFrames); this only maps events.
+  // events: `resolved` paints the full panel skeleton with the answer body in a
+  // wait state; `done` merges the commentary into the trail entry, wires chart
+  // annotations, and typewriters the answer in. `error` (after headers)
+  // surfaces a fresh ask's error card, or — for a follow-up — the inline error
+  // slot without blowing away the current answer. `dismissed`/`requestSeq` are
+  // re-checked on every event so a superseded or closed panel never paints.
   async function consumeAskStream(response, question, seq, fresh) {
     let entry = null; // this ask's trail entry (pushed on `resolved`)
     let chartCard = null;
@@ -1401,20 +1249,16 @@ function initOne(el) {
       onEvent: (event, data) => {
         if (event === "resolved") {
           if (dismissed || seq !== requestSeq) return;
-          // New trail entry for this ask (a fresh header ask already cleared the
-          // trail; a follow-up appends). Refinement/keep/follow-up all read the
-          // current (last) entry, so this is what those paths edit in place. Only
-          // the `resolved` event rebuilds the skeleton — a follow-up's current
-          // answer stays fully visible until this lands.
+          // New trail entry for this ask (a fresh header ask already cleared
+          // the trail; a follow-up appends). Only the `resolved` event rebuilds
+          // the skeleton — a follow-up's current answer stays fully visible
+          // until this lands. Only FRESH questions join the Recent list: a
+          // follow-up fragment ("make it weekly") is meaningless re-asked
+          // without its session and would resolve to garbage from the dropdown.
           entry = pushTrail({ question, payload: data });
-          // A successful answer records the question for the "Recent" section
-          // and — a fresh session now being live — retires any "Continue" row.
-          pushRecent(question);
-          delete el.dataset.askResume;
-          buildAnswerSkeleton();
+          if (fresh) pushRecent(question);
+          buildAnswerSkeleton(data);
           applyModelTooltip(data);
-          renderTrailPills();
-          renderProvenance(data);
           chartCard = repaintChartAndTable(data);
           renderAnswerWaiting(answerBody);
           renderKeepFooter(data);
@@ -1424,11 +1268,10 @@ function initOne(el) {
         } else if (event === "done") {
           if (dismissed || seq !== requestSeq || !entry) return;
           setBusy(false);
-          // Merge the commentary into the (partial) resolved payload so the trail
-          // entry carries the full answer for keep / follow-up context.
+          // Merge the commentary into the (partial) resolved payload so the
+          // trail entry carries the full answer for add / follow-up context.
           const full = { ...entry.payload, ...data };
           entry.payload = full;
-          persistSession();
           if (
             chartCard &&
             Array.isArray(full.annotations) &&
@@ -1448,7 +1291,7 @@ function initOne(el) {
           } else {
             // Non-destructive follow-up failure: keep the current answer.
             showFollowupBusy(false);
-            showExecError(msg);
+            showInlineError(msg);
           }
         }
       },
@@ -1472,16 +1315,15 @@ function initOne(el) {
     if (fresh) renderLoading();
     else showFollowupBusy(true);
 
-    // A follow-up failure never blows away the visible answer: surface it through
-    // the inline error slot (429 / notice / network / non-stream error) and
-    // re-enable the input (its text is untouched, so edit-and-retry works). A
-    // fresh ask keeps the full-shell error rendering (its trail is already clear).
+    // A follow-up failure never blows away the visible answer: surface it
+    // through the inline error slot and re-enable the input (its text is
+    // untouched, so edit-and-retry works).
     const fail = (msg) => {
       if (fresh) {
         renderError(msg);
       } else {
         showFollowupBusy(false);
-        showExecError(msg);
+        showInlineError(msg);
       }
     };
     const failNotice = (msg) => {
@@ -1489,7 +1331,7 @@ function initOne(el) {
         renderNotice(msg);
       } else {
         showFollowupBusy(false);
-        showExecError(msg);
+        showInlineError(msg);
       }
     };
 
@@ -1500,8 +1342,8 @@ function initOne(el) {
         signal: controller.signal,
       });
       if (dismissed || seq !== requestSeq) return; // closed / newer question took over
-      // Staged SSE (the normal cache-miss / cache-hit path) vs. plain JSON (a
-      // 429 / notice / disabled / proxy fallback — checked before streaming).
+      // Staged SSE (the normal path) vs. plain JSON (a 429 / notice / disabled
+      // / proxy fallback — checked before streaming).
       const contentType = response.headers.get("Content-Type") || "";
       if (response.ok && contentType.includes("text/event-stream")) {
         await consumeAskStream(response, question, seq, fresh);
@@ -1522,14 +1364,17 @@ function initOne(el) {
         fail(data.error || data.detail || `HTTP ${response.status}`);
         return;
       }
-      // A non-streaming JSON answer (shouldn't happen on the happy path, but stay
-      // robust): render it whole like the pre-staging client did.
+      // A non-streaming JSON answer (shouldn't happen on the happy path, but
+      // stay robust): render it whole like the pre-staging client did.
       pushTrail({ question, payload: data });
-      pushRecent(question);
-      delete el.dataset.askResume;
+      if (fresh) pushRecent(question);
       renderAnswerPayload(data, seq);
     } catch (error) {
-      if (dismissed || seq !== requestSeq || (error && error.name === "AbortError")) {
+      if (
+        dismissed ||
+        seq !== requestSeq ||
+        (error && error.name === "AbortError")
+      ) {
         return;
       }
       setBusy(false);
@@ -1541,19 +1386,25 @@ function initOne(el) {
   // site_search.js fires this when the operator picks the "Ask the data" row
   // (or hits Enter in ask-only mode). The modules stay decoupled — no import
   // either way, just the DOM event. A header ask always STARTS A NEW SESSION
-  // (clears the trail, no history) — refinement/follow-up carries the trail,
-  // not this.
+  // (clears the trail, no history) — the follow-up field carries the trail.
   el.addEventListener("dashdown:ask", (ev) => {
     const q = ((ev.detail && ev.detail.question) || "").trim();
     if (q) submit(q, { fresh: true });
   });
 
+  // The omnibox compose row ("✎ Add to this page" on an imperative-shaped
+  // input) — straight to plan+preview, same decoupled DOM-event channel.
+  el.addEventListener("dashdown:compose", (ev) => {
+    const instruction = ((ev.detail && ev.detail.instruction) || "").trim();
+    if (instruction) submitCompose(instruction);
+  });
+
   // Escape closes the answer panel *first*, then falls through to search's own
   // Escape on a second press. Capture phase on `el` (an ancestor of the input)
-  // fires before site_search.js's target-phase keydown, so stopPropagation keeps
-  // the first Escape from also closing/blurring search. The follow-up field has
-  // its own layering (its Escape steps focus back to the omnibox input, then a
-  // second Escape lands here and closes).
+  // fires before site_search.js's target-phase keydown, so stopPropagation
+  // keeps the first Escape from also closing/blurring search. The follow-up
+  // field has its own layering (its Escape steps focus back to the omnibox
+  // input, then a second Escape lands here and closes).
   el.addEventListener(
     "keydown",
     (ev) => {
@@ -1578,6 +1429,7 @@ function initOne(el) {
   // still-focused field fires no `focus` event — the click handler covers it.
   // `open()` re-hides the search dropdown, so the two panels never stack.
   const reopen = () => {
+    if (suppressReopen) return; // the ✕ handler's programmatic refocus
     if (hasAnswer) open();
   };
   input.addEventListener("focus", reopen);
@@ -1611,23 +1463,13 @@ function initOne(el) {
     if (card._chartInstance) card._chartInstance.echartsInstance = next;
     if (Array.isArray(records) && records.length) {
       // Re-run the same paint helper so the y-axis-name suppression is applied
-      // on the freshly re-initialized instance too (a bare updateChart here was
-      // the theme-toggle regression: the axis name reappeared and clipped).
+      // on the freshly re-initialized instance too.
       paintPanelChart(card, records, chartState.config);
     }
   });
 
-  // ---- Restored session + deep link (4A-b / 4A-c) -------------------------
-
-  // site_search.js pulls a fresh resume value right before rendering the
-  // empty-focus dropdown; expose the stored session's last question then.
-  el.addEventListener("dashdown:ask-resume", refreshResume);
-  // And seed it once at init (before any interaction), so a straight focus after
-  // reload already offers the "Continue" row.
-  refreshResume();
-
   // Deep-link prefill: ?_ask=<question> fills the omnibox, focuses + selects it,
-  // and waits for the operator to press Enter — NEVER auto-submits (the approved
+  // and waits for the operator to press Enter — NEVER auto-submits (the
   // confirm-first cost guard). parseUrlParams() strips _-prefixed keys, so read
   // the raw URL; nothing is stripped from the URL.
   try {

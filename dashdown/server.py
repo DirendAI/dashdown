@@ -646,7 +646,14 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         proj: Project = request.app.state.project
         if ask_unavailable_notice(proj) is not None:
             return JSONResponse({"suggestions": []})
-        return JSONResponse({"suggestions": ask_suggestions(proj)})
+        suggestions = ask_suggestions(proj)
+        # On the dev server (where "Add to page"/compose exist) one starter
+        # teaches the page-writing verb — the client renders it with a ✎ glyph
+        # and routes it to the compose flow, so the feature is discoverable
+        # without any extra UI chrome. Never on production/static (no compose).
+        if request.app.state.dev and suggestions:
+            suggestions = suggestions[:2] + ["add a KPI row of key metrics"]
+        return JSONResponse({"suggestions": suggestions})
 
     @app.get("/_dashdown/api/ask/{ask_id}")
     def get_ask_commentary(ask_id: str, request: Request):
@@ -980,14 +987,16 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
 
     @app.post("/_dashdown/api/ask/execute")
     def post_ask_execute(request: Request, body: Any = Body(default=None)):
-        """Re-execute a client-edited semantic spec (the answer-panel chips).
+        """Re-execute a client-edited semantic spec — a **programmatic API**.
 
-        The answer panel grows interactive chips that let the operator swap the
-        measure / dimension / grain / filters of a **semantic** answer and re-run
-        it *without* an LLM resolution call. The client sends the edited ``spec``;
-        this validates it against the live catalog (the same check the LLM output
-        goes through — semantic values are pure JSON data, no injection surface)
-        and executes it. ``commentary=false`` (the default) returns data + chart
+        Runs a caller-built **semantic** spec (measure / dimension / grain /
+        filters) *without* an LLM resolution call. (The v1 answer-panel chip
+        editor was this endpoint's original consumer; the v2 panel refines
+        through language only, so no shipped client calls it — it remains for
+        scripts and integrations.) The caller sends the ``spec``; this validates
+        it against the live catalog (the same check the LLM output goes through
+        — semantic values are pure JSON data, no injection surface) and
+        executes it. ``commentary=false`` (the default) returns data + chart
         with no LLM call and no rate-limit consumption; ``commentary=true`` adds
         one LLM call for the typed answer + chart annotations.
 
@@ -1048,7 +1057,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
     def post_ask_keep(request: Request, body: Any = Body(default=None)):
         """Persist a liked runtime answer onto a page as a **live** markdown section.
 
-        The operator clicks "Keep on this page" on an answer they like; we append a
+        The operator clicks "Add to page" on an answer they like; we append a
         ``## question`` section (chart/table/`<Ask>` components) to that page's
         ``.md``, so it re-queries on every visit — the dashboard grows into the
         answers you kept. Distinct POST from ``/api/ask/{id}`` (GET-only), so no
@@ -1067,7 +1076,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         from fastapi import HTTPException
         from fastapi.responses import JSONResponse
 
-        from dashdown.ask_engine import build_kept_markdown
+        from dashdown.ask_engine import build_kept_markdown, insert_kept_section
 
         proj: Project = request.app.state.project
 
@@ -1082,6 +1091,22 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         chart = body.get("chart")
         if chart is not None and not isinstance(chart, dict):
             raise HTTPException(status_code=400, detail="'chart' must be an object or null")
+        # The client's element choice (derived from the answer's display form —
+        # "what lands = what the panel shows") + placement. Both optional (older
+        # clients / the CLI omit them → the original recipe, appended at the
+        # end); the values are re-validated in build_kept_markdown /
+        # insert_kept_section, so a crafted body maps to a clean 400.
+        elements = body.get("elements")
+        if elements is not None and not isinstance(elements, list):
+            raise HTTPException(status_code=400, detail="'elements' must be a list")
+        position = body.get("position", "end")
+        if not isinstance(position, str):
+            raise HTTPException(status_code=400, detail="'position' must be a string")
+        # The answer's generated title (payload `title`, echoed by the client).
+        # Optional; re-cleaned in build_kept_markdown — it crossed the browser.
+        title = body.get("title")
+        if title is not None and not isinstance(title, str):
+            raise HTTPException(status_code=400, detail="'title' must be a string")
         path = body.get("path")
 
         # Shared dev-gate / path resolution (403/400/404/400-dynamic) — the same
@@ -1089,16 +1114,20 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         md_path = _resolve_editable_page(request, path)
 
         try:
-            section, keep_id = build_kept_markdown(proj, question.strip(), resolved, chart)
+            section, keep_id = build_kept_markdown(
+                proj, question.strip(), resolved, chart, elements, title
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        # Append with exactly one blank line separating the new section from the
-        # existing body (the section already starts with a newline).
+        # Splice at the requested position ("end" appends with exactly one blank
+        # line separating — the section already starts with a newline).
         try:
             existing = md_path.read_text(encoding="utf-8")
-            new_content = existing.rstrip("\n") + "\n" + section
+            new_content = insert_kept_section(existing, section, position)
             md_path.write_text(new_content, encoding="utf-8")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except (OSError, UnicodeDecodeError) as e:
             raise HTTPException(status_code=400, detail=f"could not update page source: {e}")
 
@@ -1110,6 +1139,139 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 "path": ("/" + full).rstrip("/") or "/",
                 "id": keep_id,
                 "token": token,
+            }
+        )
+
+    @app.post("/_dashdown/api/ask/compose")
+    def post_ask_compose(request: Request, body: Any = Body(default=None)):
+        """Plan new page content from an instruction — **preview only, no write**.
+
+        The generative sibling of keep: one constrained LLM call turns the
+        operator's instruction into a typed plan drawn from the ask catalog, and
+        the plan is compiled (``build_composed_markdown``) into the section the
+        apply endpoint *would* write. The response carries ``{plan, section,
+        dropped}`` so the client can show exactly what will land (entries that
+        failed validation come back in ``dropped`` with reasons). The operator
+        confirms via ``/api/ask/compose/apply``.
+
+        Gates: the same dev-server + editable-page contract as keep (403 off-dev,
+        404 unknown page, 400 dynamic ``[slug]``); the ask availability notice
+        (llm ∧ ask.enabled) as plain JSON; the shared ask rate limit (a compose
+        is one billable LLM call → 429 past the window). 400 on a malformed body
+        / an unplannable instruction; 502 on an LLM transport failure.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        from dashdown import ask_engine
+        from dashdown.ask_compose import build_composed_markdown, compose_plan
+        from dashdown.ask_engine import AskLLMError, ask_unavailable_notice
+
+        proj: Project = request.app.state.project
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        instruction = body.get("instruction")
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise HTTPException(status_code=400, detail="a non-empty 'instruction' is required")
+        _resolve_editable_page(request, body.get("path"))
+
+        notice = ask_unavailable_notice(proj)
+        if notice is not None:
+            return JSONResponse({"notice": notice})
+        if ask_engine.rate_limited(proj.config.ask.rate_limit):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"ask rate limit reached ({proj.config.ask.rate_limit}/min — "
+                    "ask.rate_limit in dashdown.yaml); try again shortly"
+                ),
+            )
+
+        try:
+            plan = compose_plan(proj, instruction.strip())
+            section, _keep_id, dropped = build_composed_markdown(
+                proj, instruction.strip(), plan
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except AskLLMError as e:
+            raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+        if proj.config.ask.log:
+            from datetime import datetime, timezone
+
+            ask_engine.log_ask(
+                proj,
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "question": instruction.strip(),
+                    "kind": "compose",
+                    "via": "compose",
+                    "sections": len(plan.get("sections", [])),
+                    "dropped": len(dropped),
+                },
+            )
+        return JSONResponse({"plan": plan, "section": section, "dropped": dropped})
+
+    @app.post("/_dashdown/api/ask/compose/apply")
+    def post_ask_compose_apply(request: Request, body: Any = Body(default=None)):
+        """Write a previewed compose plan onto the page — the confirm half.
+
+        The client echoes back the ``plan`` it previewed (plus the instruction
+        and a ``position``); the plan is **re-compiled through the same pure
+        validators** — deterministic, so what was previewed is what lands (a
+        catalog change in between surfaces as a fresh 400/drop, never a silent
+        difference). No LLM call, no rate-limit consumption. The section is
+        spliced with the standard keep markers (``kind=composed``), so the
+        section toolbars and the post-write flash govern it unchanged.
+        """
+        from fastapi import HTTPException
+        from fastapi.responses import JSONResponse
+
+        from dashdown.ask_compose import build_composed_markdown
+        from dashdown.ask_engine import insert_kept_section
+
+        proj: Project = request.app.state.project
+
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be a JSON object")
+        instruction = body.get("instruction")
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise HTTPException(status_code=400, detail="a non-empty 'instruction' is required")
+        plan = body.get("plan")
+        if not isinstance(plan, dict):
+            raise HTTPException(status_code=400, detail="a 'plan' object is required")
+        position = body.get("position", "end")
+        if not isinstance(position, str):
+            raise HTTPException(status_code=400, detail="'position' must be a string")
+        path = body.get("path")
+        md_path = _resolve_editable_page(request, path)
+
+        try:
+            section, keep_id, dropped = build_composed_markdown(
+                proj, instruction.strip(), plan
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        try:
+            existing = md_path.read_text(encoding="utf-8")
+            new_content = insert_kept_section(existing, section, position)
+            md_path.write_text(new_content, encoding="utf-8")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except (OSError, UnicodeDecodeError) as e:
+            raise HTTPException(status_code=400, detail=f"could not update page source: {e}")
+
+        full = (path or "").strip("/")
+        token = hashlib.sha1(new_content.encode("utf-8")).hexdigest()
+        return JSONResponse(
+            {
+                "ok": True,
+                "path": ("/" + full).rstrip("/") or "/",
+                "id": keep_id,
+                "token": token,
+                "dropped": dropped,
             }
         )
 
@@ -1460,7 +1622,7 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
                 and proj.config.ask.enabled
                 and not embed_on
             ),
-            # "Keep on this page" turns a liked answer into an authored markdown
+            # "Add to page" turns a liked answer into an authored markdown
             # section — it writes to source, so it's gated to the dev server and
             # only on a static (non-`[slug]`) page (a kept block on a dynamic
             # template would apply to every slug). Requires the ask box itself.

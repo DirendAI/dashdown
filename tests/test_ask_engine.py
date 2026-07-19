@@ -348,6 +348,315 @@ class TestChartInference:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Chart preferences — the extended type vocabulary + per-type shape rules
+# --------------------------------------------------------------------------- #
+class TestChartPrefs:
+    TEMPORAL_3 = [
+        ["2026-01-01", "email", 10],
+        ["2026-01-08", "search", 20],
+        ["2026-01-15", "email", 15],
+    ]
+    CATEGORICAL_3 = [["North", "email", 10], ["South", "search", 20]]
+
+    @staticmethod
+    def _shape(res, columns, rows):
+        payload = serialize_result(QueryResult(columns=columns, rows=rows))
+        return ask_engine.resolution_chart_shape(res, payload)
+
+    def _sem(self, pref, by, series="channel"):
+        return ask_engine.Resolution(
+            kind="semantic", model="orders", metric="revenue",
+            by=by, series=series, chart_pref=pref,
+        )
+
+    def test_aliases_normalize(self):
+        assert ask_engine._parse_chart_pref({"chart": "river"}) == "themeriver"
+        assert ask_engine._parse_chart_pref({"chart": "Stream"}) == "themeriver"
+        assert ask_engine._parse_chart_pref({"chart": "donut"}) == "pie"
+        assert ask_engine._parse_chart_pref({"chart": "area"}) == "line"
+        assert ask_engine._parse_chart_pref({"chart": "hologram"}) is None
+
+    def test_themeriver_on_temporal_series(self):
+        shape = self._shape(
+            self._sem("themeriver", "order_date"),
+            ["order_date", "channel", "revenue"], self.TEMPORAL_3,
+        )
+        assert shape == {
+            "type": "themeriver", "x": "order_date", "y": "revenue",
+            "series_by": "channel",
+        }
+
+    def test_themeriver_categorical_falls_back_to_split_bar(self):
+        shape = self._shape(
+            self._sem("themeriver", "region"),
+            ["region", "channel", "revenue"], self.CATEGORICAL_3,
+        )
+        assert shape["type"] == "bar" and shape["series_by"] == "channel"
+
+    def test_heatmap_remaps_to_value_keys(self):
+        shape = self._shape(
+            self._sem("heatmap", "region"),
+            ["region", "channel", "revenue"], self.CATEGORICAL_3,
+        )
+        assert shape == {
+            "type": "heatmap", "x": "region", "y": "channel", "value": "revenue",
+        }
+
+    def test_sankey_remaps_to_value_keys(self):
+        shape = self._shape(
+            self._sem("sankey", "region"),
+            ["region", "channel", "revenue"], self.CATEGORICAL_3,
+        )
+        assert shape == {
+            "type": "sankey", "x": "region", "y": "channel", "value": "revenue",
+        }
+
+    def test_radar_keeps_series_split(self):
+        shape = self._shape(
+            self._sem("radar", "region"),
+            ["region", "channel", "revenue"], self.CATEGORICAL_3,
+        )
+        assert shape["type"] == "radar" and shape["series_by"] == "channel"
+        assert "sort_by" not in shape
+
+    def test_gauge_on_scalar_result(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="gauge")
+        assert self._shape(res, ["total"], [[42]]) == {
+            "type": "gauge", "x": "total", "y": "total",
+        }
+
+    def test_gauge_on_multirow_is_dropped(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="gauge")
+        shape = self._shape(res, ["region", "total"], [["N", 1], ["S", 2]])
+        assert shape["type"] == "bar"
+
+    def test_gauge_scalar_without_numeric_stays_none(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="gauge")
+        assert self._shape(res, ["name"], [["Ann"]]) is None
+
+    def test_calendar_on_temporal_two_col(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="calendar")
+        shape = self._shape(
+            res, ["day", "total"],
+            [["2026-01-01", 1], ["2026-01-02", 2], ["2026-01-03", 3]],
+        )
+        assert shape["type"] == "calendar"
+        assert "sort_by" not in shape
+
+    def test_calendar_on_categorical_is_dropped(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="calendar")
+        shape = self._shape(res, ["region", "total"], [["N", 1], ["S", 2]])
+        assert shape["type"] == "bar"
+
+    def test_heatmap_without_series_is_dropped(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="heatmap")
+        shape = self._shape(res, ["region", "total"], [["N", 1], ["S", 2]])
+        assert shape["type"] == "bar"
+
+    def test_counter_aliases_normalize(self):
+        for spoken in ("counters", "kpi", "KPIs", "stats", "big_number"):
+            assert ask_engine._parse_chart_pref({"chart": spoken}) == "counter"
+
+    def test_counter_pref_suppresses_chart_on_small_breakdown(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="counter")
+        shape = self._shape(res, ["region", "total"], [["N", 1], ["S", 2]])
+        assert shape is None
+
+    def test_counter_pref_nonviable_keeps_inferred_chart(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="counter")
+        rows = [[f"r{i}", i] for i in range(20)]  # too many cards
+        shape = self._shape(res, ["region", "total"], rows)
+        assert shape["type"] == "bar"
+
+
+# --------------------------------------------------------------------------- #
+# Display form (payload["display"]["form"] — answer-shaped client rendering)
+# --------------------------------------------------------------------------- #
+class TestDisplayForm:
+    @staticmethod
+    def _form(resolution, columns, rows):
+        payload = serialize_result(QueryResult(columns=columns, rows=rows))
+        chart = ask_engine.resolution_chart_shape(resolution, payload)
+        return ask_engine.display_form(resolution, chart, payload)
+
+    def test_list_resolution_is_table(self):
+        res = ask_engine.Resolution(kind="list", model="sales", columns=["customer"])
+        assert self._form(res, ["customer"], [["Ann"], ["Bob"]]) == "table"
+
+    def test_charted_result_is_chart(self):
+        res = ask_engine.Resolution(kind="query", name="q")
+        form = self._form(
+            res, ["region", "total"], [["North", 100], ["South", 200]]
+        )
+        assert form == "chart"
+
+    def test_one_by_one_result_is_value(self):
+        res = ask_engine.Resolution(kind="query", name="q")
+        assert self._form(res, ["total"], [[42]]) == "value"
+
+    def test_semantic_aggregate_without_by_is_value(self):
+        # A semantic metric with no grouping is a headline even when the backend
+        # emits an extra column alongside the measure.
+        res = ask_engine.Resolution(kind="semantic", model="sales", metric="revenue")
+        assert self._form(res, ["revenue", "note"], [[42, "x"]]) == "value"
+
+    def test_single_row_multi_column_query_is_table(self):
+        # A one-row record (no metric to headline) reads as a table, not a value.
+        res = ask_engine.Resolution(kind="query", name="q")
+        assert self._form(res, ["region", "manager"], [["North", "Ann"]]) == "table"
+
+    def test_one_row_kpi_set_is_counters(self):
+        # Several numbers in one row = a KPI set → counter cards, no wish needed.
+        res = ask_engine.Resolution(kind="query", name="q")
+        form = self._form(
+            res, ["revenue", "orders", "aov"], [[4419.5, 120, 36.8]]
+        )
+        assert form == "counters"
+
+    def test_counter_pref_breakdown_is_counters(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="counter")
+        form = self._form(
+            res, ["channel", "revenue"], [["email", 1], ["search", 2]]
+        )
+        assert form == "counters"
+
+    def test_counter_pref_single_number_stays_value(self):
+        res = ask_engine.Resolution(kind="query", name="q", chart_pref="counter")
+        assert self._form(res, ["total"], [[42]]) == "value"
+
+    def test_counters_style_hint(self):
+        assert "counter cards" in ask_engine._style_hint("counters")
+
+    def test_unchartable_rows_are_table(self):
+        res = ask_engine.Resolution(kind="query", name="q")
+        form = self._form(
+            res, ["region", "manager"], [["North", "Ann"], ["South", "Bob"]]
+        )
+        assert form == "table"
+
+    def test_style_hint_per_form(self):
+        assert "One short sentence" in ask_engine._style_hint("value")
+        assert "chart" in ask_engine._style_hint("chart")
+        assert "table" in ask_engine._style_hint("table")
+        assert ask_engine._style_hint("none") == ""
+
+
+# --------------------------------------------------------------------------- #
+# Generated answer titles (resolver "title" field + deterministic fallback)
+# --------------------------------------------------------------------------- #
+class TestAnswerTitle:
+    def test_parse_resolution_cleans_title(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        project = load_project(proj)
+        try:
+            res = parse_resolution(
+                '{"kind": "query", "name": "by_region", '
+                '"title": "  Channel   share? "}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert res.title == "Channel share"
+
+    def test_title_angle_brackets_escaped_and_capped(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        project = load_project(proj)
+        try:
+            res = parse_resolution(
+                '{"kind": "query", "name": "by_region", '
+                '"title": "<LineChart /> ' + "x" * 200 + '"}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert "<" not in res.title and ">" not in res.title
+        assert "&lt;LineChart /&gt;" in res.title
+        assert len(res.title) <= ask_engine.MAX_TITLE_CHARS + 10  # + escapes
+
+    def test_non_string_title_degrades_empty(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _make_lib_project(proj)
+        project = load_project(proj)
+        try:
+            res = parse_resolution(
+                '{"kind": "query", "name": "by_region", "title": ["x"]}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert res.title == ""
+
+    def test_derive_title_semantic(self):
+        res = ask_engine.Resolution(
+            kind="semantic", model="sales", metric="revenue",
+            by="order_date", series="channel",
+        )
+        assert ask_engine._derive_title(res) == "Revenue by order date per channel"
+
+    def test_derive_title_list_and_query(self):
+        assert (
+            ask_engine._derive_title(
+                ask_engine.Resolution(kind="list", model="sales", columns=["c"])
+            )
+            == "Latest sales"
+        )
+        assert (
+            ask_engine._derive_title(
+                ask_engine.Resolution(kind="query", name="finance.mrr_by_month")
+            )
+            == "Finance mrr by month"
+        )
+
+    def test_answer_title_prefers_generated(self):
+        res = ask_engine.Resolution(kind="query", name="x", title="Nice title")
+        assert ask_engine.answer_title(res) == "Nice title"
+
+    def test_payload_carries_title(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region", "title": "Revenue by region"}',
+            "North leads.",
+        )
+        client = _client(tmp_path, fake=fake)
+        r = client.post("/_dashdown/api/ask", json={"question": "how do regions do?"})
+        assert r.status_code == 200, r.text
+        assert r.json()["title"] == "Revenue by region"
+
+    def test_payload_title_falls_back_to_derived(self, tmp_path):
+        fake = FakeAdapter(
+            '{"kind": "query", "name": "by_region"}', "North leads."
+        )
+        client = _client(tmp_path, fake=fake)
+        r = client.post("/_dashdown/api/ask", json={"question": "regions?"})
+        assert r.status_code == 200, r.text
+        assert r.json()["title"] == "By region"
+
+
+def test_style_hint_rides_build_ask_prompt():
+    from dashdown.llm import AskDef, build_ask_prompt
+
+    ask = AskDef(
+        id="x",
+        queries=(("q", "main"),),
+        prompt="How is revenue?",
+        style_hint="At most two short sentences.",
+    )
+    result = QueryResult(columns=["total"], rows=[[1]])
+    prompt = build_ask_prompt(ask, [result])
+    assert "Answer style: At most two short sentences." in prompt
+    # An authored ask (no hint) is byte-identical to the pre-hint prompt shape.
+    bare = AskDef(id="x", queries=(("q", "main"),), prompt="How is revenue?")
+    assert "Answer style" not in build_ask_prompt(bare, [result])
+
+
 def test_normalize_question_collapses_whitespace():
     assert normalize_question("  Which  Region\nLeads? ") == "which region leads?"
 
@@ -750,6 +1059,84 @@ def _semantic_project(tmp_path: Path) -> Path:
 
 @needs_bsl
 class TestSemanticResolution:
+    def test_relative_date_fails_validation_not_execution(self, tmp_path):
+        # "this week" as a date literal must be a VALIDATION failure (invalid →
+        # self-repair eligible), never reach the backend where a date column vs
+        # string comparison raises a raw IbisTypeError into the panel.
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            res = parse_resolution(
+                '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+                '"by": "region", "date_start": "this week"}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert res.kind == "none"
+        assert res.invalid is True
+        assert "ISO date" in res.reason and "this week" in res.reason
+
+    def test_relative_time_dimension_filter_fails_validation(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            res = parse_resolution(
+                '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+                '"by": "region", "filters": {"order_date": ["this week"]}}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert res.kind == "none"
+        assert "date column" in res.reason
+        assert "date_start" in res.reason
+
+    def test_iso_dates_and_categorical_filters_pass(self, tmp_path):
+        project = load_project(_semantic_project(tmp_path))
+        try:
+            res = parse_resolution(
+                '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+                '"by": "region", "filters": {"region": ["North"], '
+                '"order_date": ["2026-07-13"]}, '
+                '"date_start": "2026-07-13", "date_end": "2026-07-19"}',
+                project,
+                False,
+            )
+        finally:
+            project.close()
+        assert res.kind == "semantic"
+        assert res.date_start == "2026-07-13"
+        assert res.date_end == "2026-07-19"
+
+    def test_relative_date_repairs_to_iso(self, tmp_path):
+        # End-to-end: first resolution carries "this week", the self-repair
+        # retry (fed the validation reason + today's date in the prompt)
+        # returns concrete ISO boundaries → the answer succeeds.
+        fake = FakeAdapter(
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "date_start": "this week"}',
+            '{"kind": "semantic", "model": "sales", "metric": "revenue", '
+            '"by": "region", "date_start": "2020-01-01", "date_end": "2030-01-01"}',
+            "Revenue held steady this week.",
+        )
+        app = create_app(_semantic_project(tmp_path))
+        app.state.project.llm_adapter = fake
+        client = TestClient(app)
+        r = client.post(
+            "/_dashdown/api/ask",
+            json={"question": "what happened this week with channels"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved"]["kind"] == "semantic"
+        assert body["resolved"]["detail"]["date_start"] == "2020-01-01"
+        # resolve + repair + answer = three calls.
+        assert len(fake.calls) == 3
+        # The repair prompt quoted the reason and the prompt anchors today.
+        assert "ISO date" in fake.calls[1][1]
+        assert "Today's date:" in fake.calls[0][1]
+
     def test_semantic_happy_path(self, tmp_path):
         fake = FakeAdapter(
             '{"kind": "semantic", "model": "sales", "metric": "revenue", '

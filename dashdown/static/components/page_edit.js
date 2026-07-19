@@ -2,8 +2,8 @@
 //
 // Turns a page into its own source: a header ✎ button opens a whole-page
 // markdown editor, and every *kept* answer section (an ask answer the operator
-// pressed "Keep on this page" on) gains a hover toolbar to edit or remove just
-// that section. Both talk to the dev-server-only page-source API:
+// pressed "Add to page" on, or a composed section) gains a hover toolbar to
+// edit or remove just that section. Both talk to the dev-server-only page-source API:
 //   GET  /_dashdown/api/page-source?path=… -> {path, markdown, token}
 //   PUT  /_dashdown/api/page-source         -> {ok, token} | 409 {detail, token}
 // The `token` is a content fingerprint (sha1 of the file bytes), so a no-op

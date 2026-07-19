@@ -515,6 +515,95 @@ def ask(
     typer.echo(payload.get("answer_text") or "")
 
 
+@app.command()
+def compose(
+    instruction: str = typer.Argument(
+        ..., help="What to add — e.g. 'add a KPI row with revenue and orders'."
+    ),
+    project: Path = typer.Option(
+        Path("."), "--project", "-p", help="Project directory"
+    ),
+    page: str = typer.Option(
+        "/", "--page", help="Page path the section is composed for (e.g. /finance)"
+    ),
+    position: str = typer.Option(
+        "end", "--position", help="Where to place it: 'end' or 'top'"
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Write the section into the page's .md (default: preview only)",
+    ),
+) -> None:
+    """Compose new page content from an instruction — the CLI twin of the ask
+    box's "✎ Add to this page" flow.
+
+    One constrained LLM call plans page elements from the project's ask catalog;
+    the plan is compiled through the same validators the keep flow uses and the
+    resulting markdown section is printed (**preview by default** — pass
+    ``--write`` to splice it into the page):
+
+        dashdown compose "add a KPI row with revenue and orders" -p .
+        dashdown compose "add revenue by month as a line chart" --page /finance --write
+    """
+    from .ask_compose import build_composed_markdown, compose_plan
+    from .ask_engine import AskLLMError, ask_unavailable_notice, insert_kept_section
+    from .project import load_project
+
+    if position not in ("end", "top"):
+        raise typer.BadParameter("--position must be 'end' or 'top'")
+
+    proj = load_project(project.resolve())
+    try:
+        notice = ask_unavailable_notice(proj)
+        if notice is not None:
+            typer.echo(notice, err=True)
+            raise typer.Exit(1)
+
+        md_path, route_params = proj.page_path(page)
+        if md_path is None:
+            typer.echo(f"page not found: {page}", err=True)
+            raise typer.Exit(1)
+        if route_params:
+            typer.echo(
+                f"page {page} is dynamic ([slug]) — compose targets a single "
+                "editable file",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        try:
+            plan = compose_plan(proj, instruction.strip())
+            section, keep_id, dropped = build_composed_markdown(
+                proj, instruction.strip(), plan
+            )
+        except ValueError as exc:
+            typer.echo(f"could not compose: {exc}", err=True)
+            raise typer.Exit(1)
+        except AskLLMError as exc:
+            typer.echo(f"LLM request failed: {exc}", err=True)
+            raise typer.Exit(1)
+
+        for d in dropped:
+            typer.echo(f"dropped: {d['reason']}", err=True)
+
+        if not write:
+            typer.echo(section.strip("\n"))
+            typer.echo(
+                f"\n(preview only — pass --write to add it to {md_path.name})",
+                err=True,
+            )
+            return
+
+        existing = md_path.read_text(encoding="utf-8")
+        md_path.write_text(
+            insert_kept_section(existing, section, position), encoding="utf-8"
+        )
+        typer.echo(f"added section {keep_id} to {md_path} ({position})", err=True)
+    finally:
+        proj.close()
+
+
 _ERROR_TITLE_RE = re.compile(
     r'dashdown-error-title[^>]*>(.*?)</div>\s*<pre[^>]*>(.*?)</pre>', re.DOTALL
 )
