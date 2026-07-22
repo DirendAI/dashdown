@@ -76,6 +76,8 @@ def render_components(html: str, ctx: RenderContext, _depth: int = 0) -> str:
         try:
             attrs = parse_attrs(" " + attrs_str if attrs_str else "")
             _record_refs(attrs, ctx)
+            if comp.is_filter:
+                ctx.filter_params.update(comp.filter_param_names(attrs))
             return comp.render(attrs, ctx, None)
         except Exception as e:
             return _error_card(
@@ -137,6 +139,8 @@ def render_components(html: str, ctx: RenderContext, _depth: int = 0) -> str:
                         try:
                             attrs = parse_attrs(" " + attrs_str if attrs_str else "")
                             _record_refs(attrs, ctx)
+                            if comp.is_filter:
+                                ctx.filter_params.update(comp.filter_param_names(attrs))
                             # Recursively render inner content
                             inner_rendered = render_components(inner, ctx, _depth + 1)
                             rendered = comp.render(attrs, ctx, inner_rendered)

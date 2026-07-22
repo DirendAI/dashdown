@@ -443,6 +443,11 @@ def check(
     project: Path = typer.Option(
         Path("."), "--project", "-p", help="Project directory"
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Treat warnings (e.g. an unsupplied ${param}) as failures",
+    ),
 ) -> None:
     """Validate the project without serving it or running any queries.
 
@@ -452,8 +457,16 @@ def check(
     errors (unknown tags, bad attrs). Exits non-zero if anything is wrong: a
     fast edit→validate loop for authors and coding agents.
 
+    Also lints ``${param}`` coverage: a placeholder in a page's effective query
+    set that no filter control, route segment, global date param, or query
+    default supplies substitutes to '' at runtime and silently returns
+    plausible-but-wrong data (the classic typo: ``${regoin}``). Reported as a
+    warning — a page can legitimately be driven by URL-only params, declared in
+    frontmatter (``params: [region]``) to silence the warning. ``--strict``
+    turns warnings into failures (CI).
+
         dashdown check
-        dashdown check -p docs
+        dashdown check -p docs --strict
     """
     from .project import load_project
     from .render.pipeline import render_page
@@ -468,6 +481,7 @@ def check(
         pages_dir = proj.pages_dir
         md_paths = sorted(pages_dir.rglob("*.md")) if pages_dir.is_dir() else []
         problems: list[tuple[str, str]] = []  # (page url, message)
+        warnings: list[tuple[str, str]] = []  # (page url, message)
         ok = 0
         for md_path in md_paths:
             rel = md_path.relative_to(pages_dir).with_suffix("")
@@ -489,6 +503,7 @@ def check(
             except Exception as exc:  # parse / include / render failure
                 problems.append((url, str(exc)))
                 continue
+            warnings.extend(_param_coverage_warnings(url, rel, rendered, proj))
             # Component failures (unknown tag, bad attr) render as inline error
             # cards rather than raising — scan for them.
             cards = _ERROR_TITLE_RE.findall(rendered.body_html)
@@ -501,12 +516,70 @@ def check(
                 ok += 1
         for url, msg in problems:
             typer.echo(f"  ✗ {url}: {msg}", err=True)
+        for url, msg in warnings:
+            typer.echo(f"  ⚠ {url}: {msg}", err=True)
         typer.echo(f"{ok}/{len(md_paths)} page(s) OK", err=True)
-        if problems:
+        if warnings:
+            typer.echo(f"{len(warnings)} warning(s)", err=True)
+        if problems or (strict and warnings):
             raise typer.Exit(1)
         typer.echo("✓ project is valid")
     finally:
         proj.close()
+
+
+_SLUG_NAME_RE = re.compile(r"^\[(\w+)\]$")
+
+
+def _param_coverage_warnings(
+    url: str, md_rel: Path, rendered, proj
+) -> list[tuple[str, str]]:
+    """Warn about ``${param}`` placeholders nothing on the page supplies.
+
+    Suppliers, in the order an author would reach for them: a filter control's
+    param names (recorded on ``RenderedPage.filter_params`` during the component
+    scan), a dynamic ``[slug]`` route segment, the project global date params,
+    a query's registered default params, and an explicit frontmatter
+    ``params:`` declaration (the escape hatch for URL-only params). Python and
+    semantic queries are skipped — their params are optional runtime data, not
+    text substitution, so an absent value can't corrupt the SQL.
+    """
+    from .render.pipeline import get_query_def, sql_param_names
+
+    supplied = set(rendered.filter_params)
+    for part in md_rel.parts:  # rel is already suffix-stripped
+        m = _SLUG_NAME_RE.match(part)
+        if m:
+            supplied.add(m.group(1))
+    gd = proj.config.global_date
+    if gd.enabled:
+        supplied.update({gd.start_param, gd.end_param})
+    fm = rendered.frontmatter.get("params")
+    if isinstance(fm, str):
+        supplied.update(p.strip() for p in fm.split(",") if p.strip())
+    elif isinstance(fm, list):
+        supplied.update(str(p).strip() for p in fm if str(p).strip())
+
+    out: list[tuple[str, str]] = []
+    for qname in sorted(rendered.query_defs):
+        d = rendered.query_defs[qname]
+        qdef = get_query_def(qname, str(d.get("connector") or ""))
+        if qdef is None:  # Python / semantic query — no SQL text to corrupt
+            continue
+        sql, default_params, _ttl = qdef
+        for p in sorted(sql_param_names(sql)):
+            if p in supplied or p in default_params:
+                continue
+            out.append(
+                (
+                    url,
+                    f"${{{p}}} in query '{qname}' has no supplier — it will "
+                    "substitute to '' (add a filter control named "
+                    f"'{p}', or declare it in frontmatter `params:` if it "
+                    "arrives via the URL)",
+                )
+            )
+    return out
 
 
 @app.command()

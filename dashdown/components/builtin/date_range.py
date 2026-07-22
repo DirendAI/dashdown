@@ -77,6 +77,16 @@ class DateRange(Component):
 
     is_filter = True
 
+    def filter_param_names(self, attrs) -> set[str]:
+        # Writes derived start/end keys, never `name` itself (daterange.js).
+        name = attr_str(attrs, "name")
+        if not name:
+            return set()
+        return {
+            attr_str(attrs, "start_param", f"{name}_start"),
+            attr_str(attrs, "end_param", f"{name}_end"),
+        }
+
     def render(
         self, attrs, ctx: RenderContext, inner: str | None = None
     ) -> str:

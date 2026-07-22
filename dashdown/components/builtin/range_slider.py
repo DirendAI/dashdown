@@ -76,6 +76,16 @@ class RangeSlider(Component):
 
     is_filter = True
 
+    def filter_param_names(self, attrs) -> set[str]:
+        # Writes derived min/max keys, never `name` itself (range_slider.js).
+        name = attr_str(attrs, "name")
+        if not name:
+            return set()
+        return {
+            attr_str(attrs, "min_param", f"{name}_min"),
+            attr_str(attrs, "max_param", f"{name}_max"),
+        }
+
     def render(
         self, attrs, ctx: RenderContext, inner: str | None = None
     ) -> str:

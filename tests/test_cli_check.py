@@ -68,6 +68,115 @@ def test_check_no_pages_is_valid(tmp_path: Path) -> None:
     assert "0/0 page(s) OK" in res.stderr
 
 
+# --- check: ${param} coverage lint -------------------------------------------
+
+
+_PARAM_QUERY = (
+    "```sql sales\n"
+    "SELECT region, SUM(amount) AS total FROM sales\n"
+    "WHERE '${region}' = '' OR region = '${region}'\n"
+    "GROUP BY region\n"
+    "```\n\n"
+    "<Table data={sales} />\n"
+)
+
+
+def test_check_warns_on_unsupplied_param(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "index.md").write_text(
+        "# Sales\n\n" + _PARAM_QUERY, encoding="utf-8"
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    # Warn-only: the page may be driven by URL params — don't fail the build.
+    assert res.exit_code == 0, res.stderr
+    assert "${region}" in res.stderr
+    assert "no supplier" in res.stderr
+    assert "1 warning(s)" in res.stderr
+
+
+def test_check_strict_fails_on_unsupplied_param(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "index.md").write_text(
+        "# Sales\n\n" + _PARAM_QUERY, encoding="utf-8"
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj), "--strict"])
+    assert res.exit_code == 1
+    assert "no supplier" in res.stderr
+
+
+def test_check_filter_control_supplies_param(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "index.md").write_text(
+        "# Sales\n\n"
+        '<Dropdown name="region" data={sales} column="region" />\n\n' + _PARAM_QUERY,
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    assert res.exit_code == 0, res.stderr
+    assert "warning" not in res.stderr
+
+
+def test_check_daterange_supplies_derived_params(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "index.md").write_text(
+        "# Sales\n\n"
+        '<DateRange name="period" />\n\n'
+        "```sql sales\n"
+        "SELECT * FROM sales WHERE region >= '${period_start}' AND region <= '${period_end}'\n"
+        "```\n\n"
+        "<Table data={sales} />\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    assert res.exit_code == 0, res.stderr
+    assert "warning" not in res.stderr
+
+
+def test_check_route_segment_supplies_param(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "teams").mkdir()
+    (proj / "pages" / "teams" / "[team].md").write_text(
+        "# Team\n\n"
+        "```sql team_detail\n"
+        "SELECT * FROM sales WHERE region = '${team}'\n"
+        "```\n\n"
+        "<Table data={team_detail} />\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    assert res.exit_code == 0, res.stderr
+    assert "warning" not in res.stderr
+
+
+def test_check_frontmatter_params_escape_hatch(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "pages" / "index.md").write_text(
+        "---\nparams: [region]\n---\n\n# Sales\n\n" + _PARAM_QUERY,
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    assert res.exit_code == 0, res.stderr
+    assert "warning" not in res.stderr
+
+
+def test_check_global_date_supplies_params(tmp_path: Path) -> None:
+    proj = _make_project(tmp_path)
+    (proj / "dashdown.yaml").write_text(
+        "title: X\nglobal_filters:\n  date:\n    enabled: true\n", encoding="utf-8"
+    )
+    (proj / "pages" / "index.md").write_text(
+        "# Sales\n\n"
+        "```sql sales\n"
+        "SELECT * FROM sales WHERE region >= '${date_start}' AND region <= '${date_end}'\n"
+        "```\n\n"
+        "<Table data={sales} />\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(app, ["check", "-p", str(proj)])
+    assert res.exit_code == 0, res.stderr
+    assert "warning" not in res.stderr
+
+
 # --- connectors --------------------------------------------------------------
 
 

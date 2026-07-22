@@ -224,6 +224,15 @@ def get_query_def(name: str, connector: str) -> tuple[str, dict[str, str], int |
     return _query_def_cache.get((name, connector))
 
 
+def sql_param_names(sql: str) -> set[str]:
+    """Names of the ``${param}`` placeholders a SQL/DAX body references.
+
+    The single scan used by the client "filtered by" hints and the
+    ``${param}``-coverage lint in ``dashdown check``, so both agree with the
+    substitution regex itself."""
+    return set(_PARAM_RE.findall(sql))
+
+
 def _freeze_params(params: dict[str, str]) -> tuple:
     return tuple(sorted(params.items()))
 
@@ -500,6 +509,10 @@ class RenderedPage:
     # of one template share a cacheable, param-less data URL and the browser
     # serves the first record's response for the second. Empty for static pages.
     route_params: dict[str, str] = field(default_factory=dict)
+    # Filter/URL keys this page's filter controls supply
+    # (`Component.filter_param_names`, recorded during the component scan).
+    # Consumed by the `${param}`-coverage lint in `dashdown check`.
+    filter_params: set[str] = field(default_factory=set)
 
 
 # --- Author asset URLs (images / downloadable files) ----------------------------
@@ -876,6 +889,7 @@ def render_page(
         global_date_html=global_date_html,
         page_actions_html=page_actions_html,
         route_params=dict(params),
+        filter_params=set(ctx.filter_params),
     )
 
 

@@ -61,6 +61,10 @@ class RenderContext:
         # Set by render_components when ANY filter component renders (inline or
         # bar-routed). Informational — placement is decided per-control.
         self.has_filters = False
+        # Filter/URL keys supplied by this page's filter controls
+        # (`Component.filter_param_names`), recorded during the component scan.
+        # Consumed by the `${param}`-coverage lint in `dashdown check`.
+        self.filter_params: set[str] = set()
         # Set by `filter_bar_marker` when a filter control opts INTO the top
         # filter bar (`bar` / `filter_bar=true`). The pipeline emits the
         # filter-bar slot only when this is true, so a page of purely inline
@@ -102,6 +106,19 @@ class Component(ABC):
         self, attrs: dict[str, Any], ctx: RenderContext, inner: str | None = None
     ) -> str:  # pragma: no cover
         ...
+
+    def filter_param_names(self, attrs: dict[str, Any]) -> set[str]:
+        """The ``$store.filters`` / URL keys this control supplies when set.
+
+        Only meaningful for ``is_filter`` components. Most controls write their
+        single ``name=`` key; a control that writes derived keys instead
+        (DateRange's ``{name}_start``/``{name}_end``, RangeSlider's
+        ``{name}_min``/``{name}_max``) overrides this. Consumed by the
+        ``${param}``-coverage lint in ``dashdown check`` — it never affects
+        rendering.
+        """
+        name = attrs.get("name")
+        return {str(name)} if name else set()
 
 
 _COMPONENTS: dict[str, Component] = {}
