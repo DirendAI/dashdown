@@ -23,8 +23,10 @@ dashdown <command> --help  # options for one command
 | [`serve`](#serve) | Run the project locally with live-reload |
 | [`new`](#new) | Scaffold a new project |
 | [`check`](#check) | Validate the project without serving or running queries |
+| [`inspect`](#inspect) | One page's effective queries, bindings and (optionally) real row counts |
 | [`connectors`](#connectors) | List (and optionally probe) the configured connectors |
 | [`query`](#query) | Run raw SQL/DAX against a connector |
+| [`schema`](#schema) | The whole analytical surface — tables, columns, queries, models — in one call |
 | [`metric`](#metric) | Query the semantic layer by metric + grouping |
 | [`build`](#build) | Export a static site (HTML + pre-rendered data) |
 | [`pdf`](#pdf) | Export a presentation PDF |
@@ -104,15 +106,46 @@ edit→validate loop for authors and coding agents.
 
 ```bash
 dashdown check
-dashdown check -p my-dashboard
+dashdown check -p my-dashboard --strict
 ```
 
 | Option | Default | Notes |
 | --- | --- | --- |
 | `-p, --project` | `.` | Project directory. |
+| `--strict` | off | Treat warnings as failures (CI). |
 
 A clean project prints `✓ project is valid`; otherwise each problem is listed as
 `✗ <page>: <message>` on stderr and the command exits 1.
+
+`check` also lints **`${param}` coverage**: a placeholder in a page's queries
+that no filter control, `[slug]` route segment, global date param, or query
+default supplies substitutes to `''` at runtime and silently returns
+plausible-but-wrong data (the classic `${regoin}` typo). These print as
+`⚠` warnings — a page legitimately driven by URL-only params declares them in
+frontmatter (`params: [region]`) to silence the warning.
+
+## inspect
+
+Report **one page's ground truth**, machine-readably: its effective query set
+with provenance (page-inline / shared library / Python / semantic), resolved
+connectors, each query's `${param}` placeholders, which components read which
+query, and any unresolved `data={…}` reference (the "why is my chart empty"
+case). With `--data`, each query actually executes and reports row count +
+columns + timing — the verification step between `check` (renders, never runs
+queries) and `screenshot` (pixels drew, but were the numbers right?).
+
+```bash
+dashdown inspect /sales
+dashdown inspect /sales --data --param region=East -f json
+dashdown inspect /teams/Brazil --data     # route params resolve automatically
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `-p, --project` | `.` | Project directory. |
+| `-f, --format` | `table` | `table` or `json`. |
+| `--data` | off | Execute each query and report rows/columns/ms. |
+| `--param` | — | `key=value` filter value (repeatable), substituted when `--data` runs. |
 
 ## connectors
 
@@ -178,6 +211,33 @@ table name is matched as an escaped literal, never spliced as SQL.
 
 For a **semantic model**'s metrics and dimensions (not a connector's physical
 tables), use [`metric --list`](#metric) instead.
+
+## schema
+
+Emit the project's **whole analytical surface in one call**: every connector's
+tables + columns (introspected live), the shared query library with each
+query's `${param}` placeholders, Python queries, semantic models
+(metrics/dimensions), and which queries each page reads. One call replaces the
+per-table loop of `query --tables` / `query --schema <t>` — the context pack to
+load before writing anything, sized for an LLM in its default Markdown form.
+
+```bash
+dashdown schema                  # markdown, LLM-sized
+dashdown schema -f json          # machine-readable
+dashdown schema --no-columns     # cheap: table names only
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `-p, --project` | `.` | Project directory. |
+| `-f, --format` | `md` | `md` or `json`. |
+| `--no-pages` | off | Skip the per-page query map (no page renders). |
+| `--no-columns` | off | List tables without describing columns. |
+| `--max-tables` | `100` | Max tables introspected per connector. |
+
+Rendering pages to collect their query names never executes queries; the only
+I/O is connector introspection, which `--no-columns` / `--max-tables` bound for
+slow warehouses.
 
 ## metric
 

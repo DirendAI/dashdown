@@ -55,6 +55,9 @@ global_filters:                # → Filters
 filters:                       # → Filters
   debounce: 300                # ms of quiet before a filter change re-fetches
 
+data:                          # → see below
+  max_rows: 10000              # cap rows per data-API response (0 = unlimited)
+
 search:                        # → Full-text search
   enabled: true
   placeholder: "Search…"
@@ -152,6 +155,19 @@ Any single control overrides this with its own `debounce=` attribute
 (`<Search name="q" debounce={600} />`).
 
 → **[Filters & parameters](/filters)** for the controls themselves.
+
+## `data`
+
+Cross-cutting guards for query results.
+
+```yaml
+data:
+  max_rows: 10000   # cap rows per data-API response (0 = unlimited)
+```
+
+| Key        | Default | Purpose                                                           |
+| ---------- | ------- | ---------------------------------------------------------------- |
+| `max_rows` | `10000` | The big-result guard: one careless `SELECT *` against a warehouse table otherwise ships every row to the browser tab. Responses beyond the cap are truncated **server-side** and flagged; a `<Table>` shows a visible "showing first N of M rows" notice. Applies to the live data API only — static-build snapshots, the live WebSocket stream, and the CLI stay uncapped. |
 
 ## `search`
 

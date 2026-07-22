@@ -689,6 +689,9 @@ global_filters:                # → Filters
 filters:                       # → Filters
   debounce: 300                # ms of quiet before a filter change re-fetches
 
+data:                          # → see below
+  max_rows: 10000              # cap rows per data-API response (0 = unlimited)
+
 search:                        # → Full-text search
   enabled: true
   placeholder: "Search…"
@@ -786,6 +789,19 @@ Any single control overrides this with its own `debounce=` attribute
 (`<Search name="q" debounce={600} />`).
 
 → **[Filters & parameters](/filters)** for the controls themselves.
+
+## `data`
+
+Cross-cutting guards for query results.
+
+```yaml
+data:
+  max_rows: 10000   # cap rows per data-API response (0 = unlimited)
+```
+
+| Key        | Default | Purpose                                                           |
+| ---------- | ------- | ---------------------------------------------------------------- |
+| `max_rows` | `10000` | The big-result guard: one careless `SELECT *` against a warehouse table otherwise ships every row to the browser tab. Responses beyond the cap are truncated **server-side** and flagged; a `<Table>` shows a visible "showing first N of M rows" notice. Applies to the live data API only — static-build snapshots, the live WebSocket stream, and the CLI stay uncapped. |
 
 ## `search`
 
@@ -2569,6 +2585,8 @@ example; the common attributes are here.
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
 | `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question, `cache_ttl=` tunes the answer cache — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
 | `annotations`  | `false` keeps an explained chart **commentary-only** — the AI never proposes (or draws) [marks on the plot](/ai/ask#annotations-on-the-chart). Default `true`. |
+| `link`         | Drill-down: navigate on data-point click, e.g. `link="/regions/{region}"` — the same `{column}` grammar as a table's `row_link`, filled from the clicked point's source record. Category charts. |
+| `target`, `band`, `mark_x` | Author-declared reference marks — see below. Cartesian charts (line/bar/scatter/candlestick/box/violin). |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
@@ -2586,6 +2604,32 @@ pages.
 [LineChart](/components/charts/line-chart) and [BarChart](/components/charts/bar-chart)
 also take **`stacked`** — with a `series` column it stacks the groups on a shared
 total (a stacked area / stacked bar).
+
+## Reference marks & drill-down
+
+Three attributes draw **author-declared marks** — the same muted, dashed style
+(and renderer) as the AI's [explain annotations](/ai/ask#annotations-on-the-chart),
+but pinned by you, always on, and independent of any `explain` state:
+
+```markdown
+<LineChart data={daily_metrics} x="day" y="value"
+           target="95:SLA"                 <!-- dashed horizontal line -->
+           band="80,100:Healthy range"     <!-- shaded value band -->
+           mark_x="2025-11-01:Launch" />   <!-- dashed vertical event line -->
+```
+
+The value and an optional label split on the first `:` (`target=95` bare labels
+itself "Target"). A `target` above your data extends the value axis so the line
+is always visible. Cartesian charts only — on Sankey/Graph, `target=` remains
+their edge-target column.
+
+**Drill-down**: `link="/regions/{region}"` makes every data point a click
+target, filling `{column}` placeholders from the clicked point's source record —
+the chart twin of a table's `row_link`, and the natural pair for
+[dynamic `[slug]` pages](/detail-pages). Every chart also carries a
+hover-revealed **⬇ PNG button** (beside the fullscreen ⛶) that downloads the
+current canvas as a 2× PNG on a theme-solid background — for pasting a single
+chart into chat or a doc without a whole-page export.
 
 ## Multiple series
 
@@ -6398,8 +6442,10 @@ dashdown <command> --help  # options for one command
 | [`serve`](#serve) | Run the project locally with live-reload |
 | [`new`](#new) | Scaffold a new project |
 | [`check`](#check) | Validate the project without serving or running queries |
+| [`inspect`](#inspect) | One page's effective queries, bindings and (optionally) real row counts |
 | [`connectors`](#connectors) | List (and optionally probe) the configured connectors |
 | [`query`](#query) | Run raw SQL/DAX against a connector |
+| [`schema`](#schema) | The whole analytical surface — tables, columns, queries, models — in one call |
 | [`metric`](#metric) | Query the semantic layer by metric + grouping |
 | [`build`](#build) | Export a static site (HTML + pre-rendered data) |
 | [`pdf`](#pdf) | Export a presentation PDF |
@@ -6479,15 +6525,46 @@ edit→validate loop for authors and coding agents.
 
 ```bash
 dashdown check
-dashdown check -p my-dashboard
+dashdown check -p my-dashboard --strict
 ```
 
 | Option | Default | Notes |
 | --- | --- | --- |
 | `-p, --project` | `.` | Project directory. |
+| `--strict` | off | Treat warnings as failures (CI). |
 
 A clean project prints `✓ project is valid`; otherwise each problem is listed as
 `✗ <page>: <message>` on stderr and the command exits 1.
+
+`check` also lints **`${param}` coverage**: a placeholder in a page's queries
+that no filter control, `[slug]` route segment, global date param, or query
+default supplies substitutes to `''` at runtime and silently returns
+plausible-but-wrong data (the classic `${regoin}` typo). These print as
+`⚠` warnings — a page legitimately driven by URL-only params declares them in
+frontmatter (`params: [region]`) to silence the warning.
+
+## inspect
+
+Report **one page's ground truth**, machine-readably: its effective query set
+with provenance (page-inline / shared library / Python / semantic), resolved
+connectors, each query's `${param}` placeholders, which components read which
+query, and any unresolved `data={…}` reference (the "why is my chart empty"
+case). With `--data`, each query actually executes and reports row count +
+columns + timing — the verification step between `check` (renders, never runs
+queries) and `screenshot` (pixels drew, but were the numbers right?).
+
+```bash
+dashdown inspect /sales
+dashdown inspect /sales --data --param region=East -f json
+dashdown inspect /teams/Brazil --data     # route params resolve automatically
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `-p, --project` | `.` | Project directory. |
+| `-f, --format` | `table` | `table` or `json`. |
+| `--data` | off | Execute each query and report rows/columns/ms. |
+| `--param` | — | `key=value` filter value (repeatable), substituted when `--data` runs. |
 
 ## connectors
 
@@ -6553,6 +6630,33 @@ table name is matched as an escaped literal, never spliced as SQL.
 
 For a **semantic model**'s metrics and dimensions (not a connector's physical
 tables), use [`metric --list`](#metric) instead.
+
+## schema
+
+Emit the project's **whole analytical surface in one call**: every connector's
+tables + columns (introspected live), the shared query library with each
+query's `${param}` placeholders, Python queries, semantic models
+(metrics/dimensions), and which queries each page reads. One call replaces the
+per-table loop of `query --tables` / `query --schema <t>` — the context pack to
+load before writing anything, sized for an LLM in its default Markdown form.
+
+```bash
+dashdown schema                  # markdown, LLM-sized
+dashdown schema -f json          # machine-readable
+dashdown schema --no-columns     # cheap: table names only
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `-p, --project` | `.` | Project directory. |
+| `-f, --format` | `md` | `md` or `json`. |
+| `--no-pages` | off | Skip the per-page query map (no page renders). |
+| `--no-columns` | off | List tables without describing columns. |
+| `--max-tables` | `100` | Max tables introspected per connector. |
+
+Rendering pages to collect their query names never executes queries; the only
+I/O is connector introspection, which `--no-columns` / `--max-tables` bound for
+slow warehouses.
 
 ## metric
 

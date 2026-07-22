@@ -72,6 +72,8 @@ example; the common attributes are here.
 | `empty_message`| Message shown (centered) when the query returns no rows, for every chart type. Default `"No data available"`. |
 | `explain`      | A hover-revealed ✨ button that generates on-demand AI commentary below the plot (needs an `llm:` block); `explain="…"` asks your own question, `cache_ttl=` tunes the answer cache — see [Ask → Explain any chart](/ai/ask#explain-any-chart). |
 | `annotations`  | `false` keeps an explained chart **commentary-only** — the AI never proposes (or draws) [marks on the plot](/ai/ask#annotations-on-the-chart). Default `true`. |
+| `link`         | Drill-down: navigate on data-point click, e.g. `link="/regions/{region}"` — the same `{column}` grammar as a table's `row_link`, filled from the clicked point's source record. Category charts. |
+| `target`, `band`, `mark_x` | Author-declared reference marks — see below. Cartesian charts (line/bar/scatter/candlestick/box/violin). |
 
 A few types take their own attributes on top of the shared set — distribution
 charts ([BoxPlot](/components/charts/box-plot),
@@ -89,6 +91,32 @@ pages.
 [LineChart](/components/charts/line-chart) and [BarChart](/components/charts/bar-chart)
 also take **`stacked`** — with a `series` column it stacks the groups on a shared
 total (a stacked area / stacked bar).
+
+## Reference marks & drill-down
+
+Three attributes draw **author-declared marks** — the same muted, dashed style
+(and renderer) as the AI's [explain annotations](/ai/ask#annotations-on-the-chart),
+but pinned by you, always on, and independent of any `explain` state:
+
+```markdown
+<LineChart data={daily_metrics} x="day" y="value"
+           target="95:SLA"                 <!-- dashed horizontal line -->
+           band="80,100:Healthy range"     <!-- shaded value band -->
+           mark_x="2025-11-01:Launch" />   <!-- dashed vertical event line -->
+```
+
+The value and an optional label split on the first `:` (`target=95` bare labels
+itself "Target"). A `target` above your data extends the value axis so the line
+is always visible. Cartesian charts only — on Sankey/Graph, `target=` remains
+their edge-target column.
+
+**Drill-down**: `link="/regions/{region}"` makes every data point a click
+target, filling `{column}` placeholders from the clicked point's source record —
+the chart twin of a table's `row_link`, and the natural pair for
+[dynamic `[slug]` pages](/detail-pages). Every chart also carries a
+hover-revealed **⬇ PNG button** (beside the fullscreen ⛶) that downloads the
+current canvas as a 2× PNG on a theme-solid background — for pasting a single
+chart into chat or a doc without a whole-page export.
 
 ## Multiple series
 
