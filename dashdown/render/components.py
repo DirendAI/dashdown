@@ -8,14 +8,18 @@ from dashdown.components.base import RenderContext, get_component, known_compone
 from dashdown.render.attrs import DataRef, parse_attrs
 
 
-def _record_refs(attrs: dict, ctx: RenderContext) -> None:
+def _record_refs(attrs: dict, ctx: RenderContext, component: str = "") -> None:
     """Record every ``data={name}`` (DataRef) attribute into
     ``ctx.referenced_queries`` so the pipeline can resolve referenced shared-
     library queries after the component scan. A comma-list ref
-    (``data={a,b}`` — multi-query <Ask />) records each name."""
+    (``data={a,b}`` — multi-query <Ask />) records each name. The
+    ``(component, query)`` pair also lands in ``ctx.component_refs`` — the
+    binding map ``dashdown inspect`` reports."""
     for value in attrs.values():
         if isinstance(value, DataRef):
             ctx.referenced_queries.update(value.names)
+            for name in value.names:
+                ctx.component_refs.append((component, name))
 
 # Pattern to match component tag names (uppercase start)
 _COMPONENT_NAME_RE = re.compile(r"[A-Z][A-Za-z0-9_]*")
@@ -75,7 +79,7 @@ def render_components(html: str, ctx: RenderContext, _depth: int = 0) -> str:
             ctx.has_filters = True
         try:
             attrs = parse_attrs(" " + attrs_str if attrs_str else "")
-            _record_refs(attrs, ctx)
+            _record_refs(attrs, ctx, name)
             if comp.is_filter:
                 ctx.filter_params.update(comp.filter_param_names(attrs))
             return comp.render(attrs, ctx, None)
@@ -138,7 +142,7 @@ def render_components(html: str, ctx: RenderContext, _depth: int = 0) -> str:
                             ctx.has_filters = True
                         try:
                             attrs = parse_attrs(" " + attrs_str if attrs_str else "")
-                            _record_refs(attrs, ctx)
+                            _record_refs(attrs, ctx, opening_name)
                             if comp.is_filter:
                                 ctx.filter_params.update(comp.filter_param_names(attrs))
                             # Recursively render inner content

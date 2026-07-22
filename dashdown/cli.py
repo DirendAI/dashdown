@@ -491,6 +491,220 @@ def schema(
         proj.close()
 
 
+@app.command()
+def inspect(
+    page: str = typer.Argument("/", help="Page URL to inspect, e.g. /sales"),
+    project: Path = typer.Option(
+        Path("."), "--project", "-p", help="Project directory"
+    ),
+    fmt: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table or json"
+    ),
+    data: bool = typer.Option(
+        False,
+        "--data",
+        help="Execute each query and report row count + columns (queries DO run)",
+    ),
+    param: list[str] = typer.Option(
+        [],
+        "--param",
+        help="Filter value as key=value (repeatable) substituted when --data runs queries",
+    ),
+) -> None:
+    """Report one page's ground truth, machine-readably.
+
+    The gap between ``check`` (renders, never runs queries) and ``screenshot``
+    (pixels drew — but were the numbers right?): the page's *effective* query
+    set with provenance (page-inline / shared library / Python / semantic),
+    resolved connectors, each query's ``${param}`` placeholders, which
+    components read which query, the filter params the page supplies, and any
+    render errors. With ``--data`` each query is actually executed (with
+    ``--param`` values substituted) and its row count + columns reported — the
+    verification call an author or coding agent makes after an edit:
+
+        dashdown inspect /sales
+        dashdown inspect /sales --data --param region=East -f json
+        dashdown inspect /teams/Brazil --data     # route params resolve automatically
+    """
+    if fmt not in ("table", "json"):
+        raise typer.BadParameter("--format must be one of: table, json")
+
+    params: dict[str, str] = {}
+    for item in param:
+        if "=" not in item:
+            raise typer.BadParameter(f"--param must be key=value, got: {item!r}")
+        key, value = item.split("=", 1)
+        params[key.strip()] = value
+
+    from .project import load_project
+
+    proj = load_project(project.resolve())
+    try:
+        report = _build_inspect_report(proj, page, run_data=data, params=params)
+        if report is None:
+            avail = ", ".join(proj.list_pages()) or "(none)"
+            raise typer.BadParameter(f"no page for {page!r} — available: {avail}")
+        if fmt == "json":
+            import json
+
+            typer.echo(json.dumps(report, indent=2, default=str))
+        else:
+            _print_inspect_report(report)
+    finally:
+        proj.close()
+
+
+def _build_inspect_report(
+    proj, page: str, *, run_data: bool, params: dict[str, str]
+) -> dict | None:
+    """The `dashdown inspect` payload for one page, or None if no page matches."""
+    import time as _time
+
+    from .python_query import run_python_query
+    from .render.markdown import expand_includes, parse_markdown
+    from .render.pipeline import (
+        _substitute_params,
+        get_python_query_def,
+        get_query_def,
+        render_page,
+        sql_param_names,
+    )
+
+    full = page.strip("/")
+    md_path, route_params = proj.page_path(full)
+    if md_path is None:
+        return None
+    canonical = ("/" + full).rstrip("/") or "/"
+
+    source = md_path.read_text(encoding="utf-8")
+    rendered = render_page(
+        source,
+        proj.connectors,
+        params=route_params,
+        current_path=canonical,
+        include_base=proj.root,
+        library=proj.queries,
+        python_library=proj.python_queries,
+        semantic_models=proj.semantic_models,
+    )
+
+    # Provenance: page-inline names come from the same include-expanded parse
+    # render_page used; library/python from the project registries; the
+    # remainder are compiled semantic references.
+    _, local_specs, _ = parse_markdown(expand_includes(source, proj.root))
+    local_names = {s.name for s in local_specs}
+
+    bindings: dict[str, list[str]] = {}
+    for component, qname in rendered.component_refs:
+        bindings.setdefault(qname, []).append(component)
+
+    all_params = {**route_params, **params}
+    queries: dict[str, dict] = {}
+    for qname in sorted(rendered.query_defs):
+        d = rendered.query_defs[qname]
+        connector = str(d.get("connector") or "")
+        if qname in local_names:
+            source_kind = "page"
+        elif qname in proj.queries:
+            source_kind = "library"
+        elif qname in proj.python_queries:
+            source_kind = "python"
+        else:
+            source_kind = "semantic"
+        entry: dict = {"connector": connector, "source": source_kind}
+        qdef = get_query_def(qname, connector)
+        if qdef is not None:
+            entry["params"] = sorted(sql_param_names(qdef[0]))
+        elif "params" in d:
+            entry["params"] = list(d["params"])
+        if d.get("live"):
+            entry["live"] = True
+        if qname in bindings:
+            entry["components"] = sorted(set(bindings[qname]))
+        if run_data:
+            entry["data"] = _inspect_run_query(
+                proj, qname, connector, all_params, qdef,
+                get_python_query_def, run_python_query, _substitute_params, _time,
+            )
+        queries[qname] = entry
+
+    # Component refs that resolved to nothing render as client-side 404s — the
+    # exact "why is my chart empty" case; surface them loudly.
+    unresolved = sorted(
+        {q for _, q in rendered.component_refs if q not in rendered.query_defs}
+    )
+
+    cards = _ERROR_TITLE_RE.findall(rendered.body_html)
+    errors = [f"{t.strip()}: {d.strip()}" for t, d in cards] + list(rendered.errors)
+
+    return {
+        "page": canonical,
+        "file": str(md_path.relative_to(proj.root)),
+        "title": rendered.frontmatter.get("title", md_path.stem),
+        "route_params": route_params,
+        "queries": queries,
+        "unresolved_refs": unresolved,
+        "filter_params": sorted(rendered.filter_params),
+        "errors": errors,
+    }
+
+
+def _inspect_run_query(
+    proj, qname, connector_name, all_params, qdef,
+    get_python_query_def, run_python_query, substitute, _time,
+) -> dict:
+    """Execute one query for `inspect --data`; failures report, never raise."""
+    started = _time.perf_counter()
+    try:
+        py_spec = get_python_query_def(qname, connector_name)
+        if py_spec is not None:
+            result = run_python_query(py_spec, dict(all_params), proj.connectors)
+        elif qdef is not None:
+            conn = proj.connectors.get(connector_name)
+            if conn is None:
+                return {"error": f"connector '{connector_name}' not found"}
+            sql, default_params, _ = qdef
+            result = conn.query(substitute(sql, {**default_params, **all_params}))
+        else:
+            return {"error": "no runnable definition"}
+    except Exception as exc:  # noqa: BLE001 — report, don't traceback
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    ms = int((_time.perf_counter() - started) * 1000)
+    return {"rows": len(result.rows), "columns": list(result.columns), "ms": ms}
+
+
+def _print_inspect_report(report: dict) -> None:
+    typer.echo(f"{report['page']}  ({report['file']})")
+    if report["route_params"]:
+        pairs = ", ".join(f"{k}={v}" for k, v in report["route_params"].items())
+        typer.echo(f"  route params: {pairs}")
+    if report["filter_params"]:
+        typer.echo(f"  filters supply: {', '.join(report['filter_params'])}")
+    typer.echo("")
+    for qname, q in report["queries"].items():
+        live = "  [live]" if q.get("live") else ""
+        typer.echo(f"  {qname}  ({q['source']}, connector: {q['connector']}){live}")
+        if q.get("params"):
+            typer.echo(f"    params: {', '.join(q['params'])}")
+        if q.get("components"):
+            typer.echo(f"    read by: {', '.join(q['components'])}")
+        d = q.get("data")
+        if d is not None:
+            if "error" in d:
+                typer.echo(f"    ✗ query failed: {d['error']}")
+            else:
+                cols = ", ".join(d["columns"])
+                typer.echo(f"    ✓ {d['rows']} row(s) in {d['ms']}ms — columns: {cols}")
+    if not report["queries"]:
+        typer.echo("  (no queries on this page)")
+    for name in report["unresolved_refs"]:
+        typer.echo(f"  ✗ unresolved reference: {name} (no page/library/python query)")
+    for e in report["errors"]:
+        typer.echo(f"  ✗ {e}")
+    n = len(report["queries"])
+    typer.echo(f"{n} quer{'y' if n == 1 else 'ies'}", err=True)
+
+
 _ERROR_TITLE_RE = re.compile(
     r'dashdown-error-title[^>]*>(.*?)</div>\s*<pre[^>]*>(.*?)</pre>', re.DOTALL
 )

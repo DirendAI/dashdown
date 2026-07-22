@@ -513,6 +513,9 @@ class RenderedPage:
     # (`Component.filter_param_names`, recorded during the component scan).
     # Consumed by the `${param}`-coverage lint in `dashdown check`.
     filter_params: set[str] = field(default_factory=set)
+    # (component name, query name) bindings recorded during the component scan
+    # — which component reads which query. Consumed by `dashdown inspect`.
+    component_refs: list[tuple[str, str]] = field(default_factory=list)
 
 
 # --- Author asset URLs (images / downloadable files) ----------------------------
@@ -890,6 +893,7 @@ def render_page(
         page_actions_html=page_actions_html,
         route_params=dict(params),
         filter_params=set(ctx.filter_params),
+        component_refs=list(ctx.component_refs),
     )
 
 

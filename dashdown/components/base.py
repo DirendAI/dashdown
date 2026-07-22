@@ -75,6 +75,9 @@ class RenderContext:
         # resolves any name not defined by a local :::query against the shared
         # query library (precedence local -> library).
         self.referenced_queries: set[str] = set()
+        # (component name, query name) per DataRef — the binding map `dashdown
+        # inspect` reports. Purely informational; ordering follows the scan.
+        self.component_refs: list[tuple[str, str]] = []
         # AskDefs registered by <Ask /> renders on this page, collected so the
         # pipeline can expose them (the static build generates one commentary
         # snapshot per def).
