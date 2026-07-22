@@ -171,8 +171,20 @@ function connect() {
       return;
     }
     if (data.protocol) {
-      // hello: {protocol, active}. If nothing is active and we thought one
-      // was, the run finished while we were away (replay carries the result).
+      // hello: {protocol, active}. If nothing is active but we believe a run
+      // is, either the run finished while we were away (the replay that
+      // follows carries its result and clears `running`) or the SERVER
+      // RESTARTED mid-run and has no replay at all. Give the replay a moment,
+      // then unwedge — otherwise the panel shows "working…" forever with Run
+      // disabled.
+      if (!data.active && state.running) {
+        setTimeout(() => {
+          if (state.running) {
+            addLine("warn", "⚠ Reconnected, but the server has no record of the run (restarted?).");
+            setStatus("", false);
+          }
+        }, 1500);
+      }
       return;
     }
     if (data.run_id && data.event) handleEvent(data.run_id, data.seq, data.event);
@@ -237,7 +249,9 @@ async function startRun() {
 
 async function stopRun() {
   if (!state.runId) return;
-  await post("cancel", { run_id: state.runId });
+  const { status } = await post("cancel", { run_id: state.runId });
+  // 404 = the server doesn't know this run (restart) — unwedge locally.
+  if (status === 404) setStatus("", false);
 }
 
 async function undoRun() {

@@ -1280,11 +1280,9 @@ def _register_edit_endpoints(app: FastAPI) -> None:
             if md_path is not None:
                 page_file = str(md_path.relative_to(proj.root))
         params_in = body.get("params")
-        params = {
-            str(k): str(v)
-            for k, v in (params_in or {}).items()
-            if isinstance(params_in, dict)
-        }
+        if not isinstance(params_in, dict):
+            params_in = {}
+        params = {str(k): str(v) for k, v in params_in.items()}
         params.update(route_params)
 
         try:
@@ -1389,15 +1387,6 @@ def _register_edit_endpoints(app: FastAPI) -> None:
             return
 
         replay, queue = edit_hub.subscribe()
-        active = edit_hub.current
-        await websocket.send_json(
-            {
-                "protocol": "dashdown-edit.v1",
-                "active": active.run_id if active and active.active else None,
-            }
-        )
-        for envelope in replay:
-            await websocket.send_json(envelope)
 
         async def _receive() -> None:
             # Client → server: {"type": "cancel"} stops the active run; a
@@ -1414,8 +1403,23 @@ def _register_edit_endpoints(app: FastAPI) -> None:
             finally:
                 queue.put_nowait(CLOSED)
 
-        receiver = asyncio.create_task(_receive())
+        # Everything after subscribe() sits inside this try: the hello/replay
+        # sends can raise on a client that disconnects mid-replay (up to
+        # max_events envelopes), and an early exit must still unsubscribe or
+        # the dead queue would collect every future run's events forever.
+        receiver = None
         try:
+            active = edit_hub.current
+            await websocket.send_json(
+                {
+                    "protocol": "dashdown-edit.v1",
+                    "active": active.run_id if active and active.active else None,
+                }
+            )
+            for envelope in replay:
+                await websocket.send_json(envelope)
+
+            receiver = asyncio.create_task(_receive())
             while True:
                 item = await queue.get()
                 if item is CLOSED:
@@ -1424,7 +1428,8 @@ def _register_edit_endpoints(app: FastAPI) -> None:
         except WebSocketDisconnect:
             pass
         finally:
-            receiver.cancel()
+            if receiver is not None:
+                receiver.cancel()
             edit_hub.unsubscribe(queue)
 
 

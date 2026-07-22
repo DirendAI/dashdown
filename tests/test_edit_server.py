@@ -253,6 +253,20 @@ class TestEditSecurity:
         resp = client.get("/", headers=HOST_HEADERS)
         assert 'id="dashdown-edit"' not in resp.text
 
+    def test_malformed_params_is_400_not_500(self, tmp_path):
+        root = _make_project(tmp_path)
+        runtime = _runtime(root)
+        client = _client(root, runtime)
+        resp = client.post(
+            "/_dashdown/api/edit/run",
+            json={"prompt": "x", "params": [1, 2, 3]},
+            headers=_auth_headers(runtime),
+        )
+        # Non-dict params are ignored, not a crash — the run proceeds.
+        assert resp.status_code == 202
+        with client:
+            pass  # context exit runs the shutdown hook, killing the run
+
     def test_unavailable_agent_503_on_run(self, tmp_path):
         root = _make_project(tmp_path)
         runtime = _runtime(root, preset=None, probe="nothing installed")

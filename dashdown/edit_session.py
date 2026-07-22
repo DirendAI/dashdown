@@ -267,20 +267,29 @@ class EditRun:
             self._finish(exit_code=None)
             return
 
-        self.state = "running"
-        self._emit({"type": "status", "state": "running"})
+        if not self.active:
+            # A cancel landed while the subprocess was spawning — _kill() was a
+            # no-op then (no proc yet), so kill now and keep the cancelled state.
+            self._kill()
+        else:
+            self.state = "running"
+            self._emit({"type": "status", "state": "running"})
         self._watchdog = asyncio.get_running_loop().create_task(self._timeout_watch())
 
+        loop = asyncio.get_running_loop()
+        # Start BOTH pipe readers before feeding stdin: a prompt larger than
+        # the OS pipe buffer would otherwise deadlock against a child that
+        # fills its own stdout/stderr before consuming stdin (nobody draining
+        # either side). The stdin feed runs as its own task for the same
+        # reason.
+        stderr_task = loop.create_task(self._read_stderr())
         assert self._proc.stdin is not None
+        stdin_task = None
         if runtime.preset.prompt_via == "stdin":
-            self._proc.stdin.write(full_prompt.encode("utf-8"))
-            try:
-                await self._proc.stdin.drain()
-            except (ConnectionResetError, BrokenPipeError):
-                pass
-        self._proc.stdin.close()
+            stdin_task = loop.create_task(self._feed_stdin(full_prompt))
+        else:
+            self._proc.stdin.close()
 
-        stderr_task = asyncio.get_running_loop().create_task(self._read_stderr())
         parser = runtime.preset.parser
         assert self._proc.stdout is not None
         while True:
@@ -296,6 +305,10 @@ class EditRun:
 
         exit_code = await self._proc.wait()
         await stderr_task
+        if stdin_task is not None:
+            # Process exit breaks the pipe, so a still-blocked drain raises
+            # (handled inside) rather than hanging; await for a clean join.
+            await stdin_task
         if self._watchdog is not None:
             self._watchdog.cancel()
 
@@ -305,6 +318,19 @@ class EditRun:
         # so off the event loop like every other blocking call in the server.
         self.verify = await asyncio.to_thread(self._verify_project)
         self._finish(exit_code=exit_code)
+
+    async def _feed_stdin(self, prompt: str) -> None:
+        assert self._proc is not None and self._proc.stdin is not None
+        try:
+            self._proc.stdin.write(prompt.encode("utf-8"))
+            await self._proc.stdin.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            try:
+                self._proc.stdin.close()
+            except (ConnectionResetError, BrokenPipeError):  # pragma: no cover
+                pass
 
     async def _read_stderr(self) -> None:
         assert self._proc is not None and self._proc.stderr is not None
