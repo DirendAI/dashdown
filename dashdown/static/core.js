@@ -607,6 +607,38 @@ export function esc(str) {
     .replace(/'/g, "&#39;");
 }
 
+/* ------------------------------------------------------------------ *
+ * Drill-down link helpers — shared by <Table> row/cell links and the  *
+ * chart `link=` attribute (table.js / chart.js import these).         *
+ * ------------------------------------------------------------------ */
+
+/** Fill `{column}` placeholders in a link pattern from a record (missing → ""). */
+export function fillPattern(pattern, row) {
+  return String(pattern).replace(/\{(\w+)\}/g, (_, k) => {
+    const v = row[k];
+    return v == null ? "" : String(v);
+  });
+}
+
+/**
+ * Resolve a drill-down target for the current hosting. `row_link`/`link_pattern`
+ * are authored as absolute routes (e.g. `/detail-pages/{id}`), correct as-is on
+ * the dev server (served at the origin root). A static build is hosted against a
+ * relative `<base>` so it works under a sub-path (project GitHub Pages); there an
+ * absolute `/route` bypasses the base and 404s, so re-root it as the same
+ * `<route>/index.html` the nav uses (mirrors build.root_link). The presence of a
+ * `<base>` marks a static build; external/in-page links are left alone.
+ */
+export function navHref(href) {
+  if (!href || href[0] !== "/" || href.startsWith("//")) return href;
+  if (!document.querySelector("base[href]")) return href; // dev server
+  const i = href.search(/[#?]/);
+  const path = i === -1 ? href : href.slice(0, i);
+  const tail = i === -1 ? "" : href.slice(i);
+  const route = path.replace(/^\/+|\/+$/g, "");
+  return new URL((route ? `${route}/index.html` : "index.html") + tail, document.baseURI).href;
+}
+
 /**
  * Safe JSON stringify that handles circular references
  * @param {any} obj - Object to stringify

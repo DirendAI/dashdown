@@ -578,3 +578,23 @@ def test_stacked_absent_by_default(ctx):
     assert "stacked" not in _config_of(
         render_components('<LineChart data={s} x="m" y="v" />', ctx)
     )
+
+
+# --- chart drill-down link ---------------------------------------------------
+
+
+def test_chart_link_in_config(ctx):
+    """`link="/detail/{col}"` flows into data-config so chart.js can navigate
+    on data-point click (same {column} grammar as a table row_link)."""
+    config = _config_of(
+        render_components(
+            '<BarChart data={s} x="region" y="v" link="/regions/{region}" />', ctx
+        )
+    )
+    assert config["link"] == "/regions/{region}"
+
+
+def test_chart_link_absent_by_default(ctx):
+    assert "link" not in _config_of(
+        render_components('<BarChart data={s} x="region" y="v" />', ctx)
+    )

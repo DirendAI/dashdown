@@ -88,6 +88,12 @@ def _chart_placeholder(
     color = attr_str(attrs, "color")
     if color:
         config["color"] = color
+    # Drill-down: `link="/detail/{column}"` navigates on data-point click —
+    # the same `{column}` grammar as a table's `row_link` (chart.js fills it
+    # from the clicked point's source record). Category charts only.
+    link = attr_str(attrs, "link")
+    if link:
+        config["link"] = link
     # Pie charts default to a donut with a center total; `donut=false` opts out.
     if "donut" in attrs:
         config["donut"] = attr_bool(attrs, "donut", True)

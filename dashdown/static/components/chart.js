@@ -3,7 +3,7 @@
 
 "use strict";
 
-import { fetchQueryData, recordsOf, queryUsesFilters, esc, readBrandingConfig, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts } from "../core.js";
+import { fetchQueryData, recordsOf, queryUsesFilters, esc, readBrandingConfig, bindLiveQuery, isLiveQuery, formatValue, resolveFormatOpts, fillPattern, navHref } from "../core.js";
 import { showLoading, hideLoading } from "../loading.js";
 import { applyChartAnnotations } from "./annotations.js";
 import { mountFilterBadge } from "./filter_badge.js";
@@ -355,6 +355,7 @@ export function initChart(el) {
     // DaisyUI light/dark mode, so titles/axes/legends are readable in both.
     const echartsInstance = echarts.init(chartContainer, currentEChartsTheme());
     el._echarts_instance = echartsInstance;
+    wireDrillDown(el, echartsInstance, config);
 
     // Create chart instance
     const instance = {
@@ -476,8 +477,50 @@ function reinitChartTheme(instance) {
   const next = echarts.init(container, currentEChartsTheme());
   el._echarts_instance = next;
   instance.echartsInstance = next;
+  // Event handlers die with the disposed instance — re-attach drill-down.
+  wireDrillDown(el, next, instance.config);
   const filters = (window.Alpine && Alpine.store) ? { ...(Alpine.store("filters") || {}) } : {};
   instance.render(filters);
+}
+
+/**
+ * Chart drill-down: a `link="/detail/{column}"` attr navigates on data-point
+ * click — the same `{column}` grammar (and static-build re-rooting) as a
+ * table's `row_link`/`link_pattern`. The pattern fills from the clicked
+ * point's source record when one matches (looked up by the x value + series
+ * value in the last-rendered records), so any column of that row is
+ * addressable — not just the plotted ones. Falls back to a synthetic
+ * {x, series} record for charts whose records can't be matched (e.g. a value
+ * axis with no category name). Category charts (bar/line/pie/funnel/treemap…)
+ * are the intended surface.
+ * @param {HTMLElement} el - Chart card element (reads `_chartRecords`)
+ * @param {Object} inst - Live ECharts instance
+ * @param {Object} config - Chart config (reads `link`, `x`, `series_by`)
+ */
+function wireDrillDown(el, inst, config) {
+  if (!config || !config.link) return;
+  inst.on("click", (params) => {
+    if (!params || params.componentType !== "series") return;
+    const records = Array.isArray(el._chartRecords) ? el._chartRecords : [];
+    const xCol = config.x;
+    const seriesCol = config.series_by;
+    let row = null;
+    if (xCol && params.name != null && params.name !== "") {
+      row =
+        records.find(
+          (r) =>
+            String(r[xCol]) === String(params.name) &&
+            (!seriesCol || String(r[seriesCol]) === String(params.seriesName))
+        ) || null;
+    }
+    if (!row) {
+      row = {};
+      if (xCol && params.name != null) row[xCol] = params.name;
+      if (seriesCol && params.seriesName != null) row[seriesCol] = params.seriesName;
+    }
+    const href = navHref(fillPattern(config.link, row));
+    if (href) window.location.assign(href);
+  });
 }
 
 // Re-theme every live chart when DaisyUI light/dark mode changes.
