@@ -29,6 +29,7 @@ import { initEmbedUI } from "./components/embed_ui.js";
 import { initAllMermaid } from "./components/mermaid.js";
 import { initAllCopyCode } from "./components/copy_code.js";
 import { initFullscreen } from "./components/fullscreen.js";
+import { initChartPng } from "./components/chart_png.js";
 import { initAllSiteSearches } from "./components/site_search.js";
 import { initPrint, initPdfButton } from "./components/print.js";
 import { initLegacy } from "./legacy.js";
@@ -239,6 +240,11 @@ function init() {
   // on demand and reuses the cached query data, so it wires up regardless of
   // when charts/tables initialize (and is a no-op until a button is clicked).
   initFullscreen();
+
+  // Per-chart PNG download: one delegated listener for every chart ⬇ button.
+  // Same posture as fullscreen — wires regardless of chart init timing, no-op
+  // until clicked, reads the live ECharts instance at click time.
+  initChartPng();
 
   // Site search is plain DOM (no Alpine, no data API), so init it independently
   // of the async-component path — a prose-only docs page must still get search.

@@ -598,3 +598,9 @@ def test_chart_link_absent_by_default(ctx):
     assert "link" not in _config_of(
         render_components('<BarChart data={s} x="region" y="v" />', ctx)
     )
+
+
+def test_chart_card_carries_png_button(ctx):
+    html = render_components('<BarChart data={s} x="region" y="v" />', ctx)
+    assert "dashdown-chart-png-btn" in html
+    assert "dashdown-chart-expand-btn" in html

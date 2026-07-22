@@ -50,6 +50,19 @@ _EXPAND_BTN_HTML = (
     '1 0 001-1v-4m0-8V4a1 1 0 00-1-1h-4"/></svg></button>'
 )
 
+# The ⬇ PNG button beside the fullscreen ⛶: downloads the chart's canvas as a
+# 2x PNG on a theme-solid background (static/components/chart_png.js — a
+# delegated listener reading the live ECharts instance off the card). Only on
+# ECharts cards (this shell), never the SVG geo maps — there's no canvas there.
+_PNG_BTN_HTML = (
+    '<button type="button" class="dashdown-chart-png-btn" '
+    'aria-label="Download chart as PNG" title="Download PNG">'
+    '<svg fill="none" stroke="currentColor" stroke-width="2" '
+    'viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" '
+    'stroke-linejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 '
+    '2 0 002-2v-2"/></svg></button>'
+)
+
 
 def _chart_placeholder(
     chart_type: str,
@@ -194,12 +207,13 @@ def _chart_card(
             f'<div class="dashdown-chart-region" style="height:{height}px">'
             f"{skeleton_body}"
             f"</div>"
+            f"{_PNG_BTN_HTML}"
             f"{_EXPAND_BTN_HTML}"
             f"{explain_html}"
         )
         style = f"width:100%;{span}"
     else:
-        inner = f"{skeleton_body}{_EXPAND_BTN_HTML}"
+        inner = f"{skeleton_body}{_PNG_BTN_HTML}{_EXPAND_BTN_HTML}"
         style = f"width:100%;height:{height}px;{span}"
 
     return (

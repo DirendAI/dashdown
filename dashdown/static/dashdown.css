@@ -1342,11 +1342,53 @@ body {
    expand button tucks to its left. */
 .dashdown-chart:has(.dashdown-explain-btn) .dashdown-chart-expand-btn { right: 2.25rem; }
 
+/* --- Chart ⬇ PNG button -------------------------------------------------- */
+/* Same look/reveal as the expand button; sits one slot further left in the
+   corner cluster: [⬇] [⛶] [✨]. Only on ECharts cards (chart_png.js reads the
+   canvas), never the SVG geo maps. */
+.dashdown-chart-png-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 2.25rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--dashdown-radius-control, 0.5rem);
+  color: oklch(var(--bc) / 0.55);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.dashdown-chart-png-btn svg { width: 0.875rem; height: 0.875rem; }
+[data-async-component]:hover .dashdown-chart-png-btn,
+.dashdown-chart-png-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dashdown-chart-png-btn:hover,
+.dashdown-chart-png-btn:focus-visible {
+  color: oklch(var(--bc) / 1);
+  background: color-mix(in oklch, oklch(var(--bc) / 1) 10%, transparent);
+  outline: none;
+}
+@media (hover: none) {
+  .dashdown-chart-png-btn { opacity: 1; pointer-events: auto; }
+}
+.dashdown-chart:has(.dashdown-explain-btn) .dashdown-chart-png-btn { right: 4rem; }
+
 /* The informational funnel yields the corner to the actionable buttons: it
-   clears the expand button (always present on a chart), plus the sparkle when
-   `explain` is set. */
+   clears the expand button (always present on a chart), the PNG button, plus
+   the sparkle when `explain` is set. */
 .dashdown-chart:has(.dashdown-chart-expand-btn) .dashdown-filter-badge { right: 2.25rem; }
 .dashdown-chart:has(.dashdown-chart-expand-btn):has(.dashdown-explain-btn) .dashdown-filter-badge { right: 4rem; }
+.dashdown-chart:has(.dashdown-chart-png-btn) .dashdown-filter-badge { right: 4rem; }
+.dashdown-chart:has(.dashdown-chart-png-btn):has(.dashdown-explain-btn) .dashdown-filter-badge { right: 5.75rem; }
 
 /* The SVG geo map cards carry the same ⛶ (emitted by _map_base.py): the filter
    badge yields the corner there too, and the map header reserves clearance so
@@ -3148,6 +3190,7 @@ body {
 .dashdown-print .dashdown-filter-badge,
 .dashdown-print .dashdown-explain-btn,
 .dashdown-print .dashdown-chart-expand-btn,
+.dashdown-print .dashdown-chart-png-btn,
 .dashdown-print .dashdown-map-reset,
 .dashdown-print .dashdown-map-zoom-hint,
 .dashdown-print .dashdown-build-stamp,
