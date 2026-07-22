@@ -35,3 +35,12 @@ instead of guessing.
 
 **→ [Coding agents](/ai/coding-agents)** for `AGENTS.md`, `dashdown skill`, the
 CLI loop, and `llms.txt`.
+
+## AI editing, from the browser — `serve --edit`
+
+The two meet in **[edit mode](/ai/edit-mode)**: `dashdown serve --edit` puts an
+edit panel on your dashboard that drives whichever agent CLI you have installed —
+type *"add a bar chart of revenue by region"*, watch the page live-reload as the
+agent writes it, review the changed files, and undo with one click.
+
+**→ [AI edit mode](/ai/edit-mode)** for setup, agent presets, and the safety model.

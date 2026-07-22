@@ -282,6 +282,12 @@
          locale/currency when a component doesn't set its own. -->
     <script id="dashdown-format" type="application/json">{{ format_json | safe }}</script>
     {% endif %}
+    {% if edit_json %}
+    <!-- AI edit mode (dashdown serve --edit): panel config + the per-serve edit
+         token. Dev-server only, full-shell renders only — never emitted in
+         embeds or static builds. edit_panel.js self-gates on this script. -->
+    <script id="dashdown-edit" type="application/json">{{ edit_json | safe }}</script>
+    {% endif %}
     <main class="dashdown-main p-6" data-page-width="{{ page_width | default('l') }}">
       {# Top bar: breadcrumbs (left) + the PDF/Embed page actions (right), on one
          line. Rendered off-embed whenever there are actions or breadcrumbs — so

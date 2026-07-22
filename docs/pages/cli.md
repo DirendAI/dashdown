@@ -46,6 +46,9 @@ dashdown serve . --host 0.0.0.0 --no-watch
 | `--host` | `127.0.0.1` | Bind address. Use `0.0.0.0` to expose on your LAN. |
 | `--port` | `8000` | Bind port. |
 | `--no-watch` | off | Disable the file watcher (no live-reload). |
+| `--edit` | off | Arm the [AI edit mode](/ai/edit-mode): an in-browser panel drives a coding-agent CLI that edits the project. Loopback-only; needs the watcher. |
+| `--agent` | auto | Agent preset for `--edit` (`claude`, `codex`, `gemini`, …). |
+| `--allow-custom` | off | Consent to a custom command/binary/args from the `edit:` block. |
 
 The watcher reloads on changes under `pages/`, `components/`, `data/`, `assets/`,
 `queries/`, `semantic/`, and to `dashdown.yaml` / `sources.yaml`. Page edits

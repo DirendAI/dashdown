@@ -63,6 +63,8 @@ from dashdown.render.pipeline import (
 from dashdown.python_query import run_python_query
 from dashdown.streaming import DISCONNECT, hub as stream_hub, watch_disconnect
 from dashdown.data.base import Connector
+from dashdown.edit import EditRuntime
+from dashdown.edit_session import CLOSED, edit_hub
 
 log = logging.getLogger(__name__)
 
@@ -199,7 +201,9 @@ class ComponentStaticFiles(NoCacheStaticFiles):
         return await super().get_response(path, scope)
 
 
-def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
+def create_app(
+    project_root: Path, *, dev: bool = True, edit: EditRuntime | None = None
+) -> FastAPI:
     """Build the FastAPI app for a project.
 
     ``dev=True`` (the default, used by ``dashdown serve``) keeps the live-reload
@@ -211,7 +215,16 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
     rendered that page itself (inline ``:::query`` defs otherwise only land in
     this process's cache when the page is rendered — fine for one worker, a 404
     source across several).
+
+    ``edit`` arms the AI edit mode (``dashdown serve --edit`` — see
+    dashdown/edit.py): its endpoints exist ONLY when a frozen
+    :class:`EditRuntime` is passed, so an unarmed server 404s them without
+    advertising the feature. Dev-server only by construction — an edit runtime
+    with ``dev=False`` refuses to build (the ASGI production entry point can
+    never arm it).
     """
+    if edit is not None and not dev:
+        raise ValueError("edit mode is a dev-server feature (dashdown serve --edit)")
     project = load_project(project_root)
     reload_event = asyncio.Event()
 
@@ -226,9 +239,19 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
     app.state.project = project
     app.state.reload_event = reload_event
     app.state.dev = dev
+    app.state.edit = edit
 
     if not dev:
         register_all_page_queries(project)
+
+    if edit is not None:
+        _register_edit_endpoints(app)
+
+        @app.on_event("shutdown")
+        async def _edit_shutdown() -> None:
+            # Kill any in-flight agent subprocess (whole process group) so a
+            # stopped dev server never leaves orphans.
+            await edit_hub.shutdown()
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
@@ -1002,6 +1025,23 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         embed_cfg = proj.config.embed
         embed_on = bool(embed_cfg.enabled and request.query_params.get("_embed"))
 
+        # AI edit mode (serve --edit): the panel config + per-serve token,
+        # injected only into full-shell renders that already passed the auth
+        # guard — never embeds (a cross-origin frame must not receive the
+        # token), and never builds (build.py doesn't pass edit).
+        edit_runtime: EditRuntime | None = request.app.state.edit
+        edit_json = None
+        if edit_runtime is not None and not embed_on:
+            edit_json = json.dumps(
+                {
+                    "token": edit_runtime.token,
+                    "agent": edit_runtime.preset.name if edit_runtime.preset else None,
+                    "available": edit_runtime.available,
+                    "probe": edit_runtime.probe,
+                    "permission_mode": edit_runtime.permission_mode,
+                }
+            )
+
         try:
             source = md_path.read_text(encoding="utf-8")
             current = ("/" + full_path).rstrip("/") or "/"
@@ -1097,12 +1137,295 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             # when the header — which carries the normal toggle — is hidden).
             show_theme_toggle=show_theme_toggle,
             live_reload=request.app.state.dev,
+            edit_json=edit_json,
         )
         # Framing policy applies to every page (deny-by-default): a page can only
         # be put in an <iframe> once embed.frame_ancestors lists the host origin.
         return HTMLResponse(html, headers=frame_headers(embed_cfg))
 
     return app
+
+
+# --------------------------------------------------------------------------- #
+# AI edit mode (dashdown serve --edit)
+# --------------------------------------------------------------------------- #
+# Loopback-only, token-gated request checks. This is an arbitrary-code-execution
+# surface (the endpoints drive a coding-agent CLI in the project dir), so every
+# request re-proves it comes from the author's own browser on the author's own
+# machine: loopback peer, localhost Host header (DNS-rebinding defense),
+# same-machine Origin when present (CSRF defense — plus the custom token header
+# forces a CORS preflight no middleware answers), and the per-serve token that
+# only an authed page render receives. The normal `auth_guard` middleware runs
+# on top for HTTP; the WS handshake checks `is_authorized` itself (middleware
+# doesn't run for WebSockets — the stream_query_data precedent). An embed token
+# never authorizes any edit path (`_embed_authorizes` matches none of them).
+
+_EDIT_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _edit_peer_allowed(client: Any) -> bool:
+    """The TCP peer must be loopback. `client` is Starlette's (host, port) —
+    None only in exotic test harnesses (uvicorn always sets it); allowed then
+    because the token check still stands behind it."""
+    if client is None:
+        return True
+    host = client[0] if isinstance(client, (tuple, list)) else getattr(client, "host", "")
+    if host in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return True
+    return isinstance(host, str) and host.startswith("127.")
+
+
+def _edit_hostname_allowed(value: str | None) -> bool:
+    """Host-header / Origin-host check: only localhost names, any port."""
+    if not value:
+        return False
+    host = value.strip().lower()
+    if host.startswith("[::1]"):  # [::1] or [::1]:port
+        rest = host[len("[::1]"):]
+        return rest == "" or rest.startswith(":")
+    host = host.rsplit(":", 1)[0] if ":" in host and not host.startswith("[") else host
+    return host in ("localhost", "127.0.0.1")
+
+
+def _edit_origin_allowed(origin: str | None) -> bool:
+    """Origin, when the browser sends one, must be a same-machine page."""
+    if not origin:
+        return True  # same-origin GETs / non-browser clients omit it
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    return parts.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+def _edit_denied_reason(request: Any, runtime: EditRuntime, token: str | None) -> str | None:
+    """The first failed check's reason, or None when the request is allowed."""
+    if not _edit_peer_allowed(request.scope.get("client")):
+        return "edit requests must come from this machine (loopback only)"
+    if not _edit_hostname_allowed(request.headers.get("host")):
+        return "edit requests must target localhost (Host header)"
+    if not _edit_origin_allowed(request.headers.get("origin")):
+        return "cross-origin edit requests are not allowed"
+    import secrets as _secrets
+
+    if not token or not _secrets.compare_digest(token, runtime.token):
+        return "missing or invalid edit token"
+    return None
+
+
+def _register_edit_endpoints(app: FastAPI) -> None:
+    """The edit-mode HTTP endpoints + WS. Called ONLY when an EditRuntime was
+    passed to create_app — an unarmed server has no routes to probe (404)."""
+    from fastapi.responses import JSONResponse
+
+    def _guard(request: Request) -> JSONResponse | None:
+        runtime: EditRuntime = request.app.state.edit
+        reason = _edit_denied_reason(
+            request, runtime, request.headers.get("x-dashdown-edit-token")
+        )
+        if reason is not None:
+            return JSONResponse({"detail": reason}, status_code=403)
+        return None
+
+    @app.get("/_dashdown/api/edit/state")
+    async def edit_state(request: Request):
+        denied = _guard(request)
+        if denied is not None:
+            return denied
+        runtime: EditRuntime = request.app.state.edit
+        current = edit_hub.current
+        return JSONResponse(
+            {
+                "agent": {
+                    "name": runtime.preset.name if runtime.preset else None,
+                    "available": runtime.available,
+                    "probe": runtime.probe,
+                    "permission_mode": runtime.permission_mode,
+                },
+                "active": current.summary() if current and current.active else None,
+                "last": current.summary() if current and not current.active else None,
+            }
+        )
+
+    @app.post("/_dashdown/api/edit/run")
+    async def edit_run(request: Request):
+        denied = _guard(request)
+        if denied is not None:
+            return denied
+        runtime: EditRuntime = request.app.state.edit
+        proj: Project = request.app.state.project
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"detail": "body must be JSON"}, status_code=400)
+        prompt = body.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return JSONResponse(
+                {"detail": "prompt must be a non-empty string"}, status_code=400
+            )
+        if not runtime.available:
+            return JSONResponse({"detail": runtime.probe}, status_code=503)
+
+        # The page being viewed → its source file, so the prompt can point the
+        # agent at the right .md. Best-effort; an unknown path just omits it.
+        page = body.get("page") if isinstance(body.get("page"), str) else None
+        page_file = None
+        route_params: dict[str, str] = {}
+        if page:
+            md_path, route_params = proj.page_path(page.strip("/"))
+            if md_path is not None:
+                page_file = str(md_path.relative_to(proj.root))
+        params_in = body.get("params")
+        params = {
+            str(k): str(v)
+            for k, v in (params_in or {}).items()
+            if isinstance(params_in, dict)
+        }
+        params.update(route_params)
+
+        try:
+            run = edit_hub.start_run(
+                runtime,
+                prompt.strip(),
+                page=page,
+                page_file=page_file,
+                params=params,
+                resume=bool(body.get("resume")),
+            )
+        except RuntimeError:
+            active = edit_hub.current
+            # Deliberately no prompt in the 409 body — another tab's request
+            # text is not this caller's to read.
+            return JSONResponse(
+                {
+                    "detail": "a run is already active",
+                    "run_id": active.run_id if active else None,
+                    "started_at": int(active.started_at) if active else None,
+                    "agent": runtime.preset.name if runtime.preset else None,
+                },
+                status_code=409,
+            )
+        except OSError as e:
+            return JSONResponse(
+                {"detail": f"could not snapshot the project for undo: {e}"},
+                status_code=500,
+            )
+        return JSONResponse({"run_id": run.run_id}, status_code=202)
+
+    @app.post("/_dashdown/api/edit/cancel")
+    async def edit_cancel(request: Request):
+        denied = _guard(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        run = edit_hub.current
+        if run is None or run.run_id != body.get("run_id"):
+            return JSONResponse({"detail": "no such run"}, status_code=404)
+        run.cancel()  # idempotent — a finished run is left as-is
+        return JSONResponse({"run_id": run.run_id, "state": run.state})
+
+    @app.post("/_dashdown/api/edit/undo")
+    async def edit_undo(request: Request):
+        denied = _guard(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        run = edit_hub.current
+        if run is None or run.run_id != body.get("run_id"):
+            return JSONResponse({"detail": "no such run"}, status_code=404)
+        if run.active:
+            return JSONResponse(
+                {"detail": "run still active — stop it first"}, status_code=409
+            )
+        try:
+            outcome = run.undo()
+        except RuntimeError as e:
+            return JSONResponse({"detail": str(e)}, status_code=409)
+        return JSONResponse(outcome)
+
+    @app.websocket("/_dashdown/ws/edit")
+    async def edit_ws(websocket: WebSocket):
+        runtime: EditRuntime = websocket.app.state.edit
+        proj: Project = websocket.app.state.project
+
+        # Pre-accept checks (loopback / Host / Origin / auth) — refuse the
+        # handshake outright. The token can't ride the URL (it would land in
+        # access logs), so it arrives as the FIRST text message post-accept.
+        if (
+            not _edit_peer_allowed(websocket.scope.get("client"))
+            or not _edit_hostname_allowed(websocket.headers.get("host"))
+            or not _edit_origin_allowed(websocket.headers.get("origin"))
+        ):
+            await websocket.close(code=1008)
+            return
+        auth = proj.config.auth
+        if auth.enabled and not is_authorized(auth, websocket):
+            await websocket.close(code=1008)
+            return
+
+        await websocket.accept()
+        import secrets as _secrets
+
+        try:
+            first = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+        except Exception:  # noqa: BLE001 — bad JSON / timeout / disconnect
+            await websocket.close(code=1008)
+            return
+        token = first.get("token") if isinstance(first, dict) else None
+        if not isinstance(token, str) or not _secrets.compare_digest(
+            token, runtime.token
+        ):
+            await websocket.close(code=1008)
+            return
+
+        replay, queue = edit_hub.subscribe()
+        active = edit_hub.current
+        await websocket.send_json(
+            {
+                "protocol": "dashdown-edit.v1",
+                "active": active.run_id if active and active.active else None,
+            }
+        )
+        for envelope in replay:
+            await websocket.send_json(envelope)
+
+        async def _receive() -> None:
+            # Client → server: {"type": "cancel"} stops the active run; a
+            # disconnect (or any receive error) wakes the sender via CLOSED.
+            try:
+                while True:
+                    msg = await websocket.receive_json()
+                    if isinstance(msg, dict) and msg.get("type") == "cancel":
+                        run = edit_hub.current
+                        if run is not None:
+                            run.cancel()
+            except Exception:  # noqa: BLE001 — disconnect path
+                pass
+            finally:
+                queue.put_nowait(CLOSED)
+
+        receiver = asyncio.create_task(_receive())
+        try:
+            while True:
+                item = await queue.get()
+                if item is CLOSED:
+                    break
+                await websocket.send_json(item)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            receiver.cancel()
+            edit_hub.unsubscribe(queue)
 
 
 def _not_found_html(project: Project, path: str) -> str:

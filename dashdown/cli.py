@@ -112,17 +112,93 @@ def serve(
     host: str = typer.Option("127.0.0.1", help="Bind host"),
     port: int = typer.Option(8000, help="Bind port"),
     no_watch: bool = typer.Option(False, "--no-watch", help="Disable file watcher"),
+    edit: bool = typer.Option(
+        False,
+        "--edit",
+        help="Arm the AI edit mode: an in-browser panel drives a coding-agent "
+        "CLI (claude, codex, gemini, …) that edits the project. Loopback only.",
+    ),
+    agent: str = typer.Option(
+        None,
+        "--agent",
+        help="Agent preset for --edit (overrides edit.agent / auto-detection)",
+    ),
+    allow_custom: bool = typer.Option(
+        False,
+        "--allow-custom",
+        help="Consent to a custom command / binary / extra args defined in "
+        "dashdown.yaml's edit: block (a cloned project's config must not pick "
+        "what executes on your machine without this)",
+    ),
 ) -> None:
-    """Serve the project locally (live-reload by default)."""
+    """Serve the project locally (live-reload by default).
+
+    With ``--edit``, the dashboard gains an AI edit panel: type a request in
+    the browser, a coding-agent CLI edits the markdown/queries in the project
+    directory, and the existing live-reload shows the result. Requires the
+    file watcher and a loopback bind; the edit endpoints are token-gated and
+    exist only on this serve. See the Editing-with-AI docs page.
+    """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     from dashdown.server import create_app, reload_project, trigger_reload
 
     project = project.resolve()
+
+    edit_runtime = None
+    if edit:
+        if no_watch:
+            raise typer.BadParameter(
+                "--edit needs the file watcher (it live-reloads the agent's "
+                "edits) — drop --no-watch"
+            )
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            raise typer.BadParameter(
+                f"--edit is loopback-only (it can execute code on this machine); "
+                f"refusing to bind it on {host!r}"
+            )
+        from dashdown.edit import build_edit_runtime
+
+        try:
+            edit_runtime = build_edit_runtime(
+                project, agent=agent, allow_custom=allow_custom
+            )
+        except ValueError as e:
+            raise typer.BadParameter(str(e))
+    elif agent or allow_custom:
+        raise typer.BadParameter("--agent / --allow-custom only apply with --edit")
+
     typer.echo(f"Dashdown server: {project}")
     typer.echo(f"Open http://{host}:{port}")
+    if edit_runtime is not None:
+        if edit_runtime.available:
+            typer.echo(
+                f"AI edit mode: {edit_runtime.probe} "
+                f"[permission_mode={edit_runtime.permission_mode}]"
+            )
+            if edit_runtime.permission_mode == "full":
+                typer.echo(
+                    "  ⚠ permission_mode: full — the agent runs with its "
+                    "vendor bypass flag (no approval prompts).",
+                    err=True,
+                )
+            if not (project / "AGENTS.md").is_file():
+                typer.echo(
+                    "  hint: no AGENTS.md in this project — `dashdown skill` "
+                    "installs the agent guide so edits land better.",
+                    err=True,
+                )
+            if not (project / ".git").exists():
+                typer.echo(
+                    "  hint: project is not a git repository — the edit panel's "
+                    "Undo covers the last run only; version control covers "
+                    "everything.",
+                    err=True,
+                )
+        else:
+            typer.echo(f"AI edit mode: agent unavailable — {edit_runtime.probe}", err=True)
 
-    fastapi_app = create_app(project)
+    fastapi_app = create_app(project, edit=edit_runtime)
 
     from dashdown import telemetry
 
@@ -950,7 +1026,9 @@ def _scaffold(root: Path, targets: list[str] | None = None) -> None:
         "# Dashdown build artifacts\n"
         ".dist/\n"
         ".pdf/\n"
-        ".shots/\n",
+        ".shots/\n"
+        "# Edit-mode state (undo snapshots + audit log)\n"
+        ".dashdown/\n",
         encoding="utf-8",
     )
 

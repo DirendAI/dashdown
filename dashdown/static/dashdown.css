@@ -3153,6 +3153,8 @@ body {
 .dashdown-print .dashdown-build-stamp,
 .dashdown-print .dashdown-made-with,
 .dashdown-print .dashdown-code-copy,
+.dashdown-print .dashdown-edit-fab,
+.dashdown-print .dashdown-edit-panel,
 .dashdown-print .dashdown-theme-fab {
   display: none !important;
 }
@@ -3899,4 +3901,135 @@ dialog.dashdown-fullscreen-modal::backdrop {
 }
 .dashdown-map-bilegend-grid i {
   display: block;
+}
+
+/* --- AI edit panel (dashdown serve --edit) -------------------------------- */
+/* Only ever present on a dev serve with --edit (edit_panel.js self-gates on
+   the #dashdown-edit config script). The FAB opens a fixed right-hand panel
+   streaming the agent's transcript. Tokens + theme vars only — no new
+   Tailwind utilities, so the pre-built vendor CSS needs no rebuild. */
+.dashdown-edit-fab {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 95;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background: oklch(var(--p) / 1);
+  color: oklch(var(--pc) / 1);
+  cursor: pointer;
+  box-shadow: var(--dashdown-shadow-raised);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.dashdown-edit-fab:hover { transform: translateY(-1px); box-shadow: var(--dashdown-shadow-hover); }
+.dashdown-edit-fab svg { width: 1.25rem; height: 1.25rem; }
+.dashdown-edit-fab-open { opacity: 0.55; }
+
+.dashdown-edit-panel {
+  position: fixed;
+  top: 4.5rem;
+  right: 1.25rem;
+  bottom: 5rem;
+  z-index: 94;
+  display: flex;
+  flex-direction: column;
+  width: min(26rem, calc(100vw - 2.5rem));
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-card);
+  background: var(--fallback-b1, oklch(var(--b1) / 1));
+  box-shadow: var(--dashdown-shadow-hover);
+  overflow: hidden;
+}
+.dashdown-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.dashdown-edit-close {
+  border: none;
+  background: transparent;
+  color: oklch(var(--bc) / 0.55);
+  cursor: pointer;
+  border-radius: var(--dashdown-radius-control);
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.dashdown-edit-close:hover { color: oklch(var(--bc) / 1); background: oklch(var(--bc) / 0.08); }
+.dashdown-edit-transcript,
+.dashdown-edit-setup {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.dashdown-edit-setup { color: oklch(var(--bc) / 0.75); white-space: pre-wrap; }
+.dashdown-edit-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dashdown-edit-line-prompt { font-weight: 600; }
+.dashdown-edit-line-tool,
+.dashdown-edit-line-files { color: oklch(var(--bc) / 0.6); font-size: 0.75rem; }
+.dashdown-edit-line-raw {
+  color: oklch(var(--bc) / 0.45);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
+.dashdown-edit-line-error { color: oklch(var(--er, 0.58 0.21 27) / 1); }
+.dashdown-edit-line-warn { color: oklch(var(--wa, 0.75 0.15 80) / 1); }
+.dashdown-edit-line-done { color: oklch(var(--su, 0.65 0.15 160) / 1); }
+.dashdown-edit-status {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.75rem;
+  color: oklch(var(--bc) / 0.6);
+  min-height: 1.5rem;
+}
+.dashdown-edit-running .dashdown-edit-status::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.4rem;
+  border-radius: 9999px;
+  background: oklch(var(--p) / 1);
+  animation: dashdown-edit-pulse 1.2s ease-in-out infinite;
+}
+@keyframes dashdown-edit-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.dashdown-edit-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+}
+.dashdown-edit-input {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+  border-radius: var(--dashdown-radius-control);
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  color: oklch(var(--bc) / 1);
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.65rem;
+}
+.dashdown-edit-input:focus { outline: 2px solid oklch(var(--p) / 0.5); outline-offset: 1px; }
+.dashdown-edit-buttons { display: flex; gap: 0.5rem; }
+@media (prefers-reduced-motion: reduce) {
+  .dashdown-edit-fab { transition: none; }
+  .dashdown-edit-running .dashdown-edit-status::before { animation: none; opacity: 1; }
 }

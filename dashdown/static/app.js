@@ -31,6 +31,7 @@ import { initAllCopyCode } from "./components/copy_code.js";
 import { initFullscreen } from "./components/fullscreen.js";
 import { initAllSiteSearches } from "./components/site_search.js";
 import { initPrint, initPdfButton } from "./components/print.js";
+import { initEditPanel } from "./components/edit_panel.js";
 import { initLegacy } from "./legacy.js";
 
 // Global flag to prevent double initialization
@@ -250,6 +251,12 @@ function init() {
   initPrint();
   // Header "Export PDF" button (client-side window.print over the print styles).
   initPdfButton();
+
+  // AI edit panel (`dashdown serve --edit`): self-gates on the #dashdown-edit
+  // config script the server injects only when edit mode is armed — a no-op
+  // in builds, embeds, and plain serve. Outside the async-component gate so a
+  // prose-only page can still be edited.
+  initEditPanel();
 
   if (hasAsyncComponents()) {
     initDashdown();
