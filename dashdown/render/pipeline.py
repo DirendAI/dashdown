@@ -933,11 +933,27 @@ def serialize_value(v: Any) -> Any:
     return v
 
 
-def serialize_result(result: QueryResult) -> dict[str, Any]:
+def serialize_result(result: QueryResult, max_rows: int = 0) -> dict[str, Any]:
     """Turn a ``QueryResult`` into the ``{columns, rows}`` JSON shape the
-    frontend expects, with every cell run through :func:`serialize_value`."""
-    rows = [[serialize_value(cell) for cell in row] for row in result.rows]
-    return {"columns": result.columns, "rows": rows}
+    frontend expects, with every cell run through :func:`serialize_value`.
+
+    ``max_rows > 0`` caps the payload (the live data API's big-result guard —
+    one careless ``SELECT *`` against a warehouse otherwise ships every row to
+    the tab): rows beyond the cap are dropped *before* cell serialization, and
+    the payload carries ``truncated: true`` + ``total_rows`` so the client can
+    say so instead of silently showing partial data. The default (0) keeps
+    every other caller — static build snapshots, the WS stream, the CLI —
+    byte-identical to before."""
+    src = result.rows
+    truncated = max_rows > 0 and len(src) > max_rows
+    if truncated:
+        src = src[:max_rows]
+    rows = [[serialize_value(cell) for cell in row] for row in src]
+    payload: dict[str, Any] = {"columns": result.columns, "rows": rows}
+    if truncated:
+        payload["truncated"] = True
+        payload["total_rows"] = len(result.rows)
+    return payload
 
 
 def _expand_in_list(value: str) -> str:

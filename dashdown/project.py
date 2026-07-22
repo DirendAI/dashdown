@@ -301,6 +301,44 @@ def parse_filters_config(raw: Any) -> FiltersConfig:
 
 
 @dataclass
+class DataConfig:
+    """Optional ``data:`` block — cross-cutting guards for query results.
+
+        data:
+          max_rows: 10000    # cap rows per data-API response (0 = unlimited)
+
+    ``max_rows`` is the live data API's big-result guard: one careless
+    ``SELECT *`` against a warehouse table otherwise JSON-encodes every row and
+    ships it to the browser tab with zero diagnostics. Responses beyond the cap
+    are truncated **server-side** with a ``truncated`` flag + ``total_rows`` in
+    the payload, which the ``<Table>`` renders as a visible notice. Applies to
+    the interactive data API only — static-build snapshots, the live WS stream,
+    and the CLI are author-driven surfaces and stay uncapped.
+    """
+
+    max_rows: int = 10000
+
+
+def parse_data_config(raw: Any) -> DataConfig:
+    """Parse and validate the ``data:`` block. Raises ValueError when malformed
+    so the server refuses to start half-broken (same policy as ``auth:`` etc.)."""
+    if raw is None:
+        return DataConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("data: must be a mapping (a 'max_rows' key)")
+
+    cfg = DataConfig()
+    max_rows = raw.get("max_rows")
+    if max_rows is not None:
+        if not isinstance(max_rows, int) or isinstance(max_rows, bool) or max_rows < 0:
+            raise ValueError(
+                "data.max_rows must be a non-negative integer (0 = unlimited)"
+            )
+        cfg.max_rows = max_rows
+    return cfg
+
+
+@dataclass
 class SearchConfig:
     """Optional ``search`` block — the built-in full-text search box shown in the
     app header (centered) and at the top of the mobile menu on every page.
@@ -542,6 +580,7 @@ class ProjectConfig:
     search: SearchConfig = field(default_factory=SearchConfig)
     layout: LayoutConfig = field(default_factory=LayoutConfig)
     python_queries: PythonQueriesConfig = field(default_factory=PythonQueriesConfig)
+    data: DataConfig = field(default_factory=DataConfig)
 
 
 @dataclass
@@ -771,6 +810,7 @@ def load_project(root: Path) -> Project:
             search=parse_search_config(raw.get("search")),
             layout=parse_layout_config(raw.get("layout")),
             python_queries=parse_python_queries_config(raw.get("python_queries")),
+            data=parse_data_config(raw.get("data")),
         )
         # Auth + embedding are enterprise features: parsed above so a broken
         # block still fails with its specific error, but *activating* either

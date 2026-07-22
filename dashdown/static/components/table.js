@@ -222,6 +222,10 @@ export function initTable(el) {
             const data = await fetchQueryData(queryName, {}, filters);
             const records = recordsOf(data);
             hideLoading(el);
+            // Server-side big-result guard (data.max_rows): remember the real
+            // total so the view can say "truncated" instead of presenting a
+            // capped result as complete.
+            el._truncatedTotal = data && data.truncated ? data.total_rows || 0 : 0;
             updateTable(el, records, config);
           } catch (error) {
             hideLoading(el);
@@ -237,6 +241,7 @@ export function initTable(el) {
           try {
             const data = await fetchQueryData(queryName, {}, {});
             hideLoading(el);
+            el._truncatedTotal = data && data.truncated ? data.total_rows || 0 : 0;
             updateTable(el, recordsOf(data), config);
           } catch (error) {
             hideLoading(el);
@@ -269,7 +274,11 @@ export function initTable(el) {
       // latest-rows tables this targets. No-op for non-live / static builds.
       if (!isLiveQuery(queryName)) instance.render(filters);
       bindLiveQuery(el, queryName, filters, (data) => {
-        if (data && !data.error) updateTable(el, recordsOf(data), config);
+        // Live WS payloads are never capped — clear any stale truncation note.
+        if (data && !data.error) {
+          el._truncatedTotal = 0;
+          updateTable(el, recordsOf(data), config);
+        }
       });
     });
   });
@@ -526,6 +535,19 @@ export function buildTableView(el) {
   });
 
   html += "</tbody></table></div>";
+
+  // Server-side truncation notice (the data.max_rows big-result guard): a
+  // capped result must never read as complete — say what was dropped and how
+  // to change it. Rendered above the pagination footer, which counts only the
+  // rows the browser actually has.
+  if (el._truncatedTotal) {
+    html +=
+      '<div class="px-1 pt-3 text-xs text-base-content/60">' +
+      `⚠ Showing the first <span class="font-medium text-base-content/80">${allRecords.length.toLocaleString()}</span> of ` +
+      `<span class="font-medium text-base-content/80">${el._truncatedTotal.toLocaleString()}</span> rows — ` +
+      "result truncated server-side (<code>data.max_rows</code> in dashdown.yaml)." +
+      "</div>";
+  }
 
   // Pagination footer — only when there's more than one page.
   if (pages > 1) {

@@ -351,7 +351,10 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
             cache_headers = {"Cache-Control": f"max-age={ttl}"}
 
             def _serialize_py(result) -> JSONResponse:
-                payload = serialize_result(result)
+                # Big-result guard: cap rows server-side (data.max_rows) with a
+                # `truncated` flag so the client shows a notice, not partial
+                # data presented as complete.
+                payload = serialize_result(result, proj.config.data.max_rows)
                 payload["query"] = query_name
                 return JSONResponse(payload, headers=cache_headers)
 
@@ -397,7 +400,9 @@ def create_app(project_root: Path, *, dev: bool = True) -> FastAPI:
         cache_headers = {"Cache-Control": f"max-age={ttl}"}
 
         def _serialize(result) -> JSONResponse:
-            payload = serialize_result(result)
+            # Big-result guard: cap rows server-side (data.max_rows) with a
+            # `truncated` flag so the client shows a notice (see <Table>).
+            payload = serialize_result(result, proj.config.data.max_rows)
             payload["query"] = query_name
             return JSONResponse(payload, headers=cache_headers)
 
