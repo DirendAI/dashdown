@@ -152,7 +152,16 @@ function seriesIndexFor(annotation, option) {
  * @param {Array<Object>} records - The records this option was built from
  */
 export function applyChartAnnotations(option, config, records) {
-  const annotations = Array.isArray(config.annotations) ? config.annotations : [];
+  // Author-declared marks (`target=` / `band=` / `mark_x=` attrs, compiled
+  // server-side into the same vocabulary with `static: true` and an "s" id
+  // namespace) always paint first; AI explain marks (`config.annotations`,
+  // set/cleared by ask.js) layer on top. Separate config keys, so the explain
+  // panel's set/clear cycle can never clobber the author's marks.
+  const staticMarks = Array.isArray(config.static_annotations)
+    ? config.static_annotations
+    : [];
+  const aiMarks = Array.isArray(config.annotations) ? config.annotations : [];
+  const annotations = staticMarks.concat(aiMarks);
   if (!option || !annotations.length) return;
   if (!SUPPORTED_TYPES.has(config.type)) return;
   if (!Array.isArray(option.series) || !option.series.length) return;
@@ -203,13 +212,49 @@ export function applyChartAnnotations(option, config, records) {
   // axis carries the categories.
   const pointCoord = (cat, val) => (horizontal ? [val, cat] : [cat, val]);
 
-  /** Resolve an axis_line/range endpoint; undefined → stale, drop the mark. */
-  function resolveAxisValue(axis, value) {
+  /** Resolve an axis_line/range endpoint; undefined → stale, drop the mark.
+   * Author-declared (`static`) marks skip the numeric domain check — the
+   * author asked for that exact value, and extendValueAxis below makes sure
+   * the axis reaches it; only AI marks can go stale against filtered data. */
+  function resolveAxisValue(axis, value, isStatic = false) {
     if (axis === "x" && !scatter) return findCategory(records, xCol, value);
     const n = asNumber(value);
+    if (n === null) return undefined;
+    if (isStatic) return n;
     const domain = axis === "x" ? xDomain : yDomain;
-    return n !== null && inDomain(n, domain) ? n : undefined;
+    return inDomain(n, domain) ? n : undefined;
   }
+
+  // Extend the value axis to reach author-declared values outside the data's
+  // range (a target above the current numbers is the *point* of a target
+  // line). Small headroom so the line doesn't sit on the chart edge. Never
+  // runs for AI marks, so explain behavior is untouched.
+  function extendValueAxis() {
+    const values = [];
+    for (const a of staticMarks) {
+      if (a.type === "axis_line" && a.axis === "y") values.push(asNumber(a.value));
+      else if (a.type === "range" && a.axis === "y") {
+        values.push(asNumber(a.from), asNumber(a.to));
+      }
+    }
+    const nums = values.filter((v) => v !== null);
+    if (!nums.length || !yDomain) return;
+    const [dataLo, dataHi] = yDomain;
+    const span = dataHi - dataLo || Math.max(Math.abs(dataHi), 1);
+    const markHi = Math.max(...nums);
+    const markLo = Math.min(...nums);
+    const axis = horizontal ? option.xAxis : option.yAxis;
+    const valueAxis = Array.isArray(axis) ? axis[0] : axis;
+    if (!valueAxis || valueAxis.type === "category") return;
+    if (markHi > dataHi && valueAxis.max == null) {
+      valueAxis.max = Math.ceil(markHi + 0.08 * span);
+    }
+    // Value axes start at 0 by default; only reach down for negative marks.
+    if (markLo < Math.min(0, dataLo) && valueAxis.min == null) {
+      valueAxis.min = Math.floor(markLo - 0.08 * span);
+    }
+  }
+  if (staticMarks.length && !scatter) extendValueAxis();
 
   // Accumulate marks per target series (axis-level marks sit on series 0 —
   // they span the grid; a series-targeted point rides its own series).
@@ -223,7 +268,7 @@ export function applyChartAnnotations(option, config, records) {
     const emphasized = emphasisId !== null && a.id === emphasisId;
 
     if (a.type === "axis_line") {
-      const v = resolveAxisValue(a.axis, a.value);
+      const v = resolveAxisValue(a.axis, a.value, !!a.static);
       if (v === undefined) continue;
       bucket(0).lines.push({
         [axisKeyFor(a.axis)]: v,
@@ -236,8 +281,8 @@ export function applyChartAnnotations(option, config, records) {
         },
       });
     } else if (a.type === "range") {
-      const from = resolveAxisValue(a.axis, a.from);
-      const to = resolveAxisValue(a.axis, a.to);
+      const from = resolveAxisValue(a.axis, a.from, !!a.static);
+      const to = resolveAxisValue(a.axis, a.to, !!a.static);
       if (from === undefined || to === undefined) continue;
       const key = axisKeyFor(a.axis);
       bucket(0).areas.push([

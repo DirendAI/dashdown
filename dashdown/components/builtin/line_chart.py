@@ -64,6 +64,94 @@ _PNG_BTN_HTML = (
 )
 
 
+# Chart types the author-declared marks compile for: the cartesian set the
+# client renderer supports (annotations.js SUPPORTED_TYPES minus the
+# datum/grid families, which have no axis to mark). Also the collision guard:
+# Sankey/Graph use `target=` as their edge-target *column* alias, so the mark
+# grammar must never claim the attr there.
+_MARK_CHART_TYPES = frozenset(
+    {"line", "bar", "scatter", "candlestick", "boxplot", "violin"}
+)
+
+
+def _static_annotations(attrs: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compile the author-declared mark attrs into annotation objects.
+
+    ``target=95`` / ``target="95:Goal"`` → a dashed horizontal reference line;
+    ``band="80,100"`` / ``band="80,100:Healthy"`` → a shaded value band;
+    ``mark_x="2025-11-01:Launch"`` → a dashed vertical line on that category.
+    The value and an optional label split on the **first** ``:``.
+
+    These reuse the AI-explain annotation vocabulary (chart_annotations.py /
+    annotations.js) — the exact renderer, styling and per-chart-type support —
+    but ride a separate ``static_annotations`` config key with an ``s`` id
+    namespace and ``static: true``, so the explain panel's set/clear cycle
+    never clobbers them and the client skips the stale-domain check (the
+    author asked for that exact value; the axis extends to reach it).
+    Malformed numbers raise (→ the inline error card), like any bad attr.
+    """
+    out: list[dict[str, Any]] = []
+
+    def _num(text: str, attr: str) -> float:
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(
+                f'`{attr}=` needs a number (got {text!r}) — e.g. {attr}=95 or '
+                f'{attr}="95:Label"'
+            )
+
+    target = attr_str(attrs, "target")
+    if target:
+        value, _, label = target.partition(":")
+        out.append(
+            {
+                "id": f"s{len(out) + 1}",
+                "type": "axis_line",
+                "axis": "y",
+                "value": _num(value.strip(), "target"),
+                "label": label.strip() or "Target",
+                "static": True,
+            }
+        )
+    band = attr_str(attrs, "band")
+    if band:
+        rng, _, label = band.partition(":")
+        lo, sep, hi = rng.partition(",")
+        if not sep:
+            raise ValueError(
+                '`band=` needs two comma-separated numbers — e.g. band="80,100" '
+                'or band="80,100:Healthy"'
+            )
+        out.append(
+            {
+                "id": f"s{len(out) + 1}",
+                "type": "range",
+                "axis": "y",
+                "from": _num(lo.strip(), "band"),
+                "to": _num(hi.strip(), "band"),
+                "label": label.strip(),
+                "static": True,
+            }
+        )
+    mark_x = attr_str(attrs, "mark_x")
+    if mark_x:
+        value, _, label = mark_x.partition(":")
+        if not value.strip():
+            raise ValueError('`mark_x=` needs an x value — e.g. mark_x="2025-11-01:Launch"')
+        out.append(
+            {
+                "id": f"s{len(out) + 1}",
+                "type": "axis_line",
+                "axis": "x",
+                "value": value.strip(),
+                "label": label.strip(),
+                "static": True,
+            }
+        )
+    return out
+
+
 def _chart_placeholder(
     chart_type: str,
     attrs: dict[str, Any],
@@ -107,6 +195,15 @@ def _chart_placeholder(
     link = attr_str(attrs, "link")
     if link:
         config["link"] = link
+    # Author-declared reference marks (`target=` / `band=` / `mark_x=`):
+    # compiled server-side into the explain-annotation vocabulary and drawn by
+    # the same client renderer (annotations.js), independent of any AI marks.
+    # Cartesian types only (see _MARK_CHART_TYPES — `target=` is a column
+    # alias on Sankey/Graph).
+    if chart_type in _MARK_CHART_TYPES:
+        static_marks = _static_annotations(attrs)
+        if static_marks:
+            config["static_annotations"] = static_marks
     # Pie charts default to a donut with a center total; `donut=false` opts out.
     if "donut" in attrs:
         config["donut"] = attr_bool(attrs, "donut", True)

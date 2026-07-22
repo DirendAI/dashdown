@@ -604,3 +604,76 @@ def test_chart_card_carries_png_button(ctx):
     html = render_components('<BarChart data={s} x="region" y="v" />', ctx)
     assert "dashdown-chart-png-btn" in html
     assert "dashdown-chart-expand-btn" in html
+
+
+# --- author-declared reference marks (target= / band= / mark_x=) -------------
+
+
+def test_target_compiles_to_axis_line(ctx):
+    config = _config_of(
+        render_components('<LineChart data={s} x="m" y="v" target=95 />', ctx)
+    )
+    [mark] = config["static_annotations"]
+    assert mark["type"] == "axis_line" and mark["axis"] == "y"
+    assert mark["value"] == 95.0
+    assert mark["label"] == "Target"
+    assert mark["static"] is True
+    assert mark["id"] == "s1"
+
+
+def test_target_with_label(ctx):
+    config = _config_of(
+        render_components('<LineChart data={s} x="m" y="v" target="99.9:SLA" />', ctx)
+    )
+    [mark] = config["static_annotations"]
+    assert mark["value"] == 99.9 and mark["label"] == "SLA"
+
+
+def test_band_compiles_to_range(ctx):
+    config = _config_of(
+        render_components(
+            '<BarChart data={s} x="m" y="v" band="80,100:Healthy" />', ctx
+        )
+    )
+    [mark] = config["static_annotations"]
+    assert mark["type"] == "range" and mark["axis"] == "y"
+    assert mark["from"] == 80.0 and mark["to"] == 100.0
+    assert mark["label"] == "Healthy"
+
+
+def test_mark_x_compiles_to_vertical_line(ctx):
+    config = _config_of(
+        render_components(
+            '<LineChart data={s} x="d" y="v" mark_x="2025-11-01:Launch" />', ctx
+        )
+    )
+    [mark] = config["static_annotations"]
+    assert mark["type"] == "axis_line" and mark["axis"] == "x"
+    assert mark["value"] == "2025-11-01" and mark["label"] == "Launch"
+
+
+def test_all_three_marks_get_distinct_ids(ctx):
+    config = _config_of(
+        render_components(
+            '<LineChart data={s} x="d" y="v" target=95 band="80,100" mark_x="2025-01-01" />',
+            ctx,
+        )
+    )
+    assert [m["id"] for m in config["static_annotations"]] == ["s1", "s2", "s3"]
+
+
+def test_bad_target_renders_error_card(ctx):
+    html = render_components('<LineChart data={s} x="m" y="v" target="high" />', ctx)
+    assert "dashdown-error" in html
+    assert "needs a number" in html
+
+
+def test_bad_band_renders_error_card(ctx):
+    html = render_components('<BarChart data={s} x="m" y="v" band="80" />', ctx)
+    assert "dashdown-error" in html
+
+
+def test_no_marks_no_config_key(ctx):
+    assert "static_annotations" not in _config_of(
+        render_components('<LineChart data={s} x="m" y="v" />', ctx)
+    )
