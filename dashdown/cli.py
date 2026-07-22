@@ -433,6 +433,64 @@ def _print_semantic_models(models) -> None:
     typer.echo(f"{len(models)} model(s)", err=True)
 
 
+@app.command()
+def schema(
+    project: Path = typer.Option(
+        Path("."), "--project", "-p", help="Project directory"
+    ),
+    fmt: str = typer.Option(
+        "md", "--format", "-f", help="Output format: md (LLM-sized) or json"
+    ),
+    no_pages: bool = typer.Option(
+        False, "--no-pages", help="Skip the per-page query map (no page renders)"
+    ),
+    no_columns: bool = typer.Option(
+        False,
+        "--no-columns",
+        help="List tables without describing columns (one query per table saved)",
+    ),
+    max_tables: int = typer.Option(
+        None,
+        "--max-tables",
+        help="Max tables introspected per connector (default 100)",
+    ),
+) -> None:
+    """Emit the project's whole analytical surface in one call.
+
+    Connector tables + columns (introspected live), the shared query library
+    (names + ``${param}`` placeholders), Python queries, semantic models
+    (metrics/dimensions), and which queries each page reads. One call replaces
+    the O(tables) loop of ``dashdown query --tables`` / ``--schema <t>`` — the
+    context pack an author or coding agent loads before writing anything:
+
+        dashdown schema                  # markdown, LLM-sized
+        dashdown schema -f json          # machine-readable
+        dashdown schema --no-columns     # cheap: table names only
+    """
+    if fmt not in ("md", "json"):
+        raise typer.BadParameter("--format must be one of: md, json")
+
+    from .project import load_project
+    from .schema_pack import DEFAULT_MAX_TABLES, build_schema_pack, schema_pack_markdown
+
+    proj = load_project(project.resolve())
+    try:
+        pack = build_schema_pack(
+            proj,
+            include_pages=not no_pages,
+            include_columns=not no_columns,
+            max_tables=max_tables if max_tables is not None else DEFAULT_MAX_TABLES,
+        )
+        if fmt == "json":
+            import json
+
+            typer.echo(json.dumps(pack, indent=2, default=str))
+        else:
+            typer.echo(schema_pack_markdown(pack))
+    finally:
+        proj.close()
+
+
 _ERROR_TITLE_RE = re.compile(
     r'dashdown-error-title[^>]*>(.*?)</div>\s*<pre[^>]*>(.*?)</pre>', re.DOTALL
 )
